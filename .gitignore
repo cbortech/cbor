@@ -5,6 +5,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
+pnpm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
@@ -24,6 +29,7 @@ coverage
 
 # nyc test coverage
 .nyc_output
+.vitest-attachments/
 
 # Grunt intermediate storage (https://gruntjs.com/creating-plugins#storing-task-files)
 .grunt
@@ -125,6 +131,16 @@ dist
 # Stores VSCode versions used for testing VSCode extensions
 .vscode-test
 
+# IDE
+.vscode/
+.idea/
+.agents/
+.claude/
+.codex/
+*.swp
+*.swo
+*~
+
 # pnpm
 .pnpm-store
 
@@ -141,3 +157,13 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Windows/WSL metadata
+*:Zone.Identifier
+
+# Test artifacts
+**/__screenshots__/

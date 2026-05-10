@@ -1,33 +1,31 @@
 # @cbortech/cbor
 
-TypeScript library for converting between [CBOR](#specifications),
-[CBOR-EDN](#specifications), and JavaScript values.
+[CBOR](#準拠している仕様)、[CBOR-EDN](#準拠している仕様)、JavaScript 値を相互変換するための TypeScript ライブラリです。
 
-This package currently exposes a small public API centered on the `CBOR` facade.
-Lower-level parser, encoder, and AST classes are intentionally not part of the
-documented public API yet.
+このパッケージは、現時点では `CBOR` ファサードを中心にした小さな公開 API だけを提供します。
+低レベルのパーサー、エンコーダー、AST クラスは、まだドキュメント上の公開 API には含めていません。
 
-## Install
+## インストール
 
 ```bash
 npm install @cbortech/cbor
 ```
 
-## Import
+## インポート
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
 ```
 
-Default import is also supported:
+default import も利用できます。
 
 ```ts
 import CBOR from '@cbortech/cbor';
 ```
 
-## Quick Examples
+## クイック例
 
-### JavaScript to CBOR bytes
+### JavaScript から CBOR バイト列へ
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -38,7 +36,7 @@ console.log(bytes);
 // Uint8Array(...)
 ```
 
-### CBOR bytes to JavaScript
+### CBOR バイト列から JavaScript へ
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -54,7 +52,7 @@ console.log(value);
 // { hello: 'world', n: 42 }
 ```
 
-### CBOR bytes to CBOR-EDN
+### CBOR バイト列から CBOR-EDN へ
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -65,7 +63,7 @@ console.log(text);
 // [1,2,3]
 ```
 
-### CBOR-EDN to CBOR bytes
+### CBOR-EDN から CBOR バイト列へ
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -76,7 +74,7 @@ console.log(bytes);
 // Uint8Array([0x83, 0x01, 0x02, 0x03])
 ```
 
-### JavaScript to CBOR-EDN
+### JavaScript から CBOR-EDN へ
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -87,7 +85,7 @@ console.log(text);
 // {"a":1,"b":true,"c":null}
 ```
 
-### Pretty CBOR-EDN
+### 読みやすい CBOR-EDN を出力する
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -105,7 +103,7 @@ console.log(text);
 // }
 ```
 
-### CBOR-EDN to JavaScript
+### CBOR-EDN から JavaScript へ
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -116,7 +114,7 @@ console.log(value);
 // [1, Uint8Array(...), true, null]
 ```
 
-### Normalize CBOR-EDN
+### CBOR-EDN を正規化する
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -133,10 +131,10 @@ console.log(text);
 // }
 ```
 
-### Split text strings while formatting
+### テキスト文字列を分割して整形する
 
-`textStringFormat` can split long text strings with EDN string concatenation.
-It is applied when `indent` is specified.
+`textStringFormat` を使うと、長いテキスト文字列を EDN の文字列連結として分割できます。
+このオプションは `indent` を指定したときに適用されます。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -154,7 +152,7 @@ console.log(text);
 // }
 ```
 
-For strings that contain CBOR-EDN or JSON-like content, use `cboredn`.
+文字列の中身が CBOR-EDN や JSON 風の内容なら、`cboredn` を使えます。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -174,11 +172,10 @@ console.log(text);
 // }
 ```
 
-## Working With The AST
+## AST を扱う
 
-`CBOR.fromCBOR()`, `CBOR.fromEDN()`, and `CBOR.fromJS()` return a CBOR item.
-The concrete node classes are not documented as public API yet, but every item
-supports these methods:
+`CBOR.fromCBOR()`、`CBOR.fromEDN()`、`CBOR.fromJS()` は CBOR item を返します。
+具体的なノードクラスはまだ公開 API としてドキュメント化していませんが、すべての item は次のメソッドを持ちます。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -190,7 +187,7 @@ const text = item.toEDN();
 const value = item.toJS();
 ```
 
-### Parse to AST, then serialize
+### AST としてパースしてからシリアライズする
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -204,7 +201,7 @@ console.log(item.toCBOR());
 // Uint8Array(...)
 ```
 
-### Decode to AST, then inspect as EDN
+### CBOR を AST としてデコードし、EDN として確認する
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -218,16 +215,15 @@ console.log(item.toJS());
 // [1, 2, 3]
 ```
 
-## JSON-like API
+## JSON に近い API
 
-`CBOR.parse()` and `CBOR.stringify()` intentionally feel similar to
-`JSON.parse()` and `JSON.stringify()`.
+`CBOR.parse()` と `CBOR.stringify()` は、`JSON.parse()` と `JSON.stringify()` に近い感覚で使えるようにしています。
 
-Unlike JSON, CBOR can represent `undefined` as a value. Use `CBOR.OMIT` from a
-reviver or replacer when you want to remove an object entry or map entry
-explicitly, instead of producing an `undefined` value.
+JSON と違い、CBOR では `undefined` も値として表現できます。
+reviver や replacer で object entry や map entry を明示的に取り除きたい場合は、
+`undefined` を返す代わりに `CBOR.OMIT` を使います。
 
-### Reviver function
+### Reviver 関数
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -244,7 +240,7 @@ console.log(value);
 // { createdAt: 2026-05-06T00:00:00.000Z }
 ```
 
-### Replacer function
+### Replacer 関数
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -257,7 +253,7 @@ console.log(text);
 // {"id":1}
 ```
 
-### Replacer key list
+### Replacer のキー一覧
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -275,9 +271,9 @@ console.log(text);
 // }
 ```
 
-## Default Options
+## デフォルトオプション
 
-Create a `CBOR` instance when you want to reuse the same options.
+同じオプションを繰り返し使いたい場合は、`CBOR` インスタンスを作成します。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -298,10 +294,10 @@ console.log(cbor.stringify({ value }));
 // }
 ```
 
-## Dates
+## 日時
 
-CBOR-EDN `dt'...'` and `DT'...'` literals are parsed by default. Add `CBOR.dt_as_Date`
-when you want JavaScript `Date` objects.
+CBOR-EDN の `dt'...'` と `DT'...'` リテラルは、デフォルトでパースできます。
+JavaScript の `Date` オブジェクトとして扱いたい場合は `CBOR.dt_as_Date` を追加します。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -325,9 +321,9 @@ console.log(text);
 // DT'2026-05-06T00:00:00Z'
 ```
 
-## Tags
+## タグ
 
-Use `CBOR.Tag` for CBOR tagged values in JavaScript.
+JavaScript 上で CBOR のタグ付き値を扱うには `CBOR.Tag` を使います。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -351,10 +347,9 @@ console.log(CBOR.Tag.getValue(value));
 // "hello"
 ```
 
-## Simple Values
+## Simple 値
 
-Use `CBOR.Simple` for CBOR simple values other than `false`, `true`, `null`, and
-`undefined`.
+`false`、`true`、`null`、`undefined` 以外の CBOR simple value には `CBOR.Simple` を使います。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -377,9 +372,9 @@ console.log(value.value);
 // 16
 ```
 
-## Maps
+## マップ
 
-By default, CBOR maps with text keys become plain JavaScript objects.
+デフォルトでは、テキストキーだけを持つ CBOR map は通常の JavaScript オブジェクトになります。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -390,8 +385,7 @@ console.log(value);
 // { a: 1, b: 2 }
 ```
 
-Use `mapAs: 'entries'` when you need to preserve non-string keys or duplicate
-keys.
+文字列ではないキーや重複キーを保持したい場合は、`mapAs: 'entries'` を使います。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -407,7 +401,7 @@ console.log(entries);
 // [[1, "one"], [1, "uno"]]
 ```
 
-`CBOR.MapEntries` can be passed back to `CBOR.stringify()` or `CBOR.encode()`.
+`CBOR.MapEntries` は `CBOR.stringify()` や `CBOR.encode()` にそのまま渡せます。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -418,9 +412,9 @@ console.log(CBOR.stringify(entries));
 // {1:"one",1:"uno"}
 ```
 
-## Hex Dumps
+## Hex Dump
 
-CBOR items can produce and parse annotated hex dumps.
+CBOR item は注釈付き hex dump の生成とパースに対応しています。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -447,13 +441,13 @@ console.log(item.toEDN());
 // [1,2,3]
 ```
 
-## Public API
+## 公開 API
 
-The documented public export is:
+ドキュメント化している公開 export は次のとおりです。
 
 - `CBOR`
 
-The `CBOR` facade also exposes:
+`CBOR` ファサードからは次にもアクセスできます。
 
 - `CBOR.Tag`
 - `CBOR.Simple`
@@ -461,28 +455,25 @@ The `CBOR` facade also exposes:
 - `CBOR.dt_as_Date`
 - `CBOR.OMIT`
 
-## Specifications
+## 準拠している仕様
 
-This library targets:
+このライブラリは次の仕様を対象にしています。
 
 - [CBOR, RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)
 - [CBOR Extended Diagnostic Notation (CBOR-EDN), draft-ietf-cbor-edn-literals-23](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/23/)
 
-CBOR-EDN is a human-readable text notation for CBOR data. It is useful for
-examples, test vectors, debugging, fixtures, and configuration-like files where
-raw CBOR bytes would be hard to read.
+CBOR-EDN は、CBOR データを人間が読み書きしやすいテキストとして表現するための記法です。
+サンプル、テストベクター、デバッグ、fixture、設定ファイルに近い用途など、CBOR のバイト列をそのまま扱うと読みにくい場面で役立ちます。
 
-It looks similar to JSON for ordinary arrays, maps, strings, numbers, booleans,
-and null values, but it can also represent CBOR-specific features such as byte
-strings, tags, simple values, indefinite-length items, non-string map keys, and
-application literals like `dt'2026-05-06T00:00:00Z'`.
+通常の配列、マップ、文字列、数値、真偽値、null は JSON に近い見た目で書けます。
+一方で、CBOR 固有の byte string、tag、simple value、不定長 item、文字列以外の map key、
+`dt'2026-05-06T00:00:00Z'` のような application literal も表現できます。
 
-CBOR-EDN is a superset of JSON and JSONC, so ordinary JSON data and
-commented JSON-style data can be parsed and formatted as CBOR-EDN without
-special handling.
+CBOR-EDN は JSON / JSONC の上位互換なので、通常の JSON データやコメント付きの JSON 風データも、
+特別な変換なしに CBOR-EDN としてパース・整形できます。
 
-CBOR-EDN is still an Internet-Draft rather than a widely deployed RFC.
+CBOR-EDN はまだ広く普及した RFC ではなく、Internet-Draft として策定中の仕様です。
 
-## License
+## ライセンス
 
 Apache-2.0

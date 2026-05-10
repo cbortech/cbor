@@ -1,0 +1,46 @@
+/**
+ * §4.2 draft-ietf-cbor-edn-literals-20 — Ellipsis (Elision) tag.
+ *
+ * Two forms:
+ *   888(null)          — subtree elision:    a whole data item replaced by ...
+ *   888([frag, 888(null), frag, ...])
+ *                      — string/bytes elision: fragments alternating with ellipses
+ *
+ * Note: CPA888 is a provisional tag number.
+ */
+
+import type { ToEDNOptions } from '../types';
+import { CborTag } from './CborTag';
+import { CborArray } from './CborArray';
+import { CborSimple } from './CborSimple';
+import type { CborItem } from './CborItem';
+
+export const CPA888_TAG = 888n;
+
+export class CborEllipsis extends CborTag {
+  /** Subtree elision: 888(null) */
+  constructor();
+  /** String/bytes elision: 888([items...]) */
+  constructor(items: CborItem[]);
+  constructor(items?: CborItem[]) {
+    if (items === undefined) {
+      super(CPA888_TAG, CborSimple.NULL);
+    } else {
+      super(CPA888_TAG, new CborArray(items));
+    }
+  }
+
+  override _toEDN(options: ToEDNOptions | undefined, depth: number): string {
+    if (this.content instanceof CborSimple) {
+      // Subtree elision → "..."
+      return '...';
+    }
+    if (this.content instanceof CborArray) {
+      // String/bytes elision → frag + ... + frag
+      return this.content.items
+        .map((item) => item._toEDN(options, depth))
+        .join(' + ');
+    }
+    return super._toEDN(options, depth);
+  }
+}

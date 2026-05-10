@@ -1,0 +1,301 @@
+/**
+ * Pure utility functions for EDN serialization.
+ * No AST imports — safe to import from any AST class.
+ */
+
+import type { CborComments, ToEDNOptions } from '../types';
+
+// ─── Indent helpers ───────────────────────────────────────────────────────────
+
+/** Resolve indent option to a string, or null for single-line output. */
+export function resolveIndent(
+  options: ToEDNOptions | undefined
+): string | null {
+  const indent = options?.indent;
+  if (indent === undefined) return null;
+  return typeof indent === 'number' ? ' '.repeat(indent) : indent;
+}
+
+/** Build the indent prefix for a given depth. */
+export function indentOf(indentStr: string, depth: number): string {
+  return indentStr.repeat(depth);
+}
+
+// ─── Comment helpers ─────────────────────────────────────────────────────────
+
+export interface Commented {
+  comments?: CborComments;
+}
+
+export function hasPreservedComments(item: Commented): boolean {
+  return Boolean(
+    item.comments?.leading?.length ||
+    item.comments?.trailing?.length ||
+    item.comments?.dangling?.length
+  );
+}
+
+export function hasContainerLayoutComments(item: Commented): boolean {
+  return Boolean(
+    item.comments?.trailing?.length || item.comments?.dangling?.length
+  );
+}
+
+export function formatLeadingComments(
+  item: Commented,
+  indent: string
+): string[] {
+  return (item.comments?.leading ?? []).map((comment) => indent + comment.text);
+}
+
+export function formatTrailingComments(item: Commented): string {
+  const comments = item.comments?.trailing ?? [];
+  if (comments.length === 0) return '';
+  return ' ' + comments.map((comment) => comment.text).join(' ');
+}
+
+export function formatDanglingComments(
+  item: Commented,
+  indent: string
+): string[] {
+  return (item.comments?.dangling ?? []).map(
+    (comment) => indent + comment.text
+  );
+}
+
+// ─── Comma / separator helpers ────────────────────────────────────────────────
+
+/**
+ * Resolve separator options into concrete strings.
+ *
+ * @param compact - When `true` (no `indent` option), omit spaces around
+ *   separators to produce compact single-line output (like `JSON.stringify`).
+ *
+ * @returns
+ *   - `inlineSep`    – between items on a single line
+ *   - `multilineSep` – appended after each non-last line in multi-line mode
+ *   - `trailSep`     – appended after the last item (empty string or `,`)
+ *   - `colSep`       – between map key and value (`': '` or `':'`)
+ */
+export function resolveSeparators(
+  options: ToEDNOptions | undefined,
+  compact = false
+): {
+  inlineSep: string;
+  multilineSep: string;
+  trailSep: string;
+  colSep: string;
+} {
+  const commas = options?.commas ?? 'comma';
+  const useCommas = commas !== 'none';
+  const trailing = commas === 'trailing';
+  return {
+    inlineSep: useCommas ? (compact ? ',' : ', ') : ' ',
+    multilineSep: useCommas ? ',' : '',
+    trailSep: trailing ? ',' : '',
+    colSep: compact ? ':' : ': ',
+  };
+}
+
+// ─── Byte string encoding ─────────────────────────────────────────────────────
+
+function toHex(bytes: Uint8Array): string {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (typeof (bytes as any).toHex === 'function')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (bytes as any).toHex();
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const _hasNativeToBase64 =
+  typeof (new Uint8Array(0) as any).toBase64 === 'function';
+
+function toBase64(bytes: Uint8Array): string {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (_hasNativeToBase64) return (bytes as any).toBase64({ omitPadding: true });
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/=/g, '');
+}
+
+function toBase64Url(bytes: Uint8Array): string {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (_hasNativeToBase64)
+    return (bytes as any).toBase64({
+      alphabet: 'base64url',
+      omitPadding: true,
+    });
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+const B32_ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+const H32_ALPHA = '0123456789ABCDEFGHIJKLMNOPQRSTUV';
+
+function base32Encode(bytes: Uint8Array, alpha: string): string {
+  let result = '';
+  let buf = 0,
+    bufBits = 0;
+  for (const b of bytes) {
+    buf = (buf << 8) | b;
+    bufBits += 8;
+    while (bufBits >= 5) {
+      bufBits -= 5;
+      result += alpha[(buf >> bufBits) & 0x1f];
+    }
+  }
+  if (bufBits > 0) result += alpha[(buf << (5 - bufBits)) & 0x1f];
+  return result;
+}
+
+/**
+ * Returns true if the string contains any C0 control character (U+0000–U+001F)
+ * or DEL (U+007F).
+ */
+function _hasNonPrintable(s: string): boolean {
+  for (const char of s) {
+    const cp = char.codePointAt(0)!;
+    if (cp < 0x20 || cp === 0x7f) return true;
+  }
+  return false;
+}
+
+export function serializeBytes(
+  bytes: Uint8Array,
+  encoding?: 'hex' | 'base64' | 'base64url' | 'base32' | 'base32hex',
+  sqstr?: 'printable-string' | 'string' | 'none'
+): string {
+  if (sqstr === 'string') {
+    const s = _tryDecodeUtf8(bytes);
+    if (s != null) return _escapeSingleQuoted(s);
+  }
+  if (sqstr === 'printable-string' || sqstr === undefined) {
+    const s = _tryDecodeUtf8(bytes);
+    if (s != null && !_hasNonPrintable(s)) return _escapeSingleQuoted(s);
+  }
+  switch (encoding) {
+    case 'base64':
+      return `b64'${toBase64(bytes)}'`;
+    case 'base64url':
+      return `b64'${toBase64Url(bytes)}'`;
+    case 'base32':
+      return `b32'${base32Encode(bytes, B32_ALPHA)}'`;
+    case 'base32hex':
+      return `h32'${base32Encode(bytes, H32_ALPHA)}'`;
+    case 'hex':
+    default:
+      return `h'${toHex(bytes)}'`;
+  }
+}
+
+/** Decode bytes as UTF-8; returns null if the bytes are not valid UTF-8. */
+function _tryDecodeUtf8(bytes: Uint8Array): string | null {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+// ─── Text string escaping ─────────────────────────────────────────────────────
+
+/**
+ * Core EDN string escaper.
+ *
+ * Produces a quoted literal delimited by `quote` (`"` or `'`).
+ * Iterates by Unicode code point so characters above U+FFFF are emitted as a
+ * single character rather than two surrogate `\uXXXX` escapes.
+ *
+ * Always escapes:
+ *   - the delimiter character itself
+ *   - `\` (backslash)
+ *   - `\n`, `\r`, `\t`
+ *   - U+0000–U+001F (C0 controls), U+007F (DEL)
+ *   - U+2028 / U+2029 (JS line terminators)
+ *   - U+200B–U+200D (zero-width characters), U+FEFF (BOM)
+ */
+function _escapeQuoted(s: string, quote: string): string {
+  const quoteCP = quote.codePointAt(0)!;
+  let result = quote;
+  for (const char of s) {
+    const cp = char.codePointAt(0)!;
+    switch (cp) {
+      case quoteCP:
+        result += `\\${quote}`;
+        break;
+      case 0x5c: // \
+        result += '\\\\';
+        break;
+      case 0x0a: // \n
+        result += '\\n';
+        break;
+      case 0x0d: // \r
+        result += '\\r';
+        break;
+      case 0x09: // \t
+        result += '\\t';
+        break;
+      default:
+        if (
+          cp < 0x20 ||
+          cp === 0x7f ||
+          cp === 0x2028 ||
+          cp === 0x2029 ||
+          cp === 0x200b ||
+          cp === 0x200c ||
+          cp === 0x200d ||
+          cp === 0xfeff
+        )
+          result += `\\u${cp.toString(16).padStart(4, '0')}`;
+        else result += char;
+    }
+  }
+  return result + quote;
+}
+
+/** Produce a single-quoted EDN byte string literal `'...'` from a string value. */
+function _escapeSingleQuoted(s: string): string {
+  return _escapeQuoted(s, "'");
+}
+
+/**
+ * Produce a single-quoted EDN app-string content `'...'` from a string value.
+ * Exported for use by app-extension `_toEDN` implementations.
+ */
+export function escapeAppString(s: string): string {
+  return _escapeQuoted(s, "'");
+}
+
+/**
+ * Produce an EDN double-quoted string literal `"..."` from a string value.
+ */
+export function escapeString(s: string): string {
+  return _escapeQuoted(s, '"');
+}
+
+// ─── Float formatting ─────────────────────────────────────────────────────────
+
+/** Produce the numeric string for a float value (with decimal point if needed). */
+export function floatValueToString(value: number): string {
+  if (isNaN(value)) return 'NaN';
+  if (!isFinite(value)) return value > 0 ? 'Infinity' : '-Infinity';
+  if (Object.is(value, -0)) return '-0.0';
+  const s = value.toString();
+  // Ensure a decimal point is present to distinguish from CBOR integer types
+  return s.includes('.') || s.includes('e') ? s : s + '.0';
+}
+
+/**
+ * EDN encoding-indicator suffix for a float precision.
+ * Returns '' when the auto-selected precision matches (no suffix needed).
+ */
+export function floatSuffix(
+  _value: number,
+  precision: 'half' | 'single' | 'double' | undefined,
+  autoSelected: 'half' | 'single' | 'double'
+): string {
+  if (precision === undefined || precision === autoSelected) return '';
+  return precision === 'half' ? '_1' : precision === 'single' ? '_2' : '_3';
+}

@@ -1,0 +1,435 @@
+import type { FromCBOROptions } from '../types';
+import type { CborItem } from '../ast/CborItem';
+import { BUILTIN_EXTENSIONS } from '../extensions/builtins';
+import { CborUint } from '../ast/CborUint';
+import { CborNint } from '../ast/CborNint';
+import { CborByteString } from '../ast/CborByteString';
+import { CborIndefiniteByteString } from '../ast/CborIndefiniteByteString';
+import { CborTextString } from '../ast/CborTextString';
+import { CborIndefiniteTextString } from '../ast/CborIndefiniteTextString';
+import { CborArray } from '../ast/CborArray';
+import { CborMap } from '../ast/CborMap';
+import { CborTag } from '../ast/CborTag';
+import { CborFloat } from '../ast/CborFloat';
+import { CborSimple } from '../ast/CborSimple';
+import { float16BitsToFloat64 } from '../utils/float16';
+import {
+  MT_UINT,
+  MT_NINT,
+  MT_BYTES,
+  MT_TEXT,
+  MT_ARRAY,
+  MT_MAP,
+  MT_TAG,
+  MT_SIMPLE,
+  AI_1BYTE,
+  AI_2BYTE,
+  AI_4BYTE,
+  AI_8BYTE,
+  AI_INDEFINITE,
+  BREAK_CODE,
+} from './constants';
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const textDecoder = new TextDecoder('utf-8', { fatal: true });
+
+function decodeError(msg: string): never {
+  throw new Error(`CBOR decode error: ${msg}`);
+}
+
+/**
+ * Read the CBOR "argument" that follows the initial byte.
+ * For ai 0–23 the argument is inline; for 24–27 it occupies 1/2/4/8 bytes.
+ */
+function readArgument(
+  view: DataView,
+  offset: number,
+  ai: number
+): { value: bigint; nextOffset: number } {
+  if (ai <= 23) {
+    return { value: BigInt(ai), nextOffset: offset };
+  }
+  switch (ai) {
+    case AI_1BYTE:
+      if (offset + 1 > view.byteLength) decodeError('unexpected end of input');
+      return { value: BigInt(view.getUint8(offset)), nextOffset: offset + 1 };
+    case AI_2BYTE:
+      if (offset + 2 > view.byteLength) decodeError('unexpected end of input');
+      return {
+        value: BigInt(view.getUint16(offset, false)),
+        nextOffset: offset + 2,
+      };
+    case AI_4BYTE:
+      if (offset + 4 > view.byteLength) decodeError('unexpected end of input');
+      return {
+        value: BigInt(view.getUint32(offset, false)),
+        nextOffset: offset + 4,
+      };
+    case AI_8BYTE:
+      if (offset + 8 > view.byteLength) decodeError('unexpected end of input');
+      return {
+        value: view.getBigUint64(offset, false),
+        nextOffset: offset + 8,
+      };
+    default:
+      decodeError(`reserved additional info value: ${ai}`);
+  }
+}
+
+// ─── Core recursive decoder ───────────────────────────────────────────────────
+
+type DecodeResult = { value: CborItem; nextOffset: number };
+
+function decodeItem(
+  view: DataView,
+  offset: number,
+  options?: FromCBOROptions
+): DecodeResult {
+  const startOffset = offset;
+  const result = decodeItemInner(view, offset, options);
+  result.value.start = startOffset;
+  result.value.end = result.nextOffset;
+  return result;
+}
+
+function decodeItemInner(
+  view: DataView,
+  offset: number,
+  options?: FromCBOROptions
+): DecodeResult {
+  if (offset >= view.byteLength) decodeError('unexpected end of input');
+
+  const initialByte = view.getUint8(offset++);
+  const mt = initialByte >> 5;
+  const ai = initialByte & 0x1f;
+
+  switch (mt) {
+    // ── Major Type 0: unsigned integer ────────────────────────────────────────
+    case MT_UINT: {
+      const { value, nextOffset } = readArgument(view, offset, ai);
+      return { value: new CborUint(value), nextOffset };
+    }
+
+    // ── Major Type 1: negative integer ───────────────────────────────────────
+    case MT_NINT: {
+      const { value, nextOffset } = readArgument(view, offset, ai);
+      // CBOR encodes negative integers as -1 - argument
+      return { value: new CborNint(-1n - value), nextOffset };
+    }
+
+    // ── Major Type 2: byte string ─────────────────────────────────────────────
+    case MT_BYTES: {
+      if (ai === AI_INDEFINITE) {
+        const chunks: CborByteString[] = [];
+        let pos = offset;
+        while (true) {
+          if (pos >= view.byteLength)
+            decodeError('unexpected end of indefinite byte string');
+          if (view.getUint8(pos) === BREAK_CODE) {
+            pos++;
+            break;
+          }
+          const result = decodeItem(view, pos, options);
+          if (!(result.value instanceof CborByteString)) {
+            decodeError(
+              'indefinite-length byte string chunk must be a definite byte string'
+            );
+          }
+          chunks.push(result.value);
+          pos = result.nextOffset;
+        }
+        return { value: new CborIndefiniteByteString(chunks), nextOffset: pos };
+      }
+      const { value: len, nextOffset: dataOffset } = readArgument(
+        view,
+        offset,
+        ai
+      );
+      const length = Number(len);
+      if (dataOffset + length > view.byteLength)
+        decodeError('byte string extends beyond input');
+      const bytes = new Uint8Array(
+        view.buffer,
+        view.byteOffset + dataOffset,
+        length
+      );
+      return {
+        value: new CborByteString(bytes.slice()),
+        nextOffset: dataOffset + length,
+      };
+    }
+
+    // ── Major Type 3: text string ─────────────────────────────────────────────
+    case MT_TEXT: {
+      if (ai === AI_INDEFINITE) {
+        const chunks: CborTextString[] = [];
+        let pos = offset;
+        while (true) {
+          if (pos >= view.byteLength)
+            decodeError('unexpected end of indefinite text string');
+          if (view.getUint8(pos) === BREAK_CODE) {
+            pos++;
+            break;
+          }
+          const result = decodeItem(view, pos, options);
+          if (!(result.value instanceof CborTextString)) {
+            decodeError(
+              'indefinite-length text string chunk must be a definite text string'
+            );
+          }
+          chunks.push(result.value);
+          pos = result.nextOffset;
+        }
+        return { value: new CborIndefiniteTextString(chunks), nextOffset: pos };
+      }
+      const { value: len, nextOffset: dataOffset } = readArgument(
+        view,
+        offset,
+        ai
+      );
+      const length = Number(len);
+      if (dataOffset + length > view.byteLength)
+        decodeError('text string extends beyond input');
+      const bytes = new Uint8Array(
+        view.buffer,
+        view.byteOffset + dataOffset,
+        length
+      );
+      let text: string;
+      try {
+        text = textDecoder.decode(bytes);
+      } catch {
+        decodeError('invalid UTF-8 sequence in text string');
+      }
+      return {
+        value: new CborTextString(text),
+        nextOffset: dataOffset + length,
+      };
+    }
+
+    // ── Major Type 4: array ───────────────────────────────────────────────────
+    case MT_ARRAY: {
+      if (ai === AI_INDEFINITE) {
+        const items: CborItem[] = [];
+        let pos = offset;
+        while (true) {
+          if (pos >= view.byteLength)
+            decodeError('unexpected end of indefinite array');
+          if (view.getUint8(pos) === BREAK_CODE) {
+            pos++;
+            break;
+          }
+          const result = decodeItem(view, pos, options);
+          items.push(result.value);
+          pos = result.nextOffset;
+        }
+        return {
+          value: new CborArray(items, { indefiniteLength: true }),
+          nextOffset: pos,
+        };
+      }
+      const { value: count, nextOffset: itemsStart } = readArgument(
+        view,
+        offset,
+        ai
+      );
+      const length = Number(count);
+      const items: CborItem[] = [];
+      let pos = itemsStart;
+      for (let i = 0; i < length; i++) {
+        const result = decodeItem(view, pos, options);
+        items.push(result.value);
+        pos = result.nextOffset;
+      }
+      return { value: new CborArray(items), nextOffset: pos };
+    }
+
+    // ── Major Type 5: map ─────────────────────────────────────────────────────
+    case MT_MAP: {
+      if (ai === AI_INDEFINITE) {
+        const entries: [CborItem, CborItem][] = [];
+        let pos = offset;
+        while (true) {
+          if (pos >= view.byteLength)
+            decodeError('unexpected end of indefinite map');
+          if (view.getUint8(pos) === BREAK_CODE) {
+            pos++;
+            break;
+          }
+          const keyResult = decodeItem(view, pos, options);
+          pos = keyResult.nextOffset;
+          const valResult = decodeItem(view, pos, options);
+          pos = valResult.nextOffset;
+          entries.push([keyResult.value, valResult.value]);
+        }
+        return {
+          value: new CborMap(entries, { indefiniteLength: true }),
+          nextOffset: pos,
+        };
+      }
+      const { value: count, nextOffset: entriesStart } = readArgument(
+        view,
+        offset,
+        ai
+      );
+      const length = Number(count);
+      const entries: [CborItem, CborItem][] = [];
+      let pos = entriesStart;
+      for (let i = 0; i < length; i++) {
+        const keyResult = decodeItem(view, pos, options);
+        pos = keyResult.nextOffset;
+        const valResult = decodeItem(view, pos, options);
+        pos = valResult.nextOffset;
+        entries.push([keyResult.value, valResult.value]);
+      }
+      return { value: new CborMap(entries), nextOffset: pos };
+    }
+
+    // ── Major Type 6: tagged item ─────────────────────────────────────────────
+    case MT_TAG: {
+      if (ai === AI_INDEFINITE)
+        decodeError('tags cannot use indefinite-length encoding');
+      const { value: tagNum, nextOffset: contentStart } = readArgument(
+        view,
+        offset,
+        ai
+      );
+      const contentResult = decodeItem(view, contentStart, options);
+      for (const ext of [
+        ...(options?.extensions ?? []),
+        ...BUILTIN_EXTENSIONS,
+      ]) {
+        if (ext.parseTag) {
+          const result = ext.parseTag(tagNum, contentResult.value);
+          if (result !== undefined)
+            return { value: result, nextOffset: contentResult.nextOffset };
+        }
+      }
+      return {
+        value: new CborTag(tagNum, contentResult.value),
+        nextOffset: contentResult.nextOffset,
+      };
+    }
+
+    // ── Major Type 7: float / simple value ────────────────────────────────────
+    case MT_SIMPLE: {
+      // ai 0–19: simple value encoded inline
+      if (ai <= 19) {
+        return { value: new CborSimple(ai), nextOffset: offset };
+      }
+      // ai 20–23: false / true / null / undefined
+      if (ai === 20) return { value: CborSimple.FALSE, nextOffset: offset };
+      if (ai === 21) return { value: CborSimple.TRUE, nextOffset: offset };
+      if (ai === 22) return { value: CborSimple.NULL, nextOffset: offset };
+      if (ai === 23) return { value: CborSimple.UNDEFINED, nextOffset: offset };
+
+      // ai 24: simple value in next byte (value must be >= 32)
+      if (ai === AI_1BYTE) {
+        if (offset + 1 > view.byteLength)
+          decodeError('unexpected end of input');
+        const simpleVal = view.getUint8(offset);
+        if (simpleVal < 32) {
+          decodeError(
+            `simple value ${simpleVal} must be encoded in initial byte (0–31 reserved for extended encoding)`
+          );
+        }
+        return { value: new CborSimple(simpleVal), nextOffset: offset + 1 };
+      }
+
+      // ai 25: half-precision float
+      if (ai === AI_2BYTE) {
+        if (offset + 2 > view.byteLength)
+          decodeError('unexpected end of input');
+        const bits = view.getUint16(offset, false);
+        return {
+          value: new CborFloat(float16BitsToFloat64(bits), {
+            precision: 'half',
+          }),
+          nextOffset: offset + 2,
+        };
+      }
+
+      // ai 26: single-precision float
+      if (ai === AI_4BYTE) {
+        if (offset + 4 > view.byteLength)
+          decodeError('unexpected end of input');
+        return {
+          value: new CborFloat(view.getFloat32(offset, false), {
+            precision: 'single',
+          }),
+          nextOffset: offset + 4,
+        };
+      }
+
+      // ai 27: double-precision float
+      if (ai === AI_8BYTE) {
+        if (offset + 8 > view.byteLength)
+          decodeError('unexpected end of input');
+        return {
+          value: new CborFloat(view.getFloat64(offset, false), {
+            precision: 'double',
+          }),
+          nextOffset: offset + 8,
+        };
+      }
+
+      // ai 28–30: reserved
+      if (ai < AI_INDEFINITE) {
+        decodeError(`reserved additional info value in major type 7: ${ai}`);
+      }
+
+      // ai 31: break code — not valid at item level
+      return decodeError(
+        'unexpected break code outside indefinite-length item'
+      );
+    }
+  }
+  // unreachable: all major types 0–7 are handled above
+  return decodeError(`unknown major type: ${mt}`);
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+function toInputBytes(data: ArrayBufferView | ArrayBufferLike): Uint8Array {
+  if (
+    data instanceof ArrayBuffer ||
+    (typeof SharedArrayBuffer !== 'undefined' &&
+      data instanceof SharedArrayBuffer)
+  ) {
+    return new Uint8Array(data);
+  }
+  if (ArrayBuffer.isView(data)) {
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  }
+  throw new TypeError('expected ArrayBufferView or ArrayBufferLike');
+}
+
+/**
+ * Decode a CBOR-encoded byte array into a CborItem AST node.
+ *
+ * Accepts any `ArrayBufferView` (e.g. `Uint8Array`, `DataView`) or
+ * `ArrayBufferLike` (e.g. `ArrayBuffer`, `SharedArrayBuffer`).
+ *
+ * Throws if the input is not well-formed CBOR or contains trailing bytes.
+ */
+export function decodeCBOR(
+  input: ArrayBufferView | ArrayBufferLike,
+  options?: FromCBOROptions
+): CborItem {
+  const bytes = toInputBytes(input);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const offset = options?.offset ?? 0;
+  if (!Number.isInteger(offset) || offset < 0 || offset > view.byteLength) {
+    throw new RangeError(
+      `CBOR decode offset must be an integer between 0 and ${view.byteLength}`
+    );
+  }
+  const { value, nextOffset } = decodeItem(view, offset, options);
+  if (!options?.allowTrailing && nextOffset !== view.byteLength) {
+    decodeError(
+      `${view.byteLength - nextOffset} trailing byte(s) after end of CBOR item`
+    );
+  }
+  return value;
+}

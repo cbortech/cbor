@@ -1,0 +1,89 @@
+/**
+ * CborExtension interface — the public plugin contract for extending CBOR
+ * parsing and serialisation.
+ *
+ * Defined here (src/extensions/types.ts) rather than in src/types.ts to keep
+ * the extension API co-located with its built-in implementations.
+ * src/types.ts re-exports this interface so callers can import it from either
+ * location.
+ */
+
+// Type-only import avoids a runtime circular chain while giving API Extractor
+// the real CborItem type: extensions/types → ast/CborItem → types → extensions/types.
+import type { CborItem } from '../ast/CborItem';
+import type { FromJSOptions } from '../types';
+
+/**
+ * Plugin that extends EDN parsing, CBOR decoding, and `fromJS()` for specific
+ * application-string prefixes or CBOR tag numbers.
+ *
+ * Pass instances via `FromEDNOptions.extensions`, `FromCBOROptions.extensions`,
+ * or `FromJSOptions.extensions`.
+ *
+ * @example
+ * // Custom "ip" extension: ip'192.0.2.1' → CborByteString of 4 bytes
+ * const ipExtension: CborExtension = {
+ *   appStringPrefixes: ['ip'],
+ *   parseAppString(_prefix, content) {
+ *     return new CborByteString(parseIPv4(content));
+ *   },
+ * };
+ * parseEDN("ip'192.0.2.1'", { extensions: [ipExtension] });
+ */
+export interface CborExtension {
+  /**
+   * App-string prefixes this extension handles (e.g. `['dt', 'DT']`).
+   * The tokenizer recognises these as `APP_STRING` / `APP_SEQUENCE` tokens.
+   */
+  readonly appStringPrefixes?: readonly string[];
+
+  /**
+   * CBOR tag numbers this extension handles (e.g. `[0n, 1n]`).
+   * Extensions with `parseTag()` are invoked for these tag numbers during
+   * `fromCBOR()` and integer-tagged EDN items (`1(…)`) in `fromEDN()`.
+   */
+  readonly tagNumbers?: readonly bigint[];
+
+  /**
+   * Parse an app-string literal: `prefix'content'` or `prefix"content"`.
+   * Receives the matched `prefix` and the decoded string `content`.
+   * Throw `SyntaxError` to report invalid content.
+   */
+  parseAppString?(prefix: string, content: string): CborItem;
+
+  /**
+   * Parse an app-sequence literal: `prefix<<item, ...>>`.
+   * Receives the matched `prefix` and the array of parsed CBOR values.
+   * If omitted, the `<<...>>` form is rejected with a `SyntaxError`.
+   */
+  parseAppSequence?(prefix: string, items: CborItem[]): CborItem;
+
+  /**
+   * Called when a `CborTag` is encountered during CBOR decode (`fromCBOR`)
+   * or EDN integer-tag parsing (`fromEDN`).
+   * Return `undefined` to fall back to the default `CborTag` representation.
+   */
+  parseTag?(tag: bigint, value: CborItem): CborItem | undefined;
+
+  /**
+   * Called during `fromJS()` for every value before the default conversion
+   * logic.  Return `undefined` to fall through to the default behaviour.
+   * Typical uses: intercept `Date` instances, or CBOR-tagged plain objects
+   * that carry a `Symbol.for('cbor.tag')` key for a registered tag number.
+   */
+  fromJS?(value: unknown, options: FromJSOptions): CborItem | undefined;
+
+  /**
+   * Returns `true` if the given JS value is of a type that this extension's
+   * `fromJS()` converts.  When `true`, the replacer pipeline passes the value
+   * through as-is instead of decomposing it with `Object.keys()` traversal.
+   *
+   * Implement this alongside `fromJS` for any class instance type (e.g.
+   * `Date`) that must survive the replacer pipeline intact so that `fromJS`
+   * can convert it correctly.
+   *
+   * Implementations may narrow the return type to a type predicate
+   * (e.g. `value is Date`) for better static type inference at the call site.
+   */
+  isJSType?(value: unknown): boolean;
+}
