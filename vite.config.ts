@@ -9,19 +9,22 @@ export default defineConfig({
   plugins: [
     dts({
       include: ['src/**/*'],
+      exclude: ['src/**/*.test.ts'],
       outDir: 'dist',
-      rollupTypes: true,
     }),
   ],
   build: {
     lib: {
-      entry: resolve(__dirname, 'src/index.ts'),
+      entry: {
+        index: resolve(__dirname, 'src/index.ts'),
+        'ast/index': resolve(__dirname, 'src/ast/index.ts'),
+      },
       name: 'CBOR',
       formats: ['es', 'cjs'],
-      fileName: (format) => {
-        if (format === 'es') return 'index.js';
-        if (format === 'cjs') return 'index.cjs';
-        return `index.${format}.js`;
+      fileName: (format, entryName) => {
+        if (format === 'es') return `${entryName}.js`;
+        if (format === 'cjs') return `${entryName}.cjs`;
+        return `${entryName}.${format}.js`;
       },
     },
     rollupOptions: {
