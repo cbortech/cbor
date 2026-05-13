@@ -46,6 +46,9 @@
     "dist"
   ],
   "sideEffects": false,
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "build": "vite build",
     "watch": "vite build --watch",
