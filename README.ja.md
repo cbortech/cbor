@@ -326,6 +326,33 @@ console.log(text);
 // DT'2026-05-06T00:00:00Z'
 ```
 
+## オプション extension
+
+追加の application extension は別パッケージとして公開されています。必要なものを
+インストールし、`extensions` オプションに渡して使います。
+
+```bash
+npm install @cbortech/hash-extension @cbortech/uuid-extension
+```
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+import hashExtension from '@cbortech/hash-extension';
+import uuidExtension from '@cbortech/uuid-extension';
+
+const cbor = new CBOR({
+  extensions: [hashExtension, uuidExtension],
+});
+
+const digest = cbor.fromEDN("hash'foo'");
+console.log(digest.toEDN());
+// hash'foo'
+
+const id = cbor.fromEDN("uuid'550e8400-e29b-41d4-a716-446655440000'");
+console.log(id.toEDN());
+// uuid'550e8400-e29b-41d4-a716-446655440000'
+```
+
 ## タグ
 
 JavaScript 上で CBOR のタグ付き値を扱うには `CBOR.Tag` を使います。
