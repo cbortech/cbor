@@ -26,13 +26,15 @@ describe('README examples', () => {
   });
 
   test('CBOR bytes to CBOR-EDN', () => {
-    const text = CBOR.cborToCborEdn(new Uint8Array([0x83, 0x01, 0x02, 0x03]));
+    const text = CBOR.fromCBOR(
+      new Uint8Array([0x83, 0x01, 0x02, 0x03])
+    ).toEDN();
 
     expect(text).toBe('[1,2,3]');
   });
 
   test('CBOR-EDN to CBOR bytes', () => {
-    const bytes = CBOR.cborEdnToCbor('[1, 2, 3]');
+    const bytes = CBOR.fromEDN('[1, 2, 3]').toCBOR();
 
     expect(bytes).toEqual(new Uint8Array([0x83, 0x01, 0x02, 0x03]));
   });

@@ -120,6 +120,9 @@ export class CBOR {
     return CBOR.encode(value, this.#merge(options));
   }
 
+  /**
+   * @deprecated Use `fromCBOR(input, options).toEDN(options)` instead.
+   */
   cborToCborEdn(
     input: ArrayBufferView | ArrayBufferLike,
     options?: FromCBOROptions & ToEDNOptions
@@ -127,6 +130,9 @@ export class CBOR {
     return CBOR.cborToCborEdn(input, this.#merge(options));
   }
 
+  /**
+   * @deprecated Use `fromEDN(text, options).toCBOR(options)` instead.
+   */
   cborEdnToCbor(
     text: string,
     options?: FromEDNOptions & ToCBOROptions
@@ -260,7 +266,11 @@ export class CBOR {
     return CBOR.fromJS(value, options).toCBOR(options);
   }
 
-  /** Convert CBOR binary data directly to a CBOR-EDN text string. */
+  /**
+   * Convert CBOR binary data directly to a CBOR-EDN text string.
+   *
+   * @deprecated Use `CBOR.fromCBOR(input, options).toEDN(options)` instead.
+   */
   static cborToCborEdn(
     input: ArrayBufferView | ArrayBufferLike,
     options?: FromCBOROptions & ToEDNOptions
@@ -268,7 +278,11 @@ export class CBOR {
     return CBOR.fromCBOR(input, options).toEDN(options);
   }
 
-  /** Convert a CBOR-EDN text string directly to CBOR binary data. */
+  /**
+   * Convert a CBOR-EDN text string directly to CBOR binary data.
+   *
+   * @deprecated Use `CBOR.fromEDN(text, options).toCBOR(options)` instead.
+   */
   static cborEdnToCbor(
     text: string,
     options?: FromEDNOptions & ToCBOROptions
