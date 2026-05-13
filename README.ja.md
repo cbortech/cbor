@@ -57,7 +57,9 @@ console.log(value);
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
-const text = CBOR.cborToCborEdn(new Uint8Array([0x83, 0x01, 0x02, 0x03]));
+const text = CBOR.fromCBOR(
+  new Uint8Array([0x83, 0x01, 0x02, 0x03])
+).toEDN();
 
 console.log(text);
 // [1,2,3]
@@ -68,7 +70,7 @@ console.log(text);
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
-const bytes = CBOR.cborEdnToCbor('[1, 2, 3]');
+const bytes = CBOR.fromEDN('[1, 2, 3]').toCBOR();
 
 console.log(bytes);
 // Uint8Array([0x83, 0x01, 0x02, 0x03])
