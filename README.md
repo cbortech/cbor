@@ -3,9 +3,9 @@
 TypeScript library for converting between [CBOR](#specifications),
 [CBOR-EDN](#specifications), and JavaScript values.
 
-This package currently exposes a small public API centered on the `CBOR` facade.
-Lower-level parser, encoder, and AST classes are intentionally not part of the
-documented public API yet.
+This package exposes the `CBOR` facade plus a separate AST entrypoint for the
+CBOR node classes needed by extensions. Lower-level parser and encoder internals
+are not part of the documented public API.
 
 ## Install
 
@@ -177,13 +177,16 @@ console.log(text);
 ## Working With The AST
 
 `CBOR.fromCBOR()`, `CBOR.fromEDN()`, and `CBOR.fromJS()` return a CBOR item.
-The concrete node classes are not documented as public API yet, but every item
+Concrete node classes such as `CborTextString`, `CborByteString`, `CborArray`,
+and `CborTag` are exported from `@cbortech/cbor/ast` for extensions. Every item
 supports these methods:
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
+import { CborItem } from '@cbortech/cbor/ast';
 
 const item = CBOR.fromEDN('{ "x": 1 }');
+item satisfies CborItem;
 
 const bytes = item.toCBOR();
 const text = item.toEDN();
