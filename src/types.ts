@@ -58,6 +58,17 @@ export interface ToJSOptions {
   mapAs?: 'auto' | 'object' | 'entries';
 
   /**
+   * When `true`, CBOR tag annotations are omitted from the JavaScript value.
+   *
+   * By default, generic tags are preserved using `CBOR.Tag` so that
+   * `toJS()` → `fromJS()` can round-trip CBOR tags. Enable this option when
+   * you only need the tagged content as a plain JavaScript value.
+   *
+   * @default false
+   */
+  stripTags?: boolean;
+
+  /**
    * Post-conversion reviver function, applied bottom-up after the CBOR value
    * has been converted to JavaScript.
    *

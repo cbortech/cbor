@@ -347,6 +347,18 @@ console.log(CBOR.Tag.getValue(value));
 // "hello"
 ```
 
+タグ情報が不要で、中身だけを通常の JavaScript 値として扱いたい場合は
+`stripTags: true` を指定できます。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const value = CBOR.parse('42("hello")', { stripTags: true });
+
+console.log(value);
+// "hello"
+```
+
 ## Simple 値
 
 `false`、`true`、`null`、`undefined` 以外の CBOR simple value には `CBOR.Simple` を使います。

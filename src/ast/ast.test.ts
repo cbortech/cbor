@@ -12,6 +12,7 @@ import { CborMap } from './CborMap';
 import { CborTag } from './CborTag';
 import { CborFloat } from './CborFloat';
 import { CborSimple } from './CborSimple';
+import { Tag } from '../tag';
 
 // ─── CborUint ─────────────────────────────────────────────────────────────────
 
@@ -359,6 +360,32 @@ describe('CborTag', () => {
 
   test('is instanceof CborItem', () => {
     expect(new CborTag(0, new CborUint(0))).toBeInstanceOf(CborItem);
+  });
+
+  test('toJS preserves tag annotations by default', () => {
+    const value = new CborTag(42n, new CborTextString('hello')).toJS();
+
+    expect(Tag.get(value)).toBe(42n);
+    expect(Tag.getValue(value)).toBe('hello');
+  });
+
+  test('toJS stripTags returns plain content value', () => {
+    const value = new CborTag(42n, new CborTextString('hello')).toJS({
+      stripTags: true,
+    });
+
+    expect(value).toBe('hello');
+    expect(Tag.get(value)).toBeUndefined();
+  });
+
+  test('toJS stripTags applies to nested tags', () => {
+    const value = new CborTag(
+      1n,
+      new CborTag(2n, new CborTextString('hello'))
+    ).toJS({ stripTags: true });
+
+    expect(value).toBe('hello');
+    expect(Tag.get(value)).toBeUndefined();
   });
 });
 

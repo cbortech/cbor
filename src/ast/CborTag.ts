@@ -54,6 +54,7 @@ export class CborTag extends CborItem {
   }
 
   _toJS(options?: ToJSOptions): unknown {
-    return Tag.set(this.content._toJS(options), this.tag);
+    const value = this.content._toJS(options);
+    return options?.stripTags ? value : Tag.set(value, this.tag);
   }
 }
