@@ -54,17 +54,24 @@ function formatTextString(
   }
 
   const breakpoints = new Map<number, number>();
+  let cborednBreakpoints: StringBreakpoint[] | null = null;
   if (formats.includes('cboredn')) {
-    const cborednBreakpoints = collectCborEdnBreakpoints(value);
+    cborednBreakpoints = collectCborEdnBreakpoints(value);
     if (cborednBreakpoints !== null) {
       for (const { point, contentDepth } of cborednBreakpoints) {
         breakpoints.set(point, contentDepth);
       }
     }
   }
-  if (formats.includes('newline') && breakpoints.size === 0) {
-    for (const { point, contentDepth } of collectNewlineBreakpoints(value, 0)) {
-      breakpoints.set(point, contentDepth);
+  if (formats.includes('newline')) {
+    const newlineBreakpoints =
+      cborednBreakpoints !== null
+        ? collectCborEdnNewlineBreakpoints(value)
+        : collectNewlineBreakpoints(value, 0);
+    for (const { point, contentDepth } of newlineBreakpoints) {
+      if (!breakpoints.has(point)) {
+        breakpoints.set(point, contentDepth);
+      }
     }
   }
 
@@ -129,7 +136,11 @@ function collectCborEdnBreakpoints(value: string): StringBreakpoint[] | null {
   const points: StringBreakpoint[] = [];
   const tokenizer = new Tokenizer(value);
   let nesting = 0;
-  let pending: { point: number; contentDepth: number } | null = null;
+  let pending: {
+    point: number;
+    contentDepth: number;
+    kind: 'opener' | 'comma';
+  } | null = null;
   let sawToken = false;
   let lastTokenEnd = 0;
   for (;;) {
@@ -150,7 +161,15 @@ function collectCborEdnBreakpoints(value: string): StringBreakpoint[] | null {
     // After an opener/comma, split before the next token so intervening layout
     // whitespace stays at the end of the previous chunk.
     if (pending !== null) {
-      if (CLOSE_TOKENS.has(token.type) && token.offset === pending.point) {
+      if (pending.kind === 'opener' && OPENER_MODIFIER_TOKENS.has(token.type)) {
+        pending.point = token.endOffset;
+        lastTokenEnd = token.endOffset;
+        continue;
+      } else if (
+        pending.kind === 'opener' &&
+        CLOSE_TOKENS.has(token.type) &&
+        hasOnlyWhitespaceBetween(value, pending.point, token.offset)
+      ) {
         skipClosePoint = true;
       } else {
         points.push({
@@ -163,14 +182,22 @@ function collectCborEdnBreakpoints(value: string): StringBreakpoint[] | null {
 
     if (OPEN_TOKENS.has(token.type)) {
       nesting++;
-      pending = { point: token.endOffset, contentDepth: nesting };
+      pending = {
+        point: token.endOffset,
+        contentDepth: nesting,
+        kind: 'opener',
+      };
     } else if (CLOSE_TOKENS.has(token.type)) {
       nesting = Math.max(0, nesting - 1);
       if (!skipClosePoint) {
         points.push({ point: token.offset, contentDepth: nesting });
       }
     } else if (token.type === 'COMMA') {
-      pending = { point: token.endOffset, contentDepth: nesting };
+      pending = {
+        point: token.endOffset,
+        contentDepth: nesting,
+        kind: 'comma',
+      };
     }
     lastTokenEnd = token.endOffset;
   }
@@ -183,6 +210,41 @@ function collectCborEdnBreakpoints(value: string): StringBreakpoint[] | null {
   }
   return points;
 }
+
+function collectCborEdnNewlineBreakpoints(value: string): StringBreakpoint[] {
+  const points: StringBreakpoint[] = [];
+  const tokenizer = new Tokenizer(value);
+  let nesting = 0;
+  for (;;) {
+    const token = tokenizer.consume();
+    if (token.type === 'EOF') break;
+
+    if (OPEN_TOKENS.has(token.type)) {
+      nesting++;
+    } else if (CLOSE_TOKENS.has(token.type)) {
+      nesting = Math.max(0, nesting - 1);
+    } else if (token.type === 'COMMA') {
+      // Commas can create structural split points, but never contain newline
+      // split points themselves.
+    } else if (TEXT_STRING_TOKENS.has(token.type)) {
+      const tokenText = value.slice(token.offset, token.endOffset);
+      for (const { point } of collectNewlineBreakpoints(tokenText, 0)) {
+        points.push({
+          point: token.offset + point,
+          contentDepth: nesting + 1,
+        });
+      }
+    }
+  }
+  return points;
+}
+
+const TEXT_STRING_TOKENS = new Set<TokenType>(['TSTR', 'RAWSTRING']);
+
+const OPENER_MODIFIER_TOKENS = new Set<TokenType>([
+  'ENCODING_INDICATOR',
+  'UNDERSCORE',
+]);
 
 const OPEN_TOKENS = new Set<TokenType>([
   'LBRACKET',
@@ -208,6 +270,14 @@ function hasCommentBetween(
   return comments.some(
     (comment) => comment.start >= start && comment.end <= end
   );
+}
+
+function hasOnlyWhitespaceBetween(
+  value: string,
+  start: number,
+  end: number
+): boolean {
+  return /^[\t\n\r ]*$/.test(value.slice(start, end));
 }
 
 function splitAtBreakpoints(
