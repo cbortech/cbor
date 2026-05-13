@@ -167,3 +167,7 @@ vite.config.ts.timestamp-*
 
 # Test artifacts
 **/__screenshots__/
+
+# Local/private notes
+SPEC.md
+scratch.ts
