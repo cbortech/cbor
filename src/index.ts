@@ -1,5 +1,3 @@
-export { CborItem } from './ast/index';
-
 // Option types and plugin interfaces
 export type {
   CBOROptions,

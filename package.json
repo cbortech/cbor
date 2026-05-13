@@ -40,6 +40,16 @@
         "types": "./dist/index.d.ts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./ast": {
+      "import": {
+        "types": "./dist/ast/index.d.ts",
+        "default": "./dist/ast/index.js"
+      },
+      "require": {
+        "types": "./dist/ast/index.d.ts",
+        "default": "./dist/ast/index.cjs"
+      }
     }
   },
   "files": [
@@ -54,6 +64,7 @@
     "dev": "npm run build && npm start",
     "clean": "node -e \"['dist','coverage'].forEach(d=>require('fs').rmSync(d,{recursive:true,force:true}))\"",
     "test": "vitest run",
+    "test:exports": "npm run build && node scripts/check-package-exports.mjs",
     "test:vectors": "vitest run --config vitest.vectors.config.ts",
     "test:node": "vitest run",
     "test:chromium": "BROWSER=chromium vitest run --config vitest.browser.config.ts",

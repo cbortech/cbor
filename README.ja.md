@@ -2,8 +2,8 @@
 
 [CBOR](#準拠している仕様)、[CBOR-EDN](#準拠している仕様)、JavaScript 値を相互変換するための TypeScript ライブラリです。
 
-このパッケージは、現時点では `CBOR` ファサードを中心にした小さな公開 API だけを提供します。
-低レベルのパーサー、エンコーダー、AST クラスは、まだドキュメント上の公開 API には含めていません。
+このパッケージは `CBOR` ファサードに加えて、extension の実装に必要な CBOR AST ノードクラス用の entrypoint を公開します。
+低レベルのパーサー、エンコーダー内部は、ドキュメント上の公開 API には含めていません。
 
 ## インストール
 
@@ -175,12 +175,15 @@ console.log(text);
 ## AST を扱う
 
 `CBOR.fromCBOR()`、`CBOR.fromEDN()`、`CBOR.fromJS()` は CBOR item を返します。
-具体的なノードクラスはまだ公開 API としてドキュメント化していませんが、すべての item は次のメソッドを持ちます。
+`CborTextString`、`CborByteString`、`CborArray`、`CborTag` などの具体的なノードクラスは、
+extension 向けに `@cbortech/cbor/ast` から export されています。すべての item は次のメソッドを持ちます。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
+import { CborItem } from '@cbortech/cbor/ast';
 
 const item = CBOR.fromEDN('{ "x": 1 }');
+item satisfies CborItem;
 
 const bytes = item.toCBOR();
 const text = item.toEDN();
