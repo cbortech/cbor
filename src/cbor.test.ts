@@ -386,13 +386,74 @@ describe('CBOR.format()', () => {
     ).toBe('{\n  "json": "{" +\n      "\\"key\\":\\"value\\"" +\n    "}"\n}');
   });
 
-  test('uses CBOR-EDN split points before newline split points', () => {
+  test('combines CBOR-EDN split points with newline split points', () => {
     expect(
       CBOR.format('{"edn": "[\\n1,2\\n]"}', {
         indent: 2,
         textStringFormat: ['cboredn', 'newline'],
       })
     ).toBe('{\n  "edn": "[\\n" +\n      "1," +\n      "2\\n" +\n    "]"\n}');
+  });
+
+  test('splits newlines inside CBOR-EDN text string chunks', () => {
+    expect(
+      CBOR.format('{"json": "{\\"key\\": \\"line1\\nline2\\"}"}', {
+        indent: 2,
+        textStringFormat: ['newline', 'cboredn'],
+      })
+    ).toBe(
+      '{\n  "json": "{" +\n      "\\"key\\": \\"line1\\n" +\n        "line2\\"" +\n    "}"\n}'
+    );
+  });
+
+  test('splits trailing comma before closing CBOR-EDN container', () => {
+    expect(
+      CBOR.format('{"json":"{\\"a\\":\\"1\\",}"}', {
+        indent: 2,
+        textStringFormat: ['newline', 'cboredn'],
+      })
+    ).toBe('{\n  "json": "{" +\n      "\\"a\\":\\"1\\"," +\n    "}"\n}');
+  });
+
+  test('keeps CBOR-EDN container encoding indicators with the opener chunk', () => {
+    expect(
+      CBOR.format('{"json":"{_1 \\"a\\":\\"1\\"}"}', {
+        indent: 2,
+        textStringFormat: ['newline', 'cboredn'],
+      })
+    ).toBe('{\n  "json": "{_1 " +\n      "\\"a\\":\\"1\\"" +\n    "}"\n}');
+  });
+
+  test('keeps CBOR-EDN indefinite marker with the opener chunk', () => {
+    expect(
+      CBOR.format('{"json":"{_ \\"a\\":\\"1\\"}"}', {
+        indent: 2,
+        textStringFormat: ['newline', 'cboredn'],
+      })
+    ).toBe('{\n  "json": "{_ " +\n      "\\"a\\":\\"1\\"" +\n    "}"\n}');
+  });
+
+  test('does not split empty CBOR-EDN containers with opener modifiers', () => {
+    expect(
+      CBOR.format(
+        '{"object": "{_1 }", "array": "[_1 ]", "indefObject": "{_ }", "indefArray": "[_ ]"}',
+        {
+          indent: 2,
+          textStringFormat: ['cboredn'],
+        }
+      )
+    ).toBe(
+      '{\n  "object": "{_1 }",\n  "array": "[_1 ]",\n  "indefObject": "{_ }",\n  "indefArray": "[_ ]"\n}'
+    );
+  });
+
+  test('keeps CBOR-EDN array opener modifiers with the opener chunk', () => {
+    expect(
+      CBOR.format('{"array":"[_ \\"a\\"]"}', {
+        indent: 2,
+        textStringFormat: ['cboredn'],
+      })
+    ).toBe('{\n  "array": "[_ " +\n      "\\"a\\"" +\n    "]"\n}');
   });
 
   test('keeps CBOR-EDN layout whitespace at the end of previous chunks', () => {

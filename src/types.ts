@@ -362,8 +362,8 @@ export interface ToEDNOptions {
    * - `'cboredn'`: split according to CBOR-EDN structure when the string content
    *                is parseable as CBOR-EDN (JSON superset)
    *
-   * When both are specified, `'cboredn'` is tried first; `'newline'` is used
-   * only when the string content is not parseable as CBOR-EDN.
+   * When both are specified, CBOR-EDN structure split points are combined with
+   * newline split points.
    */
   textStringFormat?: ('newline' | 'cboredn')[];
 }
