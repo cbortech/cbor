@@ -351,6 +351,18 @@ console.log(CBOR.Tag.getValue(value));
 // "hello"
 ```
 
+Use `stripTags: true` when you only need the tagged content as a plain
+JavaScript value.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const value = CBOR.parse('42("hello")', { stripTags: true });
+
+console.log(value);
+// "hello"
+```
+
 ## Simple Values
 
 Use `CBOR.Simple` for CBOR simple values other than `false`, `true`, `null`, and

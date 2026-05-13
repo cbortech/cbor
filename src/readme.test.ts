@@ -214,6 +214,13 @@ describe('README examples', () => {
     expect(CBOR.Tag.getValue(value)).toBe('hello');
   });
 
+  test('stripTags removes parsed CBOR tag annotations', () => {
+    const value = CBOR.parse('42("hello")', { stripTags: true });
+
+    expect(value).toBe('hello');
+    expect(CBOR.Tag.get(value)).toBeUndefined();
+  });
+
   test('Simple values stringify', () => {
     const text = CBOR.stringify(new CBOR.Simple(16));
 
