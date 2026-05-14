@@ -335,6 +335,14 @@ console.log(text);
 Additional application extensions are published as separate packages. Install
 the ones you need and pass them through the `extensions` option.
 
+`hash` is an application extension defined by the CBOR-EDN specification, but
+it requires an external package. For that reason, it is not bundled with this
+package and is provided separately as `@cbortech/hash-extension`.
+
+`uuid` is a library-specific application extension that is not defined by the
+CBOR-EDN specification. To keep it distinct from standard CBOR-EDN features, it
+is provided separately as `@cbortech/uuid-extension`.
+
 ```bash
 npm install @cbortech/hash-extension @cbortech/uuid-extension
 ```

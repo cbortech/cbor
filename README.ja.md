@@ -331,6 +331,14 @@ console.log(text);
 追加の application extension は別パッケージとして公開されています。必要なものを
 インストールし、`extensions` オプションに渡して使います。
 
+`hash` は CBOR-EDN の仕様に含まれる application extension ですが、利用には
+外部パッケージが必要です。そのため、このパッケージ本体には含めず、
+`@cbortech/hash-extension` として提供しています。
+
+`uuid` は CBOR-EDN の仕様には定められていない、このライブラリ独自の
+application extension です。仕様上の標準機能と区別するため、
+`@cbortech/uuid-extension` として別パッケージで提供しています。
+
 ```bash
 npm install @cbortech/hash-extension @cbortech/uuid-extension
 ```
