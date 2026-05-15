@@ -61,6 +61,7 @@
   },
   "scripts": {
     "build": "vite build",
+    "prepack": "npm run build",
     "watch": "vite build --watch",
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
