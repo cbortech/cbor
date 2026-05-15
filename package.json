@@ -13,7 +13,7 @@
     "serialization",
     "typescript"
   ],
-  "homepage": "https://cbor.tech/",
+  "homepage": "https://github.com/cbortech/cbor",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/cbortech/cbor.git"
