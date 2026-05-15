@@ -68,7 +68,6 @@
     "clean": "node -e \"['dist','coverage'].forEach(d=>require('fs').rmSync(d,{recursive:true,force:true}))\"",
     "test": "vitest run",
     "test:exports": "npm run build && node scripts/check-package-exports.mjs",
-    "test:vectors": "vitest run --config vitest.vectors.config.ts",
     "test:node": "vitest run",
     "test:chromium": "cross-env BROWSER=chromium vitest run --config vitest.browser.config.ts",
     "test:firefox": "cross-env BROWSER=firefox vitest run --config vitest.browser.config.ts",
