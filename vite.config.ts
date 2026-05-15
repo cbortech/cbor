@@ -40,7 +40,6 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    exclude: ['src/edn/edn-test-vectors.test.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
