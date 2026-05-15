@@ -1,6 +1,6 @@
 {
   "name": "@cbortech/cbor",
-  "version": "0.23.1",
+  "version": "0.24.0",
   "description": "Convert between CBOR, CBOR-EDN, and JavaScript values",
   "keywords": [
     "cbor",
@@ -13,7 +13,7 @@
     "serialization",
     "typescript"
   ],
-  "homepage": "https://cbor.tech/",
+  "homepage": "https://github.com/cbortech/cbor",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/cbortech/cbor.git"
@@ -61,6 +61,7 @@
   },
   "scripts": {
     "build": "vite build",
+    "prepack": "npm run build",
     "watch": "vite build --watch",
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",

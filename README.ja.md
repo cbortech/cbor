@@ -512,7 +512,7 @@ console.log(item.toEDN());
 このライブラリは次の仕様を対象にしています。
 
 - [CBOR, RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)
-- [CBOR Extended Diagnostic Notation (CBOR-EDN), draft-ietf-cbor-edn-literals-23](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/23/)
+- [CBOR Extended Diagnostic Notation (CBOR-EDN), draft-ietf-cbor-edn-literals-24](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/24/)
 
 CBOR-EDN は、CBOR データを人間が読み書きしやすいテキストとして表現するための記法です。
 サンプル、テストベクター、デバッグ、fixture、設定ファイルに近い用途など、CBOR のバイト列をそのまま扱うと読みにくい場面で役立ちます。
