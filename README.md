@@ -518,7 +518,7 @@ The `CBOR` facade also exposes:
 This library targets:
 
 - [CBOR, RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)
-- [CBOR Extended Diagnostic Notation (CBOR-EDN), draft-ietf-cbor-edn-literals-23](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/23/)
+- [CBOR Extended Diagnostic Notation (CBOR-EDN), draft-ietf-cbor-edn-literals-24](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/24/)
 
 CBOR-EDN is a human-readable text notation for CBOR data. It is useful for
 examples, test vectors, debugging, fixtures, and configuration-like files where
