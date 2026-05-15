@@ -32,7 +32,10 @@ import {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const textDecoder = new TextDecoder('utf-8', { fatal: true });
+const textDecoder = new TextDecoder('utf-8', {
+  fatal: true,
+  ignoreBOM: true,
+});
 
 function decodeError(msg: string): never {
   throw new Error(`CBOR decode error: ${msg}`);
