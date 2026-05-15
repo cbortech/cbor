@@ -330,6 +330,41 @@ console.log(text);
 // DT'2026-05-06T00:00:00Z'
 ```
 
+## Optional Extensions
+
+Additional application extensions are published as separate packages. Install
+the ones you need and pass them through the `extensions` option.
+
+`hash` is an application extension defined by the CBOR-EDN specification, but
+it requires an external package. For that reason, it is not bundled with this
+package and is provided separately as `@cbortech/hash-extension`.
+
+`uuid` is a library-specific application extension that is not defined by the
+CBOR-EDN specification. To keep it distinct from standard CBOR-EDN features, it
+is provided separately as `@cbortech/uuid-extension`.
+
+```bash
+npm install @cbortech/hash-extension @cbortech/uuid-extension
+```
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+import hashExtension from '@cbortech/hash-extension';
+import uuidExtension from '@cbortech/uuid-extension';
+
+const cbor = new CBOR({
+  extensions: [hashExtension, uuidExtension],
+});
+
+const digest = cbor.fromEDN("hash'foo'");
+console.log(digest.toEDN());
+// hash'foo'
+
+const id = cbor.fromEDN("uuid'550e8400-e29b-41d4-a716-446655440000'");
+console.log(id.toEDN());
+// uuid'550e8400-e29b-41d4-a716-446655440000'
+```
+
 ## Tags
 
 Use `CBOR.Tag` for CBOR tagged values in JavaScript.

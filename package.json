@@ -57,7 +57,7 @@
   ],
   "sideEffects": false,
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=20"
   },
   "scripts": {
     "build": "vite build",
@@ -93,8 +93,5 @@
     "vite": "^8.0.11",
     "vite-plugin-dts": "^4.5.4",
     "vitest": "^4.1.5"
-  },
-  "dependencies": {
-    "@noble/hashes": "^2.2.0"
   }
 }
