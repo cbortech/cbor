@@ -1,8 +1,8 @@
 /**
- * EDN lexer (internal).
+ * CDN lexer (internal).
  *
  * Used by parser.ts for parsing and by CborTextString serialization to collect
- * source offsets after parseEDN() has already validated embedded CBOR-EDN.
+ * source offsets after parseCDN() has already validated embedded CDN.
  */
 
 export type TokenType =
@@ -164,7 +164,7 @@ export class Tokenizer {
 
       const c = this._ch();
 
-      // CBOR-EDN line comment: # to end of line
+      // CDN line comment: # to end of line
       if (c === '#') {
         const start = this.pos;
         const line = this.line;
@@ -341,7 +341,7 @@ export class Tokenizer {
     return -1; // not a comment
   }
 
-  /** Skip content until a closing `/` (CBOR-EDN block comment). */
+  /** Skip content until a closing `/` (CDN block comment). */
   private _skipBlockCommentSlash(): void {
     const line = this.line,
       col = this.col;
@@ -1313,7 +1313,7 @@ export class Tokenizer {
     }
 
     // Byte-string prefixes or app-string extensions.
-    // App-prefix grammar (§3 of draft-ietf-cbor-edn-literals):
+    // App-prefix grammar (§3 of draft-ietf-cbor-edn-literals-25):
     //   app-prefix = lcalpha *lcldh / ucalpha *ucldh
     //   lcldh = lcalpha / DIGIT / "-"
     //   ucldh = ucalpha / DIGIT / "-"

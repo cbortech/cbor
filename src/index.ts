@@ -4,6 +4,8 @@ export type {
   CborExtension,
   FromCBOROptions,
   ToCBOROptions,
+  FromCDNOptions,
+  ToCDNOptions,
   FromEDNOptions,
   ToEDNOptions,
   FromJSOptions,

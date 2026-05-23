@@ -1,5 +1,5 @@
 /**
- * §4.2 draft-ietf-cbor-edn-literals-20 — Ellipsis (Elision) tag.
+ * §4.2 of draft-ietf-cbor-edn-literals-25 — Ellipsis (Elision) tag.
  *
  * Two forms:
  *   888(null)          — subtree elision:    a whole data item replaced by ...
@@ -9,7 +9,7 @@
  * Note: CPA888 is a provisional tag number.
  */
 
-import type { ToEDNOptions } from '../types';
+import type { ToCDNOptions } from '../types';
 import { CborTag } from './CborTag';
 import { CborArray } from './CborArray';
 import { CborSimple } from './CborSimple';
@@ -30,7 +30,7 @@ export class CborEllipsis extends CborTag {
     }
   }
 
-  override _toEDN(options: ToEDNOptions | undefined, depth: number): string {
+  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     if (this.content instanceof CborSimple) {
       // Subtree elision → "..."
       return '...';
@@ -38,9 +38,9 @@ export class CborEllipsis extends CborTag {
     if (this.content instanceof CborArray) {
       // String/bytes elision → frag + ... + frag
       return this.content.items
-        .map((item) => item._toEDN(options, depth))
+        .map((item) => item._toCDN(options, depth))
         .join(' + ');
     }
-    return super._toEDN(options, depth);
+    return super._toCDN(options, depth);
   }
 }

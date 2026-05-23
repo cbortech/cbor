@@ -1,6 +1,6 @@
 import type {
   CborComment,
-  ToEDNOptions,
+  ToCDNOptions,
   ToJSOptions,
   ToCBOROptions,
 } from '../types';
@@ -19,7 +19,7 @@ import {
   formatLeadingComments,
   hasContainerLayoutComments,
   hasPreservedComments,
-} from '../edn/serialize-utils';
+} from '../cdn/serialize-utils';
 
 /** CBOR Major Type 5 — map (definite- or indefinite-length). */
 export class CborMap extends CborItem {
@@ -57,7 +57,7 @@ export class CborMap extends CborItem {
     return concat(parts);
   }
 
-  override _toEDN(options: ToEDNOptions | undefined, depth: number): string {
+  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     let indentStr = resolveIndent(options);
     const preserveComments = options?.preserveComments;
     const hasComments =
@@ -83,7 +83,7 @@ export class CborMap extends CborItem {
       const inner = this.entries
         .map(
           ([k, v]) =>
-            `${k._toEDN(options, depth + 1)}${colSep}${v._toEDN(options, depth + 1)}`
+            `${k._toCDN(options, depth + 1)}${colSep}${v._toCDN(options, depth + 1)}`
         )
         .join(inlineSep);
       if (this.indefiniteLength) {
@@ -110,7 +110,7 @@ export class CborMap extends CborItem {
           ])
         : '';
       lines.push(
-        `${childIndent}${k._toEDN(options, depth + 1)}${colSep}${v._toEDN(options, depth + 1)}${sep}${entryComments}`
+        `${childIndent}${k._toCDN(options, depth + 1)}${colSep}${v._toCDN(options, depth + 1)}${sep}${entryComments}`
       );
     }
     if (preserveComments)
@@ -119,7 +119,7 @@ export class CborMap extends CborItem {
     return `${open}\n${body}\n${closeIndent}}`;
   }
 
-  override _toHexDump(depth: number, options?: ToEDNOptions): AnnotatedLine[] {
+  override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
     const byteHex = (b: number) =>
       b.toString(16).toUpperCase().padStart(2, '0');
     const toHex = (bytes: Uint8Array) =>
@@ -184,7 +184,7 @@ export class CborMap extends CborItem {
         : undefined;
       const holder: Record<string, unknown> = {};
       for (const [k, v] of this.entries) {
-        const key = k instanceof CborTextString ? k.value : k.toEDN();
+        const key = k instanceof CborTextString ? k.value : k.toCDN();
         const raw = v._toJS(optNoReviver);
         if (key === '__proto__') {
           Object.defineProperty(holder, key, {
@@ -204,11 +204,11 @@ export class CborMap extends CborItem {
       const lastIdx = new Map<string, number>();
       for (let i = 0; i < this.entries.length; i++) {
         const [k] = this.entries[i];
-        lastIdx.set(k instanceof CborTextString ? k.value : k.toEDN(), i);
+        lastIdx.set(k instanceof CborTextString ? k.value : k.toCDN(), i);
       }
       for (let i = 0; i < this.entries.length; i++) {
         const [k, v] = this.entries[i];
-        const key = k instanceof CborTextString ? k.value : k.toEDN();
+        const key = k instanceof CborTextString ? k.value : k.toCDN();
         if (lastIdx.get(key) !== i) continue;
         const val = v._toJS(options);
         const rv = reviver.call(holder, key, val);

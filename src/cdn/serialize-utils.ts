@@ -3,13 +3,13 @@
  * No AST imports — safe to import from any AST class.
  */
 
-import type { CborComments, ToEDNOptions } from '../types';
+import type { CborComments, ToCDNOptions } from '../types';
 
 // ─── Indent helpers ───────────────────────────────────────────────────────────
 
 /** Resolve indent option to a string, or null for single-line output. */
 export function resolveIndent(
-  options: ToEDNOptions | undefined
+  options: ToCDNOptions | undefined
 ): string | null {
   const indent = options?.indent;
   if (indent === undefined) return null;
@@ -78,7 +78,7 @@ export function formatDanglingComments(
  *   - `colSep`       – between map key and value (`': '` or `':'`)
  */
 export function resolveSeparators(
-  options: ToEDNOptions | undefined,
+  options: ToCDNOptions | undefined,
   compact = false
 ): {
   inlineSep: string;
@@ -262,7 +262,7 @@ function _escapeSingleQuoted(s: string): string {
 
 /**
  * Produce a single-quoted EDN app-string content `'...'` from a string value.
- * Exported for use by app-extension `_toEDN` implementations.
+ * Exported for use by app-extension `_toCDN` implementations.
  */
 export function escapeAppString(s: string): string {
   return _escapeQuoted(s, "'");

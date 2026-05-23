@@ -1,4 +1,4 @@
-import type { ToEDNOptions, ToJSOptions, ToCBOROptions } from '../types';
+import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import type { AnnotatedLine } from './CborItem';
 import type { CborByteString } from './CborByteString';
@@ -24,13 +24,13 @@ export class CborIndefiniteByteString extends CborItem {
     return concat(parts);
   }
 
-  _toEDN(options: ToEDNOptions | undefined, _depth: number): string {
+  _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
     if (this.chunks.length === 0) return "''_";
-    const chunkStrs = this.chunks.map((c) => c._toEDN(options, 0));
+    const chunkStrs = this.chunks.map((c) => c._toCDN(options, 0));
     return `(_ ${chunkStrs.join(', ')})`;
   }
 
-  override _toHexDump(depth: number, options?: ToEDNOptions): AnnotatedLine[] {
+  override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
     const byteHex = (b: number) =>
       b.toString(16).toUpperCase().padStart(2, '0');
     const lines: AnnotatedLine[] = [

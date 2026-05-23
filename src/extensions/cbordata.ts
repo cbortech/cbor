@@ -3,7 +3,7 @@
  *
  * Intercepts tag 24 during fromCBOR() so that the byte string content is
  * decoded as a CBOR data item and represented as CborEmbeddedCBOR.  This
- * allows toEDN() to render the value as 24(<<item>>) instead of 24(h'...').
+ * allows toCDN() to render the value as 24(<<item>>) instead of 24(h'...').
  *
  * If the byte string is not valid CBOR (or has trailing bytes), the extension
  * returns undefined and falls back to the plain CborTag representation.

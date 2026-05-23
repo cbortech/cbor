@@ -2,16 +2,16 @@ import type { CborItem } from './ast/CborItem';
 import type {
   CBOROptions,
   FromCBOROptions,
+  FromCDNOptions,
   FromHexDumpOptions,
-  FromEDNOptions,
   FromJSOptions,
   ToCBOROptions,
-  ToEDNOptions,
+  ToCDNOptions,
   ToJSOptions,
 } from './types';
 import { CBOR_OMIT } from './types';
 import { decodeCBOR } from './cbor/decoder';
-import { parseEDN } from './edn/parser';
+import { parseCDN } from './cdn/parser';
 import { dt_as_Date as _dt_as_Date } from './extensions/dt';
 import { fromJS as _fromJS, _applyReplacer } from './js/fromJS';
 import { MapEntries as _MapEntries } from './mapEntries';
@@ -58,7 +58,7 @@ export class CBOR {
   /** Array subclass used to preserve CBOR map entries, including duplicates. */
   static readonly MapEntries: typeof _MapEntries = _MapEntries;
 
-  /** Extension that maps CBOR-EDN dt/DT values to JavaScript Date objects. */
+  /** Extension that maps CDN dt/DT values to JavaScript Date objects. */
   static readonly dt_as_Date: typeof _dt_as_Date = _dt_as_Date;
 
   // ─── Instance API ───────────────────────────────────────────────────────────
@@ -91,10 +91,15 @@ export class CBOR {
     return node;
   }
 
-  fromEDN(text: string, options?: FromEDNOptions): CborItem {
-    const node = CBOR.fromEDN(text, this.#merge(options));
+  fromCDN(text: string, options?: FromCDNOptions): CborItem {
+    const node = CBOR.fromCDN(text, this.#merge(options));
     node._defaults = this.#defaults;
     return node;
+  }
+
+  /** @deprecated Use `fromCDN()` instead. */
+  fromEDN(text: string, options?: FromCDNOptions): CborItem {
+    return this.fromCDN(text, options);
   }
 
   fromJS(value: unknown, options?: FromJSOptions): CborItem {
@@ -121,23 +126,37 @@ export class CBOR {
   }
 
   /**
-   * @deprecated Use `fromCBOR(input, options).toEDN(options)` instead.
+   * @deprecated Use `cborToCdn()` or `fromCBOR(input, options).toCDN(options)` instead.
    */
   cborToCborEdn(
     input: ArrayBufferView | ArrayBufferLike,
-    options?: FromCBOROptions & ToEDNOptions
+    options?: FromCBOROptions & ToCDNOptions
   ): string {
-    return CBOR.cborToCborEdn(input, this.#merge(options));
+    return this.cborToCdn(input, options);
+  }
+
+  cborToCdn(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBOROptions & ToCDNOptions
+  ): string {
+    return CBOR.cborToCdn(input, this.#merge(options));
   }
 
   /**
-   * @deprecated Use `fromEDN(text, options).toCBOR(options)` instead.
+   * @deprecated Use `cdnToCbor()` or `fromCDN(text, options).toCBOR(options)` instead.
    */
   cborEdnToCbor(
     text: string,
-    options?: FromEDNOptions & ToCBOROptions
+    options?: FromCDNOptions & ToCBOROptions
   ): Uint8Array {
-    return CBOR.cborEdnToCbor(text, this.#merge(options));
+    return this.cdnToCbor(text, options);
+  }
+
+  cdnToCbor(
+    text: string,
+    options?: FromCDNOptions & ToCBOROptions
+  ): Uint8Array {
+    return CBOR.cdnToCbor(text, this.#merge(options));
   }
 
   parse(text: string): unknown;
@@ -145,19 +164,19 @@ export class CBOR {
     text: string,
     reviver: (this: unknown, key: unknown, value: unknown) => unknown
   ): unknown;
-  parse(text: string, options: FromEDNOptions & ToJSOptions): unknown;
+  parse(text: string, options: FromCDNOptions & ToJSOptions): unknown;
   parse(
     text: string,
     arg2?:
       | ((this: unknown, key: unknown, value: unknown) => unknown)
-      | (FromEDNOptions & ToJSOptions)
+      | (FromCDNOptions & ToJSOptions)
   ): unknown {
     if (typeof arg2 === 'function') {
       const merged = this.#merge<ToJSOptions>({ reviver: arg2 });
-      return CBOR.fromEDN(text, merged).toJS(merged);
+      return CBOR.fromCDN(text, merged).toJS(merged);
     }
     const merged = this.#merge(arg2);
-    return CBOR.fromEDN(text, merged).toJS(merged);
+    return CBOR.fromCDN(text, merged).toJS(merged);
   }
 
   stringify(value: unknown): string;
@@ -169,14 +188,14 @@ export class CBOR {
       | null,
     space?: string | number
   ): string;
-  stringify(value: unknown, options: FromJSOptions & ToEDNOptions): string;
+  stringify(value: unknown, options: FromJSOptions & ToCDNOptions): string;
   stringify(
     value: unknown,
     arg2?:
       | ((this: unknown, key: unknown, value: unknown) => unknown)
       | (string | number)[]
       | null
-      | (FromJSOptions & ToEDNOptions),
+      | (FromJSOptions & ToCDNOptions),
     arg3?: string | number
   ): string {
     if (
@@ -185,8 +204,8 @@ export class CBOR {
       arg2 === null ||
       (arg2 === undefined && arg3 !== undefined)
     ) {
-      const opts: FromJSOptions & ToEDNOptions = {
-        ...(this.#defaults as FromJSOptions & ToEDNOptions),
+      const opts: FromJSOptions & ToCDNOptions = {
+        ...(this.#defaults as FromJSOptions & ToCDNOptions),
       };
       if (arg2 === null) {
         opts.replacer = undefined;
@@ -199,7 +218,7 @@ export class CBOR {
     return CBOR.stringify(value, this.#merge(arg2 ?? undefined));
   }
 
-  format(text: string, options?: FromEDNOptions & ToEDNOptions): string {
+  format(text: string, options?: FromCDNOptions & ToCDNOptions): string {
     return CBOR.format(text, this.#merge(options));
   }
 
@@ -213,9 +232,18 @@ export class CBOR {
     return decodeCBOR(input, options);
   }
 
-  /** Parse a CBOR-EDN text string into an AST node. */
-  static fromEDN(text: string, options?: FromEDNOptions): CborItem {
-    return parseEDN(text, options);
+  /** Parse a CDN text string into an AST node. */
+  static fromCDN(text: string, options?: FromCDNOptions): CborItem {
+    return parseCDN(text, options);
+  }
+
+  /**
+   * Parse a CDN text string into an AST node.
+   *
+   * @deprecated Use `fromCDN()` instead.
+   */
+  static fromEDN(text: string, options?: FromCDNOptions): CborItem {
+    return CBOR.fromCDN(text, options);
   }
 
   /** Convert a JavaScript value into an AST node. */
@@ -267,36 +295,56 @@ export class CBOR {
   }
 
   /**
-   * Convert CBOR binary data directly to a CBOR-EDN text string.
+   * Convert CBOR binary data directly to a CDN text string.
+   */
+  static cborToCdn(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBOROptions & ToCDNOptions
+  ): string {
+    return CBOR.fromCBOR(input, options).toCDN(options);
+  }
+
+  /**
+   * Convert CBOR binary data directly to a CDN text string.
    *
-   * @deprecated Use `CBOR.fromCBOR(input, options).toEDN(options)` instead.
+   * @deprecated Use `CBOR.cborToCdn()` or `CBOR.fromCBOR(input, options).toCDN(options)` instead.
    */
   static cborToCborEdn(
     input: ArrayBufferView | ArrayBufferLike,
-    options?: FromCBOROptions & ToEDNOptions
+    options?: FromCBOROptions & ToCDNOptions
   ): string {
-    return CBOR.fromCBOR(input, options).toEDN(options);
+    return CBOR.cborToCdn(input, options);
   }
 
   /**
-   * Convert a CBOR-EDN text string directly to CBOR binary data.
+   * Convert a CDN text string directly to CBOR binary data.
+   */
+  static cdnToCbor(
+    text: string,
+    options?: FromCDNOptions & ToCBOROptions
+  ): Uint8Array {
+    return CBOR.fromCDN(text, options).toCBOR(options);
+  }
+
+  /**
+   * Convert a CDN text string directly to CBOR binary data.
    *
-   * @deprecated Use `CBOR.fromEDN(text, options).toCBOR(options)` instead.
+   * @deprecated Use `CBOR.cdnToCbor()` or `CBOR.fromCDN(text, options).toCBOR(options)` instead.
    */
   static cborEdnToCbor(
     text: string,
-    options?: FromEDNOptions & ToCBOROptions
+    options?: FromCDNOptions & ToCBOROptions
   ): Uint8Array {
-    return CBOR.fromEDN(text, options).toCBOR(options);
+    return CBOR.cdnToCbor(text, options);
   }
 
   /**
-   * Parse a CBOR-EDN text string directly to a JavaScript value.
+   * Parse a CDN text string directly to a JavaScript value.
    *
    * Accepts either a JSON-compatible `reviver` function as the second argument,
    * or a plain options object (existing API).
    *
-   * When a `reviver` is supplied it is applied bottom-up after the EDN text has
+   * When a `reviver` is supplied it is applied bottom-up after the CDN text has
    * been parsed and converted to a JS value, matching the semantics of
    * `JSON.parse(text, reviver)`.
    *
@@ -308,21 +356,21 @@ export class CBOR {
     text: string,
     reviver: (this: unknown, key: unknown, value: unknown) => unknown
   ): unknown;
-  static parse(text: string, options: FromEDNOptions & ToJSOptions): unknown;
+  static parse(text: string, options: FromCDNOptions & ToJSOptions): unknown;
   static parse(
     text: string,
     arg2?:
       | ((this: unknown, key: unknown, value: unknown) => unknown)
-      | (FromEDNOptions & ToJSOptions)
+      | (FromCDNOptions & ToJSOptions)
   ): unknown {
     if (typeof arg2 === 'function') {
-      return CBOR.fromEDN(text).toJS({ reviver: arg2 });
+      return CBOR.fromCDN(text).toJS({ reviver: arg2 });
     }
-    return CBOR.fromEDN(text, arg2).toJS(arg2);
+    return CBOR.fromCDN(text, arg2).toJS(arg2);
   }
 
   /**
-   * Serialize a JavaScript value directly to a CBOR-EDN text string.
+   * Serialize a JavaScript value directly to a CDN text string.
    *
    * Accepts either JSON-compatible `replacer` + `space` arguments, or a plain
    * options object (existing API).
@@ -330,7 +378,7 @@ export class CBOR {
    * - `replacer` may be a function (transforms each key/value before encoding)
    *   or an array of strings/numbers (allowlist of object keys to include).
    *   Pass `null` to skip filtering.
-   * - `space` controls indentation, mapping to `ToEDNOptions.indent`.
+   * - `space` controls indentation, mapping to `ToCDNOptions.indent`.
    *   Numbers are clamped to `[0, 10]`; strings are truncated to 10 characters.
    */
   static stringify(value: unknown): string;
@@ -344,7 +392,7 @@ export class CBOR {
   ): string;
   static stringify(
     value: unknown,
-    options: FromJSOptions & ToEDNOptions
+    options: FromJSOptions & ToCDNOptions
   ): string;
   static stringify(
     value: unknown,
@@ -352,7 +400,7 @@ export class CBOR {
       | ((this: unknown, key: unknown, value: unknown) => unknown)
       | (string | number)[]
       | null
-      | (FromJSOptions & ToEDNOptions),
+      | (FromJSOptions & ToCDNOptions),
     arg3?: string | number
   ): string {
     if (
@@ -369,16 +417,16 @@ export class CBOR {
         const replaced = _applyReplacer(value, replacer);
         if (replaced === undefined || replaced === CBOR_OMIT)
           return undefined as unknown as string;
-        return _fromJS(replaced).toEDN(
+        return _fromJS(replaced).toCDN(
           indent !== undefined ? { indent } : undefined
         );
       }
-      return _fromJS(value).toEDN(
+      return _fromJS(value).toCDN(
         indent !== undefined ? { indent } : undefined
       );
     }
     // Options form: also mirror JSON.stringify root-drop semantics.
-    const opts = arg2 as (FromJSOptions & ToEDNOptions) | undefined;
+    const opts = arg2 as (FromJSOptions & ToCDNOptions) | undefined;
     if (opts?.replacer) {
       const replaced = _applyReplacer(
         value,
@@ -394,14 +442,14 @@ export class CBOR {
         Object.keys(restFromJS).length > 0
           ? (restFromJS as FromJSOptions)
           : undefined
-      ).toEDN(opts);
+      ).toCDN(opts);
     }
-    return _fromJS(value, opts as FromJSOptions | undefined).toEDN(opts);
+    return _fromJS(value, opts as FromJSOptions | undefined).toCDN(opts);
   }
 
-  /** Normalize a CBOR-EDN text string by parsing and re-serializing it. */
-  static format(text: string, options?: FromEDNOptions & ToEDNOptions): string {
-    return CBOR.fromEDN(text, options).toEDN(options);
+  /** Normalize a CDN text string by parsing and re-serializing it. */
+  static format(text: string, options?: FromCDNOptions & ToCDNOptions): string {
+    return CBOR.fromCDN(text, options).toCDN(options);
   }
 }
 
@@ -465,7 +513,7 @@ function whitespaceLike(text: string): string {
 
 // ─── Module-scope helper ─────────────────────────────────────────────────────
 
-/** Map JSON.stringify `space` argument to ToEDNOptions.indent. */
+/** Map JSON.stringify `space` argument to ToCDNOptions.indent. */
 function resolveSpace(
   space: string | number | undefined
 ): string | number | undefined {

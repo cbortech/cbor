@@ -1,11 +1,11 @@
 {
   "name": "@cbortech/cbor",
   "version": "0.24.0",
-  "description": "Convert between CBOR, CBOR-EDN, and JavaScript values",
+  "description": "Convert between CBOR, CDN, and JavaScript values",
   "keywords": [
     "cbor",
+    "cdn",
     "cbor-edn",
-    "edn",
     "diagnostic-notation",
     "json",
     "jsonc",

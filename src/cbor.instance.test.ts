@@ -59,8 +59,8 @@ describe('new CBOR() — no defaults', () => {
     expect(toHex(cbor.cborEdnToCbor('[1, 2, 3]'))).toBe('83010203');
   });
 
-  test('fromEDN() returns a CborItem', () => {
-    const node = cbor.fromEDN('42');
+  test('fromCDN() returns a CborItem', () => {
+    const node = cbor.fromCDN('42');
     expect(node).toBeInstanceOf(CborItem);
     expect(node.toJS()).toBe(42);
   });
@@ -118,16 +118,16 @@ describe('new CBOR({ extensions: [dt_as_Date] }) — extension default', () => {
     expect(toHex(cbor.cborEdnToCbor(DT_2024_STR))).toBe(toHex(DT_2024_CBOR));
   });
 
-  // fromEDN / fromCBOR / fromJS — _defaults carry-through
+  // fromCDN / fromCBOR / fromJS — _defaults carry-through
 
-  test('fromEDN() node inherits _defaults: toJS() returns Date', () => {
-    const node = cbor.fromEDN(DT_2024_STR);
+  test('fromCDN() node inherits _defaults: toJS() returns Date', () => {
+    const node = cbor.fromCDN(DT_2024_STR);
     expect(node.toJS()).toBeInstanceOf(Date);
   });
 
-  test('fromEDN() node inherits _defaults: toEDN() emits DT notation', () => {
-    const node = cbor.fromEDN(DT_2024_STR);
-    expect(node.toEDN()).toBe(DT_2024_STR);
+  test('fromCDN() node inherits _defaults: toCDN() emits DT notation', () => {
+    const node = cbor.fromCDN(DT_2024_STR);
+    expect(node.toCDN()).toBe(DT_2024_STR);
   });
 
   test('fromCBOR() node inherits _defaults: toJS() returns Date', () => {
@@ -135,9 +135,9 @@ describe('new CBOR({ extensions: [dt_as_Date] }) — extension default', () => {
     expect(node.toJS()).toBeInstanceOf(Date);
   });
 
-  test('fromCBOR() node inherits _defaults: toEDN() emits DT notation', () => {
+  test('fromCBOR() node inherits _defaults: toCDN() emits DT notation', () => {
     const node = cbor.fromCBOR(DT_2024_CBOR);
-    expect(node.toEDN()).toBe(DT_2024_STR);
+    expect(node.toCDN()).toBe(DT_2024_STR);
   });
 
   test('fromJS() node inherits _defaults: toCBOR() produces correct bytes', () => {
@@ -145,9 +145,9 @@ describe('new CBOR({ extensions: [dt_as_Date] }) — extension default', () => {
     expect(toHex(node.toCBOR())).toBe(toHex(DT_2024_CBOR));
   });
 
-  test('fromJS() node inherits _defaults: toEDN() emits DT notation', () => {
+  test('fromJS() node inherits _defaults: toCDN() emits DT notation', () => {
     const node = cbor.fromJS(DT_2024_DATE);
-    expect(node.toEDN()).toBe(DT_2024_STR);
+    expect(node.toCDN()).toBe(DT_2024_STR);
   });
 
   test('fromHexDump() node inherits _defaults: toJS() returns Date', () => {
@@ -204,8 +204,8 @@ describe('per-call options override defaults', () => {
     expect(result).toContain('\n');
   });
 
-  test('fromEDN() per-call toJS() options override _defaults', () => {
-    const node = cbor.fromEDN('42');
+  test('fromCDN() per-call toJS() options override _defaults', () => {
+    const node = cbor.fromCDN('42');
     // _defaults has no integerAs; override to bigint
     expect(node.toJS({ integerAs: 'bigint' })).toBe(42n);
   });
@@ -216,7 +216,7 @@ describe('per-call options override defaults', () => {
   });
 
   test('decode() per-call appStrings:false disables DT notation in toJS', () => {
-    // With appStrings: false the extension's _toEDN falls back to raw notation,
+    // With appStrings: false the extension's _toCDN falls back to raw notation,
     // but toJS() should still return a Date (extension is still active).
     const result = cbor.decode(DT_2024_CBOR);
     expect(result).toBeInstanceOf(Date);
@@ -288,18 +288,18 @@ describe('instance stringify() overloads', () => {
 // ─── appStrings default propagation ──────────────────────────────────────────
 
 describe('appStrings default propagation via _defaults', () => {
-  test('appStrings:false in constructor suppresses DT notation in toEDN()', () => {
+  test('appStrings:false in constructor suppresses DT notation in toCDN()', () => {
     const cbor = new CBOR({ extensions: [dt_as_Date], appStrings: false });
-    const node = cbor.fromEDN(DT_2024_STR);
-    // toEDN() with no args should use _defaults which has appStrings:false
-    expect(node.toEDN()).not.toContain("DT'");
-    expect(node.toEDN()).not.toContain("dt'");
+    const node = cbor.fromCDN(DT_2024_STR);
+    // toCDN() with no args should use _defaults which has appStrings:false
+    expect(node.toCDN()).not.toContain("DT'");
+    expect(node.toCDN()).not.toContain("dt'");
   });
 
   test('per-call appStrings:true overrides appStrings:false default', () => {
     const cbor = new CBOR({ extensions: [dt_as_Date], appStrings: false });
-    const node = cbor.fromEDN(DT_2024_STR);
-    expect(node.toEDN({ appStrings: true })).toContain("DT'");
+    const node = cbor.fromCDN(DT_2024_STR);
+    expect(node.toCDN({ appStrings: true })).toContain("DT'");
   });
 });
 

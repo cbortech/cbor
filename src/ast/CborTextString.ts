@@ -1,14 +1,15 @@
-import type { ToEDNOptions, ToJSOptions, ToCBOROptions } from '../types';
+import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import { MT_TEXT } from '../cbor/constants';
 import { writeHead, concat, type EncodingWidth } from '../cbor/encode';
-import { parseEDN } from '../edn/parser';
-// Internal lexer reuse: parseEDN() validates embedded CBOR-EDN first; this pass
+import { parseCDN } from '../cdn/parser';
+// Internal lexer reuse: parseCDN() validates embedded CDN first; this pass
 // only needs token offsets so string formatting can split without changing text.
-import { Tokenizer, type TokenType } from '../edn/tokenizer';
-import { escapeString, indentOf, resolveIndent } from '../edn/serialize-utils';
+import { Tokenizer, type TokenType } from '../cdn/tokenizer';
+import { escapeString, indentOf, resolveIndent } from '../cdn/serialize-utils';
 
 const textEncoder = new TextEncoder();
+let didWarnCborEdnTextStringFormat = false;
 
 /** CBOR Major Type 3 — definite-length UTF-8 text string. */
 export class CborTextString extends CborItem {
@@ -30,7 +31,7 @@ export class CborTextString extends CborItem {
     ]);
   }
 
-  _toEDN(options: ToEDNOptions | undefined, depth: number): string {
+  _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     const suffix =
       this.encodingWidth !== undefined ? `_${this.encodingWidth}` : '';
     return formatTextString(this.value, suffix, options, depth);
@@ -44,29 +45,29 @@ export class CborTextString extends CborItem {
 function formatTextString(
   value: string,
   suffix: string,
-  options: ToEDNOptions | undefined,
+  options: ToCDNOptions | undefined,
   depth: number
 ): string {
-  const formats = options?.textStringFormat ?? [];
+  const formats = normalizeTextStringFormats(options?.textStringFormat ?? []);
   const indentStr = resolveIndent(options);
   if (formats.length === 0 || indentStr === null) {
     return escapeString(value) + suffix;
   }
 
   const breakpoints = new Map<number, number>();
-  let cborednBreakpoints: StringBreakpoint[] | null = null;
-  if (formats.includes('cboredn')) {
-    cborednBreakpoints = collectCborEdnBreakpoints(value);
-    if (cborednBreakpoints !== null) {
-      for (const { point, contentDepth } of cborednBreakpoints) {
+  let cdnBreakpoints: StringBreakpoint[] | null = null;
+  if (formats.includes('cdn')) {
+    cdnBreakpoints = collectCdnBreakpoints(value);
+    if (cdnBreakpoints !== null) {
+      for (const { point, contentDepth } of cdnBreakpoints) {
         breakpoints.set(point, contentDepth);
       }
     }
   }
   if (formats.includes('newline')) {
     const newlineBreakpoints =
-      cborednBreakpoints !== null
-        ? collectCborEdnNewlineBreakpoints(value)
+      cdnBreakpoints !== null
+        ? collectCdnNewlineBreakpoints(value)
         : collectNewlineBreakpoints(value, 0);
     for (const { point, contentDepth } of newlineBreakpoints) {
       if (!breakpoints.has(point)) {
@@ -91,6 +92,21 @@ function formatTextString(
     result += ` +\n${continuationIndent}${literals[i]}`;
   }
   return result;
+}
+
+function normalizeTextStringFormats(
+  formats: NonNullable<ToCDNOptions['textStringFormat']>
+): ('newline' | 'cdn')[] {
+  return formats.map((format) => {
+    if (format !== 'cboredn') return format;
+    if (!didWarnCborEdnTextStringFormat) {
+      didWarnCborEdnTextStringFormat = true;
+      console.warn(
+        "`textStringFormat: ['cboredn']` is deprecated; use `textStringFormat: ['cdn']` instead."
+      );
+    }
+    return 'cdn';
+  });
 }
 
 interface StringBreakpoint {
@@ -124,9 +140,9 @@ function collectNewlineBreakpoints(
   return points;
 }
 
-function collectCborEdnBreakpoints(value: string): StringBreakpoint[] | null {
+function collectCdnBreakpoints(value: string): StringBreakpoint[] | null {
   try {
-    parseEDN(value);
+    parseCDN(value);
   } catch {
     return null;
   }
@@ -211,7 +227,7 @@ function collectCborEdnBreakpoints(value: string): StringBreakpoint[] | null {
   return points;
 }
 
-function collectCborEdnNewlineBreakpoints(value: string): StringBreakpoint[] {
+function collectCdnNewlineBreakpoints(value: string): StringBreakpoint[] {
   const points: StringBreakpoint[] = [];
   const tokenizer = new Tokenizer(value);
   let nesting = 0;
