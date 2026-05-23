@@ -25,7 +25,7 @@ import { CborTag } from './CborTag';
 import { CborArray } from './CborArray';
 import { CborTextString } from './CborTextString';
 import type { CborItem } from './CborItem';
-import { escapeAppString } from '../edn/serialize-utils';
+import { escapeAppString } from '../cdn/serialize-utils';
 
 /** Provisional tag number for the Unresolved Application-Extension stand-in. */
 export const CPA999_TAG = 999n;

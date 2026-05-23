@@ -7,7 +7,7 @@ import {
   resolveIndent,
   indentOf,
   resolveSeparators,
-} from '../edn/serialize-utils';
+} from '../cdn/serialize-utils';
 
 /**
  * CBOR Sequence Literal (§2.5.6) — `<<item, item, ...>>`.

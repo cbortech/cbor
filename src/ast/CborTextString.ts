@@ -2,11 +2,11 @@ import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import { MT_TEXT } from '../cbor/constants';
 import { writeHead, concat, type EncodingWidth } from '../cbor/encode';
-import { parseCDN } from '../edn/parser';
+import { parseCDN } from '../cdn/parser';
 // Internal lexer reuse: parseCDN() validates embedded CDN first; this pass
 // only needs token offsets so string formatting can split without changing text.
-import { Tokenizer, type TokenType } from '../edn/tokenizer';
-import { escapeString, indentOf, resolveIndent } from '../edn/serialize-utils';
+import { Tokenizer, type TokenType } from '../cdn/tokenizer';
+import { escapeString, indentOf, resolveIndent } from '../cdn/serialize-utils';
 
 const textEncoder = new TextEncoder();
 let didWarnCborEdnTextStringFormat = false;

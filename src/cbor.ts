@@ -11,7 +11,7 @@ import type {
 } from './types';
 import { CBOR_OMIT } from './types';
 import { decodeCBOR } from './cbor/decoder';
-import { parseCDN } from './edn/parser';
+import { parseCDN } from './cdn/parser';
 import { dt_as_Date as _dt_as_Date } from './extensions/dt';
 import { fromJS as _fromJS, _applyReplacer } from './js/fromJS';
 import { MapEntries as _MapEntries } from './mapEntries';

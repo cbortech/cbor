@@ -2,7 +2,7 @@ import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import { MT_BYTES } from '../cbor/constants';
 import { writeHead, concat, type EncodingWidth } from '../cbor/encode';
-import { serializeBytes } from '../edn/serialize-utils';
+import { serializeBytes } from '../cdn/serialize-utils';
 
 /** CBOR Major Type 2 — definite-length byte string. */
 export class CborByteString extends CborItem {

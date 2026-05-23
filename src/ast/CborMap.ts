@@ -19,7 +19,7 @@ import {
   formatLeadingComments,
   hasContainerLayoutComments,
   hasPreservedComments,
-} from '../edn/serialize-utils';
+} from '../cdn/serialize-utils';
 
 /** CBOR Major Type 5 — map (definite- or indefinite-length). */
 export class CborMap extends CborItem {

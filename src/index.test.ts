@@ -19,8 +19,8 @@
 import { describe, test, expect } from 'vitest';
 import { CBOR } from './cbor';
 import { decodeCBOR } from './cbor/decoder';
-import { parseCDN } from './edn/parser';
-import { toCDN } from './edn/serializer';
+import { parseCDN } from './cdn/parser';
+import { toCDN } from './cdn/serializer';
 import { fromJS } from './js/fromJS';
 import { CborUint } from './ast/CborUint';
 import { CborNint } from './ast/CborNint';

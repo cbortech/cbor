@@ -13,7 +13,7 @@ import {
   formatTrailingComments,
   hasContainerLayoutComments,
   hasPreservedComments,
-} from '../edn/serialize-utils';
+} from '../cdn/serialize-utils';
 
 /** CBOR Major Type 4 — array (definite- or indefinite-length). */
 export class CborArray extends CborItem {

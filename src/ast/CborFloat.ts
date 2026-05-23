@@ -3,7 +3,7 @@ import { CborItem } from './CborItem';
 import { MT_SIMPLE, AI_2BYTE, AI_4BYTE, AI_8BYTE } from '../cbor/constants';
 import { autoSelectFloatPrecision } from '../cbor/encode';
 import { writeFloat16 } from '../utils/float16';
-import { floatValueToString, floatSuffix } from '../edn/serialize-utils';
+import { floatValueToString, floatSuffix } from '../cdn/serialize-utils';
 import { floatToHexFloat } from '../utils/hexfloat';
 
 export type FloatPrecision = 'half' | 'single' | 'double';
