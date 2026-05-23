@@ -1,7 +1,7 @@
 # @cbortech/cbor
 
 TypeScript library for converting between [CBOR](#specifications),
-[CBOR-EDN](#specifications), and JavaScript values.
+[CDN](#specifications), and JavaScript values.
 
 This package exposes the `CBOR` facade plus a separate AST entrypoint for the
 CBOR node classes needed by extensions. Lower-level parser and encoder internals
@@ -54,31 +54,29 @@ console.log(value);
 // { hello: 'world', n: 42 }
 ```
 
-### CBOR bytes to CBOR-EDN
+### CBOR bytes to CDN
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
-const text = CBOR.fromCBOR(
-  new Uint8Array([0x83, 0x01, 0x02, 0x03])
-).toEDN();
+const text = CBOR.fromCBOR(new Uint8Array([0x83, 0x01, 0x02, 0x03])).toCDN();
 
 console.log(text);
 // [1,2,3]
 ```
 
-### CBOR-EDN to CBOR bytes
+### CDN to CBOR bytes
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
-const bytes = CBOR.fromEDN('[1, 2, 3]').toCBOR();
+const bytes = CBOR.fromCDN('[1, 2, 3]').toCBOR();
 
 console.log(bytes);
 // Uint8Array([0x83, 0x01, 0x02, 0x03])
 ```
 
-### JavaScript to CBOR-EDN
+### JavaScript to CDN
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -89,7 +87,7 @@ console.log(text);
 // {"a":1,"b":true,"c":null}
 ```
 
-### Pretty CBOR-EDN
+### Pretty CDN
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -107,7 +105,7 @@ console.log(text);
 // }
 ```
 
-### CBOR-EDN to JavaScript
+### CDN to JavaScript
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -118,7 +116,7 @@ console.log(value);
 // [1, Uint8Array(...), true, null]
 ```
 
-### Normalize CBOR-EDN
+### Normalize CDN
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -137,7 +135,7 @@ console.log(text);
 
 ### Split text strings while formatting
 
-`textStringFormat` can split long text strings with EDN string concatenation.
+`textStringFormat` can split long text strings with CDN string concatenation.
 It is applied when `indent` is specified.
 
 ```ts
@@ -156,19 +154,19 @@ console.log(text);
 // }
 ```
 
-For strings that contain CBOR-EDN or JSON-like content, use `cboredn`.
+For strings that contain CDN or JSON-like content, use `cdn`.
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
-const text = CBOR.format('{"edn": "[1,2,3]"}', {
+const text = CBOR.format('{"cdn": "[1,2,3]"}', {
   indent: 2,
-  textStringFormat: ['cboredn'],
+  textStringFormat: ['cdn'],
 });
 
 console.log(text);
 // {
-//   "edn": "[" +
+//   "cdn": "[" +
 //       "1," +
 //       "2," +
 //       "3" +
@@ -178,7 +176,7 @@ console.log(text);
 
 ## Working With The AST
 
-`CBOR.fromCBOR()`, `CBOR.fromEDN()`, and `CBOR.fromJS()` return a CBOR item.
+`CBOR.fromCBOR()`, `CBOR.fromCDN()`, and `CBOR.fromJS()` return a CBOR item.
 Concrete node classes such as `CborTextString`, `CborByteString`, `CborArray`,
 and `CborTag` are exported from `@cbortech/cbor/ast` for extensions. Every item
 supports these methods:
@@ -187,11 +185,11 @@ supports these methods:
 import { CBOR } from '@cbortech/cbor';
 import { CborItem } from '@cbortech/cbor/ast';
 
-const item = CBOR.fromEDN('{ "x": 1 }');
+const item = CBOR.fromCDN('{ "x": 1 }');
 item satisfies CborItem;
 
 const bytes = item.toCBOR();
-const text = item.toEDN();
+const text = item.toCDN();
 const value = item.toJS();
 ```
 
@@ -200,23 +198,23 @@ const value = item.toJS();
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
-const item = CBOR.fromEDN('[_ 1, 2, 3]');
+const item = CBOR.fromCDN('[_ 1, 2, 3]');
 
-console.log(item.toEDN());
+console.log(item.toCDN());
 // [_ 1,2,3]
 
 console.log(item.toCBOR());
 // Uint8Array(...)
 ```
 
-### Decode to AST, then inspect as EDN
+### Decode to AST, then inspect as CDN
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
 const item = CBOR.fromCBOR(new Uint8Array([0x83, 0x01, 0x02, 0x03]));
 
-console.log(item.toEDN());
+console.log(item.toCDN());
 // [1,2,3]
 
 console.log(item.toJS());
@@ -305,7 +303,7 @@ console.log(cbor.stringify({ value }));
 
 ## Dates
 
-CBOR-EDN `dt'...'` and `DT'...'` literals are parsed by default. Add `CBOR.dt_as_Date`
+CDN `dt'...'` and `DT'...'` literals are parsed by default. Add `CBOR.dt_as_Date`
 when you want JavaScript `Date` objects.
 
 ```ts
@@ -335,12 +333,12 @@ console.log(text);
 Additional application extensions are published as separate packages. Install
 the ones you need and pass them through the `extensions` option.
 
-`hash` is an application extension defined by the CBOR-EDN specification, but
+`hash` is an application extension defined by the CDN specification, but
 it requires an external package. For that reason, it is not bundled with this
 package and is provided separately as `@cbortech/hash-extension`.
 
 `uuid` is a library-specific application extension that is not defined by the
-CBOR-EDN specification. To keep it distinct from standard CBOR-EDN features, it
+CDN specification. To keep it distinct from standard CDN features, it
 is provided separately as `@cbortech/uuid-extension`.
 
 ```bash
@@ -356,12 +354,12 @@ const cbor = new CBOR({
   extensions: [hashExtension, uuidExtension],
 });
 
-const digest = cbor.fromEDN("hash'foo'");
-console.log(digest.toEDN());
+const digest = cbor.fromCDN("hash'foo'");
+console.log(digest.toCDN());
 // hash'foo'
 
-const id = cbor.fromEDN("uuid'550e8400-e29b-41d4-a716-446655440000'");
-console.log(id.toEDN());
+const id = cbor.fromCDN("uuid'550e8400-e29b-41d4-a716-446655440000'");
+console.log(id.toCDN());
 // uuid'550e8400-e29b-41d4-a716-446655440000'
 ```
 
@@ -477,7 +475,7 @@ CBOR items can produce and parse annotated hex dumps.
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
-const item = CBOR.fromEDN('[_ 1, [2, 3]]');
+const item = CBOR.fromCDN('[_ 1, [2, 3]]');
 const dump = item.toHexDump();
 
 console.log(dump);
@@ -495,7 +493,7 @@ const item = CBOR.fromHexDump(`
    03     -- 3
 `);
 
-console.log(item.toEDN());
+console.log(item.toCDN());
 // [1,2,3]
 ```
 
@@ -518,9 +516,9 @@ The `CBOR` facade also exposes:
 This library targets:
 
 - [CBOR, RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)
-- [CBOR Extended Diagnostic Notation (CBOR-EDN), draft-ietf-cbor-edn-literals-24](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/24/)
+- [Concise Diagnostic Notation (CDN), draft-ietf-cbor-edn-literals-25](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/)
 
-CBOR-EDN is a human-readable text notation for CBOR data. It is useful for
+CDN is a human-readable text notation for CBOR data. It is useful for
 examples, test vectors, debugging, fixtures, and configuration-like files where
 raw CBOR bytes would be hard to read.
 
@@ -529,11 +527,11 @@ and null values, but it can also represent CBOR-specific features such as byte
 strings, tags, simple values, indefinite-length items, non-string map keys, and
 application literals like `dt'2026-05-06T00:00:00Z'`.
 
-CBOR-EDN is a superset of JSON and JSONC, so ordinary JSON data and
-commented JSON-style data can be parsed and formatted as CBOR-EDN without
+CDN is a superset of JSON and JSONC, so ordinary JSON data and
+commented JSON-style data can be parsed and formatted as CDN without
 special handling.
 
-CBOR-EDN is still an Internet-Draft rather than a widely deployed RFC.
+CDN is still an Internet-Draft rather than a widely deployed RFC.
 
 ## License
 

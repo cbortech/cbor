@@ -107,7 +107,7 @@ function _canHaveTag(value: unknown): value is object {
  * Namespace for CBOR tag annotation utilities.
  *
  * @example
- * const v = CBOR.fromEDN('42("hello")').toJS();
+ * const v = CBOR.fromCDN('42("hello")').toJS();
  * Tag.get(v);        // 42n
  * Tag.getValue(v);   // "hello"
  *

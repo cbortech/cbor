@@ -142,9 +142,9 @@ export interface FromHexDumpOptions {
   extensions?: CborExtension[];
 }
 
-export interface FromEDNOptions {
+export interface FromCDNOptions {
   /**
-   * Character offset within the supplied text at which CBOR-EDN parsing starts.
+   * Character offset within the supplied text at which CDN parsing starts.
    * Leading whitespace/comments at or after this offset are skipped as usual.
    *
    * @default 0
@@ -156,23 +156,23 @@ export interface FromEDNOptions {
    *
    * When `false`, parsing still requires the item to consume the remaining
    * input, preserving the historical single-item behaviour. Set this to `true`
-   * when using `CborItem.end` to continue parsing a CBOR-EDN sequence.
-   * Top-level comma separators are not skipped by `fromEDN()` itself; handle
+   * when using `CborItem.end` to continue parsing a CDN sequence.
+   * Top-level comma separators are not skipped by `fromCDN()` itself; handle
    * them in sequence-level code before passing the next `offset`. For example,
    * after parsing `1, 2`, the first item's `end` points just before the comma;
    * advance past that comma before parsing the next item.
    *
    * @example
    * // Read two whitespace-separated items, validating that the second is last.
-   * const first = CBOR.fromEDN(text, { allowTrailing: true });
-   * const second = CBOR.fromEDN(text, { offset: first.end });
+   * const first = CBOR.fromCDN(text, { allowTrailing: true });
+   * const second = CBOR.fromCDN(text, { offset: first.end });
    *
    * @default false
    */
   allowTrailing?: boolean;
 
   /**
-   * Extension plugins for EDN parsing.
+   * Extension plugins for CDN parsing.
    * Each extension declares which app-string prefixes (and, in future, tag
    * numbers) it handles via `appStringPrefixes` / `tagNumbers`, and provides
    * callback methods that return `CborItem`-subclassed objects controlling
@@ -189,7 +189,7 @@ export interface FromEDNOptions {
    *
    * - `'cpa999'`: wrap the literal in a `CPA999` tag
    *   (`CborUnresolvedAppExt`) instead of failing. The resulting node
-   *   round-trips through `toEDN()` back to the original notation.
+   *   round-trips through `toCDN()` back to the original notation.
    * - `'error'`: throw `SyntaxError` for unknown prefixes.
    * @default 'cpa999'
    */
@@ -209,16 +209,23 @@ export interface FromEDNOptions {
   allowInvalidUtf8?: boolean;
 
   /**
-   * Preserve comments found between CBOR-EDN values and attach them to the AST.
+   * Preserve comments found between CDN values and attach them to the AST.
    *
    * Comments are metadata only: they are ignored by CBOR binary encoding and
-   * JavaScript conversion. Use together with `ToEDNOptions.preserveComments`
-   * to include them when formatting back to EDN.
+   * JavaScript conversion. Use together with `ToCDNOptions.preserveComments`
+   * to include them when formatting back to CDN.
    *
    * @default false
    */
   preserveComments?: boolean;
 }
+
+/**
+ * Options for parsing Concise Diagnostic Notation (CDN).
+ *
+ * @deprecated Use `FromCDNOptions` instead.
+ */
+export type FromEDNOptions = FromCDNOptions;
 
 export interface FromJSOptions {
   /**
@@ -271,7 +278,7 @@ export interface FromJSOptions {
   undefinedOmits?: boolean;
 }
 
-export interface ToEDNOptions {
+export interface ToCDNOptions {
   /**
    * Indentation for pretty-printing.
    * - `number`: number of spaces
@@ -281,7 +288,7 @@ export interface ToEDNOptions {
   indent?: number | string;
 
   /**
-   * Emit comments previously captured by `FromEDNOptions.preserveComments`.
+   * Emit comments previously captured by `FromCDNOptions.preserveComments`.
    *
    * When enabled for containers, comment-bearing arrays/maps are emitted in
    * multi-line form even if `indent` is omitted.
@@ -291,7 +298,7 @@ export interface ToEDNOptions {
   preserveComments?: boolean;
 
   /**
-   * Re-emit byte string literals parsed from EDN using their original source
+   * Re-emit byte string literals parsed from CDN using their original source
    * text when available.
    *
    * This preserves the spelling and interior layout of non-concatenated
@@ -348,7 +355,7 @@ export interface ToEDNOptions {
   appStrings?: boolean;
 
   /**
-   * Numeric format for integer values in EDN output.
+   * Numeric format for integer values in CDN output.
    * - `'decimal'`: standard decimal notation (e.g. `42`, `-14159024`)
    * - `'hex'`: hexadecimal notation (e.g. `0x2a`, `-0xd83130`)
    * - `'octal'`: octal notation (e.g. `0o52`, `-0o67061560`)
@@ -358,7 +365,7 @@ export interface ToEDNOptions {
   intFormat?: 'decimal' | 'hex' | 'octal' | 'binary';
 
   /**
-   * Numeric format for floating-point values in EDN output.
+   * Numeric format for floating-point values in CDN output.
    * - `'decimal'`: standard decimal notation (e.g. `1.5`, `145544.0_3`)
    * - `'hex'`: C99-style hex float notation (e.g. `0x1.8p+0`, `0x1.1c54p+17_3`)
    * @default 'decimal'
@@ -366,18 +373,31 @@ export interface ToEDNOptions {
   floatFormat?: 'decimal' | 'hex';
 
   /**
-   * Split long text strings using EDN string concatenation syntax (`"a" + "b"`).
+   * Split long text strings using CDN string concatenation syntax (`"a" + "b"`).
    * Only effective when `indent` is specified.
    *
    * - `'newline'`: split at newline characters
-   * - `'cboredn'`: split according to CBOR-EDN structure when the string content
-   *                is parseable as CBOR-EDN (JSON superset)
+   * - `'cdn'`: split according to CDN structure when the string content
+   *                is parseable as CDN (JSON superset)
+   * - `'cboredn'`: deprecated alias for `'cdn'`
    *
-   * When both are specified, CBOR-EDN structure split points are combined with
+   * When both are specified, CDN structure split points are combined with
    * newline split points.
    */
-  textStringFormat?: ('newline' | 'cboredn')[];
+  textStringFormat?: TextStringFormat[];
 }
+
+export type TextStringFormat = 'newline' | 'cdn' | DeprecatedTextStringFormat;
+
+/** @deprecated Use `'cdn'` instead. */
+export type DeprecatedTextStringFormat = 'cboredn';
+
+/**
+ * Options for serializing Concise Diagnostic Notation (CDN).
+ *
+ * @deprecated Use `ToCDNOptions` instead.
+ */
+export type ToEDNOptions = ToCDNOptions;
 
 export interface CborComment {
   kind: 'line' | 'block';
@@ -404,9 +424,9 @@ export interface CborComments {
  * Note: `encodeIntegerAs` (from {@link FromJSOptions}) and `integerAs` (from
  * {@link ToJSOptions}) are distinct fields and do not conflict.
  */
-export type CBOROptions = FromEDNOptions &
+export type CBOROptions = FromCDNOptions &
   FromJSOptions &
   ToCBOROptions &
-  ToEDNOptions &
+  ToCDNOptions &
   ToJSOptions &
   ToHexDumpOptions;

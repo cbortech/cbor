@@ -12,7 +12,7 @@
  *   cri'https://example.com'   → CPA999(["cri", ["https://example.com"]])
  *   hash<<"data", -44>>        → CPA999(["hash", ["data", -44]])
  *
- * toEDN() reconstructs the original app-string / app-sequence notation:
+ * toCDN() reconstructs the original app-string / app-sequence notation:
  *   CPA999(["cri", ["https://example.com"]]) → cri'https://example.com'
  *   CPA999(["hash", ["data", -44]])           → hash<<"data", -44>>
  *
@@ -20,7 +20,7 @@
  * It will be replaced by an IANA-assigned tag number upon RFC publication.
  */
 
-import type { ToEDNOptions } from '../types';
+import type { ToCDNOptions } from '../types';
 import { CborTag } from './CborTag';
 import { CborArray } from './CborArray';
 import { CborTextString } from './CborTextString';
@@ -48,7 +48,7 @@ export class CborUnresolvedAppExt extends CborTag {
     super(CPA999_TAG, new CborArray([new CborTextString(prefix), content]));
   }
 
-  override _toEDN(options: ToEDNOptions | undefined, depth: number): string {
+  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     const arr = this.content as CborArray;
     const prefix = (arr.items[0] as CborTextString).value;
     const contentItem = arr.items[1];
@@ -61,7 +61,7 @@ export class CborUnresolvedAppExt extends CborTag {
     // Array → reconstruct app-sequence form: prefix<<item, item, ...>>
     const contentArr = contentItem as CborArray;
     const inner = contentArr.items
-      .map((item) => item._toEDN(options, depth))
+      .map((item) => item._toCDN(options, depth))
       .join(', ');
     return `${prefix}<<${inner}>>`;
   }

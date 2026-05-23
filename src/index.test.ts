@@ -19,8 +19,8 @@
 import { describe, test, expect } from 'vitest';
 import { CBOR } from './cbor';
 import { decodeCBOR } from './cbor/decoder';
-import { parseEDN } from './edn/parser';
-import { toEDN } from './edn/serializer';
+import { parseCDN } from './edn/parser';
+import { toCDN } from './edn/serializer';
 import { fromJS } from './js/fromJS';
 import { CborUint } from './ast/CborUint';
 import { CborNint } from './ast/CborNint';
@@ -168,8 +168,8 @@ describe('RFC 8949 Appendix A — CBOR→EDN→CBOR byte-exact round-trip', () =
     test(desc, () => {
       const original = hex(h);
       const ast = decodeCBOR(original);
-      const edn = toEDN(ast);
-      const reparsed = parseEDN(edn);
+      const edn = toCDN(ast);
+      const reparsed = parseCDN(edn);
       expect(toHex(reparsed.toCBOR())).toBe(h);
     });
   }
@@ -323,8 +323,8 @@ describe('Complex nested structures — 4-way round-trip', () => {
     expect(toHex(decoded.toCBOR())).toBe(toHex(cbor));
 
     // AST → EDN → AST → CBOR (byte-exact)
-    const edn = toEDN(ast);
-    const reparsed = parseEDN(edn);
+    const edn = toCDN(ast);
+    const reparsed = parseCDN(edn);
     expect(toHex(reparsed.toCBOR())).toBe(toHex(cbor));
 
     // AST → JS
@@ -341,7 +341,7 @@ describe('Complex nested structures — 4-way round-trip', () => {
       new CborArray([new CborArray([new CborUint(5n), new CborUint(6n)])]),
     ]);
     const cbor = ast.toCBOR();
-    expect(toHex(parseEDN(toEDN(ast)).toCBOR())).toBe(toHex(cbor));
+    expect(toHex(parseCDN(toCDN(ast)).toCBOR())).toBe(toHex(cbor));
     expect(decodeCBOR(cbor).toJS()).toEqual([
       [
         [1, 2],
@@ -365,7 +365,7 @@ describe('Complex nested structures — 4-way round-trip', () => {
 
     const cbor = ast.toCBOR();
     expect(toHex(cbor)).toBe('9f01820203' + '9f0405ff' + 'ff');
-    expect(toHex(parseEDN(toEDN(ast)).toCBOR())).toBe(toHex(cbor));
+    expect(toHex(parseCDN(toCDN(ast)).toCBOR())).toBe(toHex(cbor));
   });
 
   test('Tagged value with nested content', () => {
@@ -374,9 +374,9 @@ describe('Complex nested structures — 4-way round-trip', () => {
       new CborArray([new CborUint(10n), new CborTextString('hello')])
     );
     const cbor = ast.toCBOR();
-    const edn = toEDN(ast);
+    const edn = toCDN(ast);
     expect(edn).toBe('1([10,"hello"])');
-    expect(toHex(parseEDN(edn).toCBOR())).toBe(toHex(cbor));
+    expect(toHex(parseCDN(edn).toCBOR())).toBe(toHex(cbor));
   });
 
   test('Map with non-string keys (integer keys)', () => {
@@ -400,9 +400,9 @@ describe('Complex nested structures — 4-way round-trip', () => {
     expect(ast.toJS()).toEqual(new Uint8Array([1, 2, 3, 4, 5]));
 
     // Also round-trips through EDN
-    const edn = toEDN(ast);
+    const edn = toCDN(ast);
     expect(edn).toBe("(_ h'0102', h'030405')");
-    const reparsed = parseEDN(edn);
+    const reparsed = parseCDN(edn);
     expect(toHex(reparsed.toCBOR())).toBe(toHex(ast.toCBOR()));
   });
 
@@ -418,7 +418,7 @@ describe('Complex nested structures — 4-way round-trip', () => {
 
 // ─── 7. CborSimple round-trips ────────────────────────────────────────────────
 
-describe('CborSimple — toJS / fromCBOR / toEDN', () => {
+describe('CborSimple — toJS / fromCBOR / toCDN', () => {
   const simpleVectors: [number, string, unknown, string][] = [
     [20, 'f4', false, 'false'],
     [21, 'f5', true, 'true'],
@@ -433,9 +433,9 @@ describe('CborSimple — toJS / fromCBOR / toEDN', () => {
       const ast = new CborSimple(n);
       expect(toHex(ast.toCBOR())).toBe(h);
       expect(ast.toJS()).toEqual(jsVal);
-      expect(toEDN(ast)).toBe(edn);
+      expect(toCDN(ast)).toBe(edn);
       // decode → same EDN
-      expect(toEDN(decodeCBOR(hex(h)))).toBe(edn);
+      expect(toCDN(decodeCBOR(hex(h)))).toBe(edn);
     });
   }
 });
@@ -458,26 +458,26 @@ describe('CborFloat encoding-indicator suffix round-trip', () => {
       const ast = new CborFloat(value, { precision: 'single' });
       expect(toHex(ast.toCBOR())).toBe(singleHex);
       // EDN has _2 suffix; round-trips back to single
-      const edn = toEDN(ast);
+      const edn = toCDN(ast);
       expect(edn).toContain('_2');
-      expect(toHex(parseEDN(edn).toCBOR())).toBe(singleHex);
+      expect(toHex(parseCDN(edn).toCBOR())).toBe(singleHex);
     });
     test(`${value} — explicit double → ${doubleHex}`, () => {
       const ast = new CborFloat(value, { precision: 'double' });
       expect(toHex(ast.toCBOR())).toBe(doubleHex);
-      const edn = toEDN(ast);
+      const edn = toCDN(ast);
       expect(edn).toContain('_3');
-      expect(toHex(parseEDN(edn).toCBOR())).toBe(doubleHex);
+      expect(toHex(parseCDN(edn).toCBOR())).toBe(doubleHex);
     });
     test(`${value} — CBOR(single)→EDN→CBOR byte-exact`, () => {
       const bytes = hex(singleHex);
-      expect(toHex(parseEDN(toEDN(decodeCBOR(bytes))).toCBOR())).toBe(
+      expect(toHex(parseCDN(toCDN(decodeCBOR(bytes))).toCBOR())).toBe(
         singleHex
       );
     });
     test(`${value} — CBOR(double)→EDN→CBOR byte-exact`, () => {
       const bytes = hex(doubleHex);
-      expect(toHex(parseEDN(toEDN(decodeCBOR(bytes))).toCBOR())).toBe(
+      expect(toHex(parseCDN(toCDN(decodeCBOR(bytes))).toCBOR())).toBe(
         doubleHex
       );
     });
@@ -497,14 +497,14 @@ describe('Error handling', () => {
   test('decodeCBOR: break code at top level', () => {
     expect(() => decodeCBOR(hex('ff'))).toThrow();
   });
-  test('parseEDN: empty input', () => {
-    expect(() => parseEDN('')).toThrow(SyntaxError);
+  test('parseCDN: empty input', () => {
+    expect(() => parseCDN('')).toThrow(SyntaxError);
   });
-  test('parseEDN: unclosed array', () => {
-    expect(() => parseEDN('[1, 2')).toThrow(SyntaxError);
+  test('parseCDN: unclosed array', () => {
+    expect(() => parseCDN('[1, 2')).toThrow(SyntaxError);
   });
-  test('parseEDN: unknown identifier', () => {
-    expect(() => parseEDN('foo')).toThrow(SyntaxError);
+  test('parseCDN: unknown identifier', () => {
+    expect(() => parseCDN('foo')).toThrow(SyntaxError);
   });
   test('fromJS: symbol throws TypeError', () => {
     expect(() => fromJS(Symbol())).toThrow(TypeError);
@@ -537,13 +537,13 @@ describe('SPEC.md usage examples', () => {
   test('CBOR binary → AST → EDN text', () => {
     const bytes = hex('83010203');
     const ast = CBOR.fromCBOR(bytes);
-    expect(ast.toEDN()).toBe('[1,2,3]');
+    expect(ast.toCDN()).toBe('[1,2,3]');
   });
 
   test('CBOR binary → AST → EDN text (pretty-printed)', () => {
     const bytes = hex('83010203');
     const ast = CBOR.fromCBOR(bytes);
-    expect(ast.toEDN({ indent: 2 })).toBe('[\n  1,\n  2,\n  3\n]');
+    expect(ast.toCDN({ indent: 2 })).toBe('[\n  1,\n  2,\n  3\n]');
   });
 
   test('CBOR binary → JS value (shortcut)', () => {
@@ -557,7 +557,7 @@ describe('SPEC.md usage examples', () => {
   });
 
   test('EDN text → AST → CBOR binary', () => {
-    const ast = CBOR.fromEDN('[1, 2, 3]');
+    const ast = CBOR.fromCDN('[1, 2, 3]');
     expect(toHex(ast.toCBOR())).toBe('83010203');
   });
 
@@ -574,7 +574,7 @@ describe('SPEC.md usage examples', () => {
     expect(node.entries).toHaveLength(1);
     expect((node.entries[0][0] as CborTextString).value).toBe('key');
     expect((node.entries[0][1] as CborUint).value).toBe(42n);
-    expect(node.toEDN()).toBe('{"key":42}');
+    expect(node.toCDN()).toBe('{"key":42}');
     expect(toHex(node.toCBOR())).toBe('a1636b6579182a');
   });
 
@@ -585,9 +585,9 @@ describe('SPEC.md usage examples', () => {
     expect(toHex(half.toCBOR())).toBe('f93c00');
     expect(toHex(single.toCBOR())).toBe('fa3f800000');
     expect(toHex(double.toCBOR())).toBe('fb3ff0000000000000');
-    expect(half.toEDN()).toBe('1.0');
-    expect(single.toEDN()).toBe('1.0_2');
-    expect(double.toEDN()).toBe('1.0_3');
+    expect(half.toCDN()).toBe('1.0');
+    expect(single.toCDN()).toBe('1.0_2');
+    expect(double.toCDN()).toBe('1.0_3');
   });
 });
 
@@ -601,7 +601,7 @@ test('package entry point imports without error', async () => {
 
 describe('CborMap.toJS() — __proto__ key safety', () => {
   test('{"__proto__": 1} stores __proto__ as own property, not prototype change', () => {
-    const ast = parseEDN('{"__proto__": 1}');
+    const ast = parseCDN('{"__proto__": 1}');
     const result = ast.toJS() as Record<string, unknown>;
 
     // The key must be an ordinary own enumerable property
@@ -616,7 +616,7 @@ describe('CborMap.toJS() — __proto__ key safety', () => {
 
   test('{"__proto__": {"x": 1}} does not mutate prototype chain', () => {
     const savedProto = Object.getPrototypeOf({});
-    const ast = parseEDN('{"__proto__": {"x": 1}}');
+    const ast = parseCDN('{"__proto__": {"x": 1}}');
     ast.toJS();
 
     // Object.prototype must remain unaffected
@@ -625,12 +625,12 @@ describe('CborMap.toJS() — __proto__ key safety', () => {
   });
 
   test('normal keys are unaffected by the fix', () => {
-    const result = parseEDN('{"a": 1, "b": 2}').toJS();
+    const result = parseCDN('{"a": 1, "b": 2}').toJS();
     expect(result).toEqual({ a: 1, b: 2 });
   });
 
   test('CBOR binary round-trip preserves __proto__ key', () => {
-    const ast = parseEDN('{"__proto__": 42}');
+    const ast = parseCDN('{"__proto__": 42}');
     const decoded = decodeCBOR(ast.toCBOR());
     const result = decoded.toJS() as Record<string, unknown>;
     expect(Object.prototype.hasOwnProperty.call(result, '__proto__')).toBe(
@@ -647,25 +647,25 @@ describe('CborMap.toJS() — __proto__ key safety', () => {
 
 describe('toHexDump / CBOR.fromHexDump', () => {
   test('leaf value round-trips through hex dump', () => {
-    const ast = parseEDN('42');
+    const ast = parseCDN('42');
     const dump = ast.toHexDump();
     expect(toHex(CBOR.fromHexDump(dump).toCBOR())).toBe(toHex(ast.toCBOR()));
   });
 
   test('definite-length array round-trips through hex dump', () => {
-    const ast = parseEDN('[1, 2, 3]');
+    const ast = parseCDN('[1, 2, 3]');
     const dump = ast.toHexDump();
     expect(toHex(CBOR.fromHexDump(dump).toCBOR())).toBe(toHex(ast.toCBOR()));
   });
 
   test('indefinite-length array round-trips through hex dump', () => {
-    const ast = parseEDN('[_ 1, [2, 3]]');
+    const ast = parseCDN('[_ 1, [2, 3]]');
     const dump = ast.toHexDump();
     expect(toHex(CBOR.fromHexDump(dump).toCBOR())).toBe(toHex(ast.toCBOR()));
   });
 
   test('map round-trips through hex dump', () => {
-    const ast = parseEDN('{"a": 1, "b": [2, 3]}');
+    const ast = parseCDN('{"a": 1, "b": [2, 3]}');
     const dump = ast.toHexDump();
     expect(toHex(CBOR.fromHexDump(dump).toCBOR())).toBe(toHex(ast.toCBOR()));
   });
@@ -675,12 +675,12 @@ describe('toHexDump / CBOR.fromHexDump', () => {
       01 // 1
       02 // 2
       03 // 3`);
-    expect(node.toEDN()).toBe('[1,2,3]');
+    expect(node.toCDN()).toBe('[1,2,3]');
   });
 
   test('fromHexDump accepts slash-delimited block comments', () => {
     const node = CBOR.fromHexDump('83 / array(3) / 01 / 1 / 02 / 2 / 03 / 3 /');
-    expect(node.toEDN()).toBe('[1,2,3]');
+    expect(node.toCDN()).toBe('[1,2,3]');
   });
 
   test('fromHexDump accepts slash-delimited block comments spanning lines', () => {
@@ -689,7 +689,7 @@ describe('toHexDump / CBOR.fromHexDump', () => {
       / comment
         spanning lines /
       02`);
-    expect(node.toEDN()).toBe('[1,2]');
+    expect(node.toCDN()).toBe('[1,2]');
   });
 
   test('fromHexDump accepts star-delimited block comments', () => {
@@ -697,7 +697,7 @@ describe('toHexDump / CBOR.fromHexDump', () => {
       spanning lines */ 01
       /* 2 */ 02
       03 /* 3 */`);
-    expect(node.toEDN()).toBe('[1,2,3]');
+    expect(node.toCDN()).toBe('[1,2,3]');
   });
 
   test('fromHexDump rejects invalid token', () => {

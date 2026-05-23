@@ -1,10 +1,10 @@
 import type { CborItem } from '../ast/CborItem';
-import type { ToEDNOptions } from '../types';
+import type { ToCDNOptions } from '../types';
 
 /**
- * Serialize a CborItem AST node to CBOR-EDN diagnostic notation.
- * Equivalent to calling value.toEDN(options) directly.
+ * Serialize a CborItem AST node to CDN text.
+ * Equivalent to calling value.toCDN(options) directly.
  */
-export function toEDN(value: CborItem, options?: ToEDNOptions): string {
-  return value.toEDN(options);
+export function toCDN(value: CborItem, options?: ToCDNOptions): string {
+  return value.toCDN(options);
 }

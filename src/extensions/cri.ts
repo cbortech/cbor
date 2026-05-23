@@ -27,7 +27,7 @@
  * Tag number 99 is used for the tagged "CRI" variant (draft-ietf-cbor-edn-literals-21 §3.4).
  */
 
-import type { ToEDNOptions } from '../types';
+import type { ToCDNOptions } from '../types';
 import type { CborExtension } from './types';
 import type { CborItem } from '../ast/CborItem';
 import { CborArray } from '../ast/CborArray';
@@ -623,22 +623,22 @@ function criItemsToUri(items: readonly CborItem[]): string {
 // ─── CborItem subclasses ──────────────────────────────────────────────────────
 
 /**
- * Bare CRI array whose toEDN() emits cri'…' notation.
+ * Bare CRI array whose toCDN() emits cri'…' notation.
  * Falls back to generic array notation if the content cannot be expressed as a URI.
  */
 export class CborCriExt extends CborArray {
-  override _toEDN(options: ToEDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toEDN(options, depth);
+  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
+    if (options?.appStrings === false) return super._toCDN(options, depth);
     try {
       return `${PREFIX_CRI}'${criItemsToUri(this.items)}'`;
     } catch {
-      return super._toEDN(options, depth);
+      return super._toCDN(options, depth);
     }
   }
 }
 
 /**
- * tag(99, CRI array) whose toEDN() emits CRI'…' notation.
+ * tag(99, CRI array) whose toCDN() emits CRI'…' notation.
  * Falls back to generic tag notation if the content cannot be expressed as a URI.
  */
 export class CborTaggedCriExt extends CborTag {
@@ -646,12 +646,12 @@ export class CborTaggedCriExt extends CborTag {
     super(TAG_CRI, content);
   }
 
-  override _toEDN(options: ToEDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toEDN(options, depth);
+  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
+    if (options?.appStrings === false) return super._toCDN(options, depth);
     try {
       return `${PREFIX_CRI_TAGGED}'${criItemsToUri((this.content as CborArray).items)}'`;
     } catch {
-      return super._toEDN(options, depth);
+      return super._toCDN(options, depth);
     }
   }
 }

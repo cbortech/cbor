@@ -61,9 +61,9 @@ describe('CborBigUint', () => {
     expect(cbor[1]).toBe(0x49); // 0x40 | 9
   });
 
-  test('toEDN() emits plain decimal', () => {
-    expect(new CborBigUint(TWO_POW_64).toEDN()).toBe('18446744073709551616');
-    expect(new CborBigUint(123456789012345678901234567890n).toEDN()).toBe(
+  test('toCDN() emits plain decimal', () => {
+    expect(new CborBigUint(TWO_POW_64).toCDN()).toBe('18446744073709551616');
+    expect(new CborBigUint(123456789012345678901234567890n).toCDN()).toBe(
       '123456789012345678901234567890'
     );
   });
@@ -90,8 +90,8 @@ describe('CborBigNint', () => {
     expect(cbor[0]).toBe(0xc3); // tag(3) head
   });
 
-  test('toEDN() emits plain decimal', () => {
-    expect(new CborBigNint(FIRST_BIGNINT).toEDN()).toBe(
+  test('toCDN() emits plain decimal', () => {
+    expect(new CborBigNint(FIRST_BIGNINT).toCDN()).toBe(
       '-18446744073709551617'
     );
   });
@@ -103,49 +103,49 @@ describe('CborBigNint', () => {
 
 // ─── EDN parser — bignum auto-detection ──────────────────────────────────────
 
-describe('parseEDN — bignum integers', () => {
+describe('parseCDN — bignum integers', () => {
   test('2^64 → CborBigUint', () => {
-    const v = CBOR.fromEDN('18446744073709551616');
+    const v = CBOR.fromCDN('18446744073709551616');
     expect(v).toBeInstanceOf(CborBigUint);
     expect((v as CborBigUint).bigValue).toBe(18446744073709551616n);
   });
 
   test('2^64 - 1 (UINT64_MAX) → plain CborUint, not bignum', () => {
-    const v = CBOR.fromEDN('18446744073709551615');
+    const v = CBOR.fromCDN('18446744073709551615');
     expect(v).toBeInstanceOf(CborUint);
     expect(v).not.toBeInstanceOf(CborBigUint);
   });
 
-  test('large positive → CborBigUint round-trips through toEDN', () => {
+  test('large positive → CborBigUint round-trips through toCDN', () => {
     const n = '123456789012345678901234567890';
-    expect(CBOR.fromEDN(n).toEDN()).toBe(n);
+    expect(CBOR.fromCDN(n).toCDN()).toBe(n);
   });
 
   test('hex notation 0x10000000000000000 → CborBigUint', () => {
-    const v = CBOR.fromEDN('0x10000000000000000');
+    const v = CBOR.fromCDN('0x10000000000000000');
     expect(v).toBeInstanceOf(CborBigUint);
     expect((v as CborBigUint).bigValue).toBe(0x10000000000000000n);
   });
 
   test('-(2^64 + 1) → CborBigNint', () => {
-    const v = CBOR.fromEDN('-18446744073709551617');
+    const v = CBOR.fromCDN('-18446744073709551617');
     expect(v).toBeInstanceOf(CborBigNint);
     expect((v as CborBigNint).bigValue).toBe(-18446744073709551617n);
   });
 
   test('-2^64 (NINT64_MIN) → plain CborNint, not bignum', () => {
-    const v = CBOR.fromEDN('-18446744073709551616');
+    const v = CBOR.fromCDN('-18446744073709551616');
     expect(v).toBeInstanceOf(CborNint);
     expect(v).not.toBeInstanceOf(CborBigNint);
   });
 
-  test('large negative → CborBigNint round-trips through toEDN', () => {
+  test('large negative → CborBigNint round-trips through toCDN', () => {
     const n = '-123456789012345678901234567890';
-    expect(CBOR.fromEDN(n).toEDN()).toBe(n);
+    expect(CBOR.fromCDN(n).toCDN()).toBe(n);
   });
 
   test('oversized tag number before ( is a SyntaxError', () => {
-    expect(() => CBOR.fromEDN('18446744073709551616(42)')).toThrow(SyntaxError);
+    expect(() => CBOR.fromCDN('18446744073709551616(42)')).toThrow(SyntaxError);
   });
 });
 
@@ -175,40 +175,40 @@ describe('fromCBOR — bignum tag interception', () => {
     expect(decoded).not.toBeInstanceOf(CborBigUint);
   });
 
-  test('CBOR round-trip: EDN → toCBOR → fromCBOR → toEDN', () => {
-    const original = CBOR.fromEDN('18446744073709551616');
+  test('CBOR round-trip: EDN → toCBOR → fromCBOR → toCDN', () => {
+    const original = CBOR.fromCDN('18446744073709551616');
     const decoded = decodeCBOR(original.toCBOR());
     expect(decoded).toBeInstanceOf(CborBigUint);
-    expect(decoded.toEDN()).toBe('18446744073709551616');
+    expect(decoded.toCDN()).toBe('18446744073709551616');
   });
 
   test('CBOR round-trip for negative bignum', () => {
-    const original = CBOR.fromEDN('-18446744073709551617');
+    const original = CBOR.fromCDN('-18446744073709551617');
     const decoded = decodeCBOR(original.toCBOR());
     expect(decoded).toBeInstanceOf(CborBigNint);
-    expect(decoded.toEDN()).toBe('-18446744073709551617');
+    expect(decoded.toCDN()).toBe('-18446744073709551617');
   });
 });
 
 // ─── EDN tag notation 2(h'...') / 3(h'...') ──────────────────────────────────
 
-describe('parseEDN — tag notation for out-of-range bignums', () => {
+describe('parseCDN — tag notation for out-of-range bignums', () => {
   test("2(h'010000000000000000') → CborBigUint", () => {
-    const v = CBOR.fromEDN("2(h'010000000000000000')");
+    const v = CBOR.fromCDN("2(h'010000000000000000')");
     expect(v).toBeInstanceOf(CborBigUint);
     expect((v as CborBigUint).bigValue).toBe(18446744073709551616n);
-    expect(v.toEDN()).toBe('18446744073709551616');
+    expect(v.toCDN()).toBe('18446744073709551616');
   });
 
   test("3(h'010000000000000000') → CborBigNint", () => {
-    const v = CBOR.fromEDN("3(h'010000000000000000')");
+    const v = CBOR.fromCDN("3(h'010000000000000000')");
     expect(v).toBeInstanceOf(CborBigNint);
     expect((v as CborBigNint).bigValue).toBe(-18446744073709551617n);
-    expect(v.toEDN()).toBe('-18446744073709551617');
+    expect(v.toCDN()).toBe('-18446744073709551617');
   });
 
   test("2(h'01') with in-range value → plain CborTag", () => {
-    const v = CBOR.fromEDN("2(h'01')");
+    const v = CBOR.fromCDN("2(h'01')");
     expect(v).toBeInstanceOf(CborTag);
     expect(v).not.toBeInstanceOf(CborBigUint);
   });

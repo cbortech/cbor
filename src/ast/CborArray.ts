@@ -1,4 +1,4 @@
-import type { ToEDNOptions, ToJSOptions, ToCBOROptions } from '../types';
+import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CBOR_OMIT } from '../types';
 import { CborItem } from './CborItem';
 import type { AnnotatedLine } from './CborItem';
@@ -47,7 +47,7 @@ export class CborArray extends CborItem {
     return concat(parts);
   }
 
-  override _toEDN(options: ToEDNOptions | undefined, depth: number): string {
+  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     let indentStr = resolveIndent(options);
     const preserveComments = options?.preserveComments;
     const hasComments =
@@ -67,7 +67,7 @@ export class CborArray extends CborItem {
     if (indentStr === null || (this.items.length === 0 && !hasComments)) {
       // single-line
       const inner = this.items
-        .map((item) => item._toEDN(options, depth + 1))
+        .map((item) => item._toCDN(options, depth + 1))
         .join(inlineSep);
       if (this.indefiniteLength) {
         return this.items.length === 0 ? '[_ ]' : `[_ ${inner}]`;
@@ -86,7 +86,7 @@ export class CborArray extends CborItem {
         lines.push(...formatLeadingComments(item, childIndent));
       const sep = i < this.items.length - 1 ? multilineSep : trailSep;
       lines.push(
-        `${childIndent}${item._toEDN(options, depth + 1)}${sep}${preserveComments ? formatTrailingComments(item) : ''}`
+        `${childIndent}${item._toCDN(options, depth + 1)}${sep}${preserveComments ? formatTrailingComments(item) : ''}`
       );
     }
     if (preserveComments)
@@ -95,7 +95,7 @@ export class CborArray extends CborItem {
     return `${open}\n${body}\n${closeIndent}]`;
   }
 
-  override _toHexDump(depth: number, options?: ToEDNOptions): AnnotatedLine[] {
+  override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
     const byteHex = (b: number) =>
       b.toString(16).toUpperCase().padStart(2, '0');
     const toHex = (bytes: Uint8Array) =>

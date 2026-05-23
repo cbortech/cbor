@@ -2,14 +2,14 @@
  * Standard EDN "dt" / "DT" application-extension (§3.1 draft-ietf-cbor-edn-literals-20).
  *
  * Parses RFC 3339 date-time app-strings into epoch-based numeric CBOR values.
- * The resulting CborItem subclasses override toEDN() so the value round-trips
+ * The resulting CborItem subclasses override toCDN() so the value round-trips
  * back to dt'...' / DT'...' notation.
  *
  * For a richer variant that makes toJS() return Date objects, use dt_as_Date
  * from ./date instead.
  */
 
-import type { ToEDNOptions, ToJSOptions, FromJSOptions } from '../types';
+import type { ToCDNOptions, ToJSOptions, FromJSOptions } from '../types';
 import type { CborExtension } from './types';
 import type { CborItem } from '../ast/CborItem';
 import { CborUint } from '../ast/CborUint';
@@ -136,7 +136,7 @@ export const TAG_EPOCH = 1n;
 // ─── CborItem subclasses ─────────────────────────────────────────────────────
 
 /**
- * Unsigned epoch timestamp whose toEDN() emits dt'…' notation.
+ * Unsigned epoch timestamp whose toCDN() emits dt'…' notation.
  * The RFC 3339 string is re-derived from the numeric value on each call.
  */
 export class CborEpochDtExtUint extends CborUint {
@@ -147,14 +147,14 @@ export class CborEpochDtExtUint extends CborUint {
     super(value, options);
   }
 
-  override _toEDN(options: ToEDNOptions | undefined, _depth: number): string {
-    if (options?.appStrings === false) return super._toEDN(options, _depth);
+  override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
+    if (options?.appStrings === false) return super._toCDN(options, _depth);
     return `${PREFIX_DT}'${epochToRfc3339(Number(this.value))}'`;
   }
 }
 
 /**
- * Negative epoch timestamp whose toEDN() emits dt'…' notation.
+ * Negative epoch timestamp whose toCDN() emits dt'…' notation.
  * The RFC 3339 string is re-derived from the numeric value on each call.
  */
 export class CborEpochDtExtNint extends CborNint {
@@ -165,14 +165,14 @@ export class CborEpochDtExtNint extends CborNint {
     super(value, options);
   }
 
-  override _toEDN(options: ToEDNOptions | undefined, _depth: number): string {
-    if (options?.appStrings === false) return super._toEDN(options, _depth);
+  override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
+    if (options?.appStrings === false) return super._toCDN(options, _depth);
     return `${PREFIX_DT}'${epochToRfc3339(Number(this.value))}'`;
   }
 }
 
 /**
- * Float epoch timestamp whose toEDN() emits dt'…' notation.
+ * Float epoch timestamp whose toCDN() emits dt'…' notation.
  * The RFC 3339 string is re-derived from the numeric value on each call.
  */
 export class CborEpochDtExtFloat extends CborFloat {
@@ -183,14 +183,14 @@ export class CborEpochDtExtFloat extends CborFloat {
     super(value, options);
   }
 
-  override _toEDN(options: ToEDNOptions | undefined, _depth: number): string {
-    if (options?.appStrings === false) return super._toEDN(options, _depth);
+  override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
+    if (options?.appStrings === false) return super._toCDN(options, _depth);
     return `${PREFIX_DT}'${epochToRfc3339(this.value)}'`;
   }
 }
 
 /**
- * CBOR tag(1, epoch) whose toEDN() emits DT'…' notation.
+ * CBOR tag(1, epoch) whose toCDN() emits DT'…' notation.
  * The RFC 3339 string is re-derived from the numeric content on each call.
  */
 export class CborTaggedEpochDtExt extends CborTag {
@@ -198,8 +198,8 @@ export class CborTaggedEpochDtExt extends CborTag {
     super(TAG_EPOCH, parseDtAppString(datetime), options);
   }
 
-  override _toEDN(options: ToEDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toEDN(options, depth);
+  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
+    if (options?.appStrings === false) return super._toCDN(options, depth);
     const c = this.content as
       | CborEpochDtExtUint
       | CborEpochDtExtNint

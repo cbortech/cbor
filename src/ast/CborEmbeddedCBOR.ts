@@ -1,4 +1,4 @@
-import type { ToEDNOptions, ToJSOptions, ToCBOROptions } from '../types';
+import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import type { AnnotatedLine } from './CborItem';
 import { MT_BYTES } from '../cbor/constants';
@@ -37,7 +37,7 @@ export class CborEmbeddedCBOR extends CborItem {
     return concat([writeHead(MT_BYTES, BigInt(content.length)), content]);
   }
 
-  override _toEDN(options: ToEDNOptions | undefined, depth: number): string {
+  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     if (this.items.length === 0) return '<<>>';
 
     const indentStr = resolveIndent(options);
@@ -49,7 +49,7 @@ export class CborEmbeddedCBOR extends CborItem {
     if (indentStr === null) {
       // single-line
       const inner = this.items
-        .map((item) => item._toEDN(options, depth + 1))
+        .map((item) => item._toCDN(options, depth + 1))
         .join(inlineSep);
       return `<<${inner}>>`;
     }
@@ -58,7 +58,7 @@ export class CborEmbeddedCBOR extends CborItem {
     const childIndent = indentOf(indentStr, depth + 1);
     const closeIndent = indentOf(indentStr, depth);
     const lines = this.items.map(
-      (item) => `${childIndent}${item._toEDN(options, depth + 1)}`
+      (item) => `${childIndent}${item._toCDN(options, depth + 1)}`
     );
     const lastIdx = lines.length - 1;
     const body = lines
@@ -69,7 +69,7 @@ export class CborEmbeddedCBOR extends CborItem {
     return `<<\n${body}\n${closeIndent}>>`;
   }
 
-  override _toHexDump(depth: number, options?: ToEDNOptions): AnnotatedLine[] {
+  override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
     const toHex = (bytes: Uint8Array) =>
       Array.from(bytes, (b) =>
         b.toString(16).toUpperCase().padStart(2, '0')

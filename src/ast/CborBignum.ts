@@ -10,11 +10,11 @@
  *   CborBigUint  — value ≥ 2^64
  *   CborBigNint  — value ≤ -(2^64 + 1)
  *
- * toEDN() emits the plain decimal form (e.g. "18446744073709551616") so that
+ * toCDN() emits the plain decimal form (e.g. "18446744073709551616") so that
  * round-trips through EDN text are human-readable.
  */
 
-import type { ToEDNOptions, ToJSOptions } from '../types';
+import type { ToCDNOptions, ToJSOptions } from '../types';
 import { CborTag } from './CborTag';
 import { CborByteString } from './CborByteString';
 
@@ -57,7 +57,7 @@ export function bytesToBigint(bytes: Uint8Array): bigint {
 /**
  * Unsigned bignum — integers ≥ 2^64.
  * Wire format: tag(2, big-endian byte string).
- * toEDN() emits the plain decimal integer.
+ * toCDN() emits the plain decimal integer.
  */
 export class CborBigUint extends CborTag {
   readonly bigValue: bigint;
@@ -71,7 +71,7 @@ export class CborBigUint extends CborTag {
     this.bigValue = value;
   }
 
-  override _toEDN(_options: ToEDNOptions | undefined, _depth: number): string {
+  override _toCDN(_options: ToCDNOptions | undefined, _depth: number): string {
     return this.bigValue.toString();
   }
 
@@ -83,7 +83,7 @@ export class CborBigUint extends CborTag {
 /**
  * Negative bignum — integers ≤ -(2^64 + 1).
  * Wire format: tag(3, big-endian byte string of (-1 - value)).
- * toEDN() emits the plain decimal integer.
+ * toCDN() emits the plain decimal integer.
  */
 export class CborBigNint extends CborTag {
   readonly bigValue: bigint;
@@ -97,7 +97,7 @@ export class CborBigNint extends CborTag {
     this.bigValue = value;
   }
 
-  override _toEDN(_options: ToEDNOptions | undefined, _depth: number): string {
+  override _toCDN(_options: ToCDNOptions | undefined, _depth: number): string {
     return this.bigValue.toString();
   }
 

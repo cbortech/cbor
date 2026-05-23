@@ -1,4 +1,4 @@
-import type { ToEDNOptions, ToJSOptions, ToCBOROptions } from '../types';
+import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import { Tag } from '../tag';
 import type { AnnotatedLine } from './CborItem';
@@ -31,13 +31,13 @@ export class CborTag extends CborItem {
     ]);
   }
 
-  override _toEDN(options: ToEDNOptions | undefined, depth: number): string {
+  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     const suffix =
       this.encodingWidth !== undefined ? `_${this.encodingWidth}` : '';
-    return `${this.tag}${suffix}(${this.content._toEDN(options, depth)})`;
+    return `${this.tag}${suffix}(${this.content._toCDN(options, depth)})`;
   }
 
-  override _toHexDump(depth: number, options?: ToEDNOptions): AnnotatedLine[] {
+  override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
     const toHex = (bytes: Uint8Array) =>
       Array.from(bytes, (b) =>
         b.toString(16).toUpperCase().padStart(2, '0')
