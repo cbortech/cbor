@@ -27,7 +27,7 @@ describe('tag 24: embedded CBOR (RFC 8949 §3.4.5.1)', () => {
     expect(
       ((r.content as CborEmbeddedCBOR).items[0] as CborTextString).value
     ).toBe('IETF');
-    expect(r.toEDN()).toBe('24(<<"IETF">>)');
+    expect(r.toCDN()).toBe('24(<<"IETF">>)');
   });
 
   test('round-trip: 24(<<{"key":"value"}>>) via toCBOR/fromCBOR', () => {
@@ -37,7 +37,7 @@ describe('tag 24: embedded CBOR (RFC 8949 §3.4.5.1)', () => {
     const r = decodeCBOR(encoded) as CborTag;
     expect(r.tag).toBe(24n);
     expect(r.content).toBeInstanceOf(CborEmbeddedCBOR);
-    expect(r.toEDN()).toBe('24(<<{"key":"value"}>>)');
+    expect(r.toCDN()).toBe('24(<<{"key":"value"}>>)');
   });
 
   test('invalid inner CBOR falls back to CborByteString', () => {

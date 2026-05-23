@@ -2,7 +2,7 @@
  * Built-in bignum extension (RFC 8949 §3.4.3).
  *
  * Intercepts tag 2 (unsigned bignum) and tag 3 (negative bignum) during
- * fromCBOR() and fromEDN() so that out-of-range values are decoded as
+ * fromCBOR() and fromCDN() so that out-of-range values are decoded as
  * CborBigUint / CborBigNint rather than plain CborTag nodes.
  *
  * In-range values (those that fit in uint64 / nint64) are left as plain

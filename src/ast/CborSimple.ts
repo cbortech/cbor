@@ -1,4 +1,4 @@
-import type { ToEDNOptions, ToJSOptions, ToCBOROptions } from '../types';
+import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import { Simple } from '../simple';
 import { MT_SIMPLE, AI_1BYTE } from '../cbor/constants';
@@ -35,7 +35,7 @@ export class CborSimple extends CborItem {
     return new Uint8Array([(MT_SIMPLE << 5) | AI_1BYTE, this.value]);
   }
 
-  _toEDN(_options: ToEDNOptions | undefined, _depth: number): string {
+  _toCDN(_options: ToCDNOptions | undefined, _depth: number): string {
     switch (this.value) {
       case 20:
         return 'false';

@@ -31,7 +31,7 @@ describe('reviver — entry points', () => {
   });
 
   test('CborItem.toJS({ reviver }) — direct call', () => {
-    expect(CBOR.fromEDN('{"a":1}').toJS({ reviver: doubleNumbers })).toEqual({
+    expect(CBOR.fromCDN('{"a":1}').toJS({ reviver: doubleNumbers })).toEqual({
       a: 2,
     });
   });

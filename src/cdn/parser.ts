@@ -5,7 +5,7 @@ import {
   type TokenType,
 } from './tokenizer';
 import type { CborItem } from '../ast/CborItem';
-import type { CborComment, FromEDNOptions, CborExtension } from '../types';
+import type { CborComment, FromCDNOptions, CborExtension } from '../types';
 import { CborUint } from '../ast/CborUint';
 import { CborNint } from '../ast/CborNint';
 import { CborByteString } from '../ast/CborByteString';
@@ -28,12 +28,12 @@ import { CborBigUint, CborBigNint } from '../ast/CborBignum';
 // ─── Public entry point ───────────────────────────────────────────────────────
 
 /**
- * Parse a CBOR-EDN diagnostic notation string into a CborItem AST node.
+ * Parse a CDN text string into a CborItem AST node.
  * Throws SyntaxError on invalid input.
  */
-export function parseEDN(text: string, options?: FromEDNOptions): CborItem {
+export function parseCDN(text: string, options?: FromCDNOptions): CborItem {
   const tokenizer = new Tokenizer(text, { offset: options?.offset });
-  const parser = new EDNParser(
+  const parser = new CDNParser(
     tokenizer,
     options?.extensions,
     options?.unresolvedExtension,
@@ -287,7 +287,7 @@ function buildLineAt(source: string): (offset: number) => number {
 
 // ─── Parser ───────────────────────────────────────────────────────────────────
 
-class EDNParser {
+class CDNParser {
   /** Lookup from app-prefix → extension (user extensions override built-ins). */
   private readonly extByPrefix: Map<string, CborExtension>;
   /** Lookup from tag number → extension. */
@@ -613,7 +613,7 @@ class EDNParser {
     }
   }
 
-  private _tokenTypeToEdnEncoding(
+  private _tokenTypeToCdnEncoding(
     type: string
   ): 'hex' | 'base64' | 'base32' | 'base32hex' {
     switch (type) {
@@ -635,7 +635,7 @@ class EDNParser {
   ): CborByteString | CborEllipsis {
     if (this.t.peek().type !== 'PLUS') {
       const ew = this.consumeEncodingIndicator();
-      const ednEncoding = this._tokenTypeToEdnEncoding(firstType);
+      const ednEncoding = this._tokenTypeToCdnEncoding(firstType);
       return new CborByteString(first, {
         ednEncoding,
         ednSource: firstSource,

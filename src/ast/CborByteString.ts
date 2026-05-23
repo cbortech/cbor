@@ -1,8 +1,8 @@
-import type { ToEDNOptions, ToJSOptions, ToCBOROptions } from '../types';
+import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import { MT_BYTES } from '../cbor/constants';
 import { writeHead, concat, type EncodingWidth } from '../cbor/encode';
-import { serializeBytes } from '../edn/serialize-utils';
+import { serializeBytes } from '../cdn/serialize-utils';
 
 /** CBOR Major Type 2 — definite-length byte string. */
 export class CborByteString extends CborItem {
@@ -35,7 +35,7 @@ export class CborByteString extends CborItem {
     ]);
   }
 
-  _toEDN(options: ToEDNOptions | undefined, _depth: number): string {
+  _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
     const suffix =
       this.encodingWidth !== undefined ? `_${this.encodingWidth}` : '';
     if (options?.preserveByteString && this.ednSource !== undefined)

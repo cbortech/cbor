@@ -1,6 +1,6 @@
 import type {
   CBOROptions,
-  ToEDNOptions,
+  ToCDNOptions,
   ToJSOptions,
   ToHexDumpOptions,
   ToCBOROptions,
@@ -18,7 +18,7 @@ export interface AnnotatedLine {
 /**
  * Abstract base class for all CBOR AST nodes.
  *
- * Every node can serialize itself to CBOR binary, CBOR-EDN text, and a
+ * Every node can serialize itself to CBOR binary, CDN text, and a
  * plain JavaScript value.  Concrete implementations are provided in each
  * subclass (added in later phases).
  */
@@ -38,7 +38,7 @@ export abstract class CborItem {
   end?: number;
 
   /**
-   * Comments captured from CBOR-EDN source when `preserveComments` is enabled.
+   * Comments captured from CDN source when `preserveComments` is enabled.
    * They do not affect CBOR bytes or JS conversion.
    */
   comments?: CborComments;
@@ -58,10 +58,10 @@ export abstract class CborItem {
     return this._toCBOR(merged);
   }
 
-  /** Serialize this node to a CBOR-EDN text string. */
-  toEDN(options?: ToEDNOptions): string {
+  /** Serialize this node to a CDN text string. */
+  toCDN(options?: ToCDNOptions): string {
     const merged = this._defaults ? { ...this._defaults, ...options } : options;
-    const body = this._toEDN(merged, 0);
+    const body = this._toCDN(merged, 0);
     if (!merged?.preserveComments) return body;
     const leading = this.comments?.leading?.map((c) => c.text) ?? [];
     const trailing = this.comments?.trailing ?? [];
@@ -70,6 +70,15 @@ export abstract class CborItem {
         ? body
         : `${body} ${trailing.map((c) => c.text.trimEnd()).join(' ')}`;
     return [...leading, bodyWithTrailing].join('\n');
+  }
+
+  /**
+   * Serialize this node to a CDN text string.
+   *
+   * @deprecated Use `toCDN()` instead.
+   */
+  toEDN(options?: ToCDNOptions): string {
+    return this.toCDN(options);
   }
 
   /**
@@ -92,7 +101,7 @@ export abstract class CborItem {
    * Generate an RFC 8949 §3 style annotated hex dump of this value.
    *
    * @example
-   * const cbor = CBOR.fromEDN('[_ 1, [2, 3]]');
+   * const cbor = CBOR.fromCDN('[_ 1, [2, 3]]');
    * console.log(cbor.toHexDump());
    * // 9F        -- Start indefinite-length array
    * //    01     -- 1
@@ -127,12 +136,12 @@ export abstract class CborItem {
 
   /**
    * @internal
-   * Depth-aware EDN serialization.
+   * Depth-aware CDN serialization.
    * Leaf nodes receive `depth` but may ignore it.
    * Container nodes use `depth` for indentation and call
-   * `child._toEDN(options, depth + 1)` when recursing.
+   * `child._toCDN(options, depth + 1)` when recursing.
    */
-  abstract _toEDN(options: ToEDNOptions | undefined, depth: number): string;
+  abstract _toCDN(options: ToCDNOptions | undefined, depth: number): string;
 
   /**
    * @internal
@@ -148,10 +157,10 @@ export abstract class CborItem {
    * Leaf nodes emit a single line; container nodes override to emit
    * open/close lines with recursively collected children.
    */
-  _toHexDump(depth: number, options?: ToEDNOptions): AnnotatedLine[] {
+  _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
     const hex = Array.from(this._toCBOR(), (b) =>
       b.toString(16).toUpperCase().padStart(2, '0')
     ).join(' ');
-    return [{ depth, hex, comment: this._toEDN(options, 0) }];
+    return [{ depth, hex, comment: this._toCDN(options, 0) }];
   }
 }

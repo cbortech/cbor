@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'vitest';
-import { parseEDN } from './parser';
-import { toEDN } from './serializer';
+import { parseCDN } from './parser';
+import { toCDN } from './serializer';
 import { CborUint } from '../ast/CborUint';
 import { CborNint } from '../ast/CborNint';
 import { CborByteString } from '../ast/CborByteString';
@@ -25,128 +25,128 @@ function toHex(bytes: Uint8Array): string {
 
 // ─── Unsigned integers ────────────────────────────────────────────────────────
 
-describe('parseEDN — unsigned integers', () => {
+describe('parseCDN — unsigned integers', () => {
   test('0', () => {
-    const n = parseEDN('0') as CborUint;
+    const n = parseCDN('0') as CborUint;
     expect(n).toBeInstanceOf(CborUint);
     expect(n.value).toBe(0n);
   });
   test('42', () => {
-    const n = parseEDN('42') as CborUint;
+    const n = parseCDN('42') as CborUint;
     expect(n.value).toBe(42n);
   });
   test('18446744073709551615 (uint64 max)', () => {
-    const n = parseEDN('18446744073709551615') as CborUint;
+    const n = parseCDN('18446744073709551615') as CborUint;
     expect(n.value).toBe(18_446_744_073_709_551_615n);
   });
   test('0xff (hex)', () => {
-    const n = parseEDN('0xff') as CborUint;
+    const n = parseCDN('0xff') as CborUint;
     expect(n.value).toBe(255n);
   });
   test('0xFF (hex uppercase)', () => {
-    const n = parseEDN('0xFF') as CborUint;
+    const n = parseCDN('0xFF') as CborUint;
     expect(n.value).toBe(255n);
   });
   test('0o17 (octal)', () => {
-    const n = parseEDN('0o17') as CborUint;
+    const n = parseCDN('0o17') as CborUint;
     expect(n.value).toBe(15n);
   });
   test('0b1010 (binary)', () => {
-    const n = parseEDN('0b1010') as CborUint;
+    const n = parseCDN('0b1010') as CborUint;
     expect(n.value).toBe(10n);
   });
 });
 
 // ─── Negative integers ────────────────────────────────────────────────────────
 
-describe('parseEDN — negative integers', () => {
+describe('parseCDN — negative integers', () => {
   test('-1', () => {
-    const n = parseEDN('-1') as CborNint;
+    const n = parseCDN('-1') as CborNint;
     expect(n).toBeInstanceOf(CborNint);
     expect(n.value).toBe(-1n);
   });
   test('-1000', () => {
-    const n = parseEDN('-1000') as CborNint;
+    const n = parseCDN('-1000') as CborNint;
     expect(n.value).toBe(-1000n);
   });
   test('-0xff', () => {
-    const n = parseEDN('-0xff') as CborNint;
+    const n = parseCDN('-0xff') as CborNint;
     expect(n.value).toBe(-255n);
   });
 });
 
 // ─── Floating-point ───────────────────────────────────────────────────────────
 
-describe('parseEDN — floats', () => {
+describe('parseCDN — floats', () => {
   test('0.0', () => {
-    const n = parseEDN('0.0') as CborFloat;
+    const n = parseCDN('0.0') as CborFloat;
     expect(n).toBeInstanceOf(CborFloat);
     expect(n.value).toBe(0.0);
     expect(n.precision).toBeUndefined();
   });
   test('-0.0', () => {
-    const n = parseEDN('-0.0') as CborFloat;
+    const n = parseCDN('-0.0') as CborFloat;
     expect(Object.is(n.value, -0)).toBe(true);
   });
   test('1.5', () => {
-    const n = parseEDN('1.5') as CborFloat;
+    const n = parseCDN('1.5') as CborFloat;
     expect(n.value).toBe(1.5);
   });
   test('1.1', () => {
-    expect((parseEDN('1.1') as CborFloat).value).toBeCloseTo(1.1);
+    expect((parseCDN('1.1') as CborFloat).value).toBeCloseTo(1.1);
   });
   test('NaN', () => {
-    expect(isNaN((parseEDN('NaN') as CborFloat).value)).toBe(true);
+    expect(isNaN((parseCDN('NaN') as CborFloat).value)).toBe(true);
   });
   test('Infinity', () => {
-    expect((parseEDN('Infinity') as CborFloat).value).toBe(Infinity);
+    expect((parseCDN('Infinity') as CborFloat).value).toBe(Infinity);
   });
   test('-Infinity', () => {
-    expect((parseEDN('-Infinity') as CborFloat).value).toBe(-Infinity);
+    expect((parseCDN('-Infinity') as CborFloat).value).toBe(-Infinity);
   });
   test('3.14e-2', () => {
-    const n = parseEDN('3.14e-2') as CborFloat;
+    const n = parseCDN('3.14e-2') as CborFloat;
     expect(n.value).toBeCloseTo(0.0314);
   });
 
   // ── positive sign ─────────────────────────────────────────────────────────
-  // Per draft-ietf-cbor-edn-literals-20 §2.4: 0, +0, -0 are all uint (00).
+  // Per draft-ietf-cbor-edn-literals-25 §2.4: 0, +0, -0 are all uint (00).
 
   test('+0 → uint 0 (same as 0)', () => {
-    const n = parseEDN('+0') as CborUint;
+    const n = parseCDN('+0') as CborUint;
     expect(n).toBeInstanceOf(CborUint);
     expect(n.value).toBe(0n);
   });
   test('-0 → uint 0 (same as 0)', () => {
-    const n = parseEDN('-0') as CborUint;
+    const n = parseCDN('-0') as CborUint;
     expect(n).toBeInstanceOf(CborUint);
     expect(n.value).toBe(0n);
   });
   // ── leading-dot floats ────────────────────────────────────────────────────
 
   test('.5 → 0.5', () => {
-    expect((parseEDN('.5') as CborFloat).value).toBe(0.5);
+    expect((parseCDN('.5') as CborFloat).value).toBe(0.5);
   });
   test('.1 → 0.1', () => {
-    expect((parseEDN('.1') as CborFloat).value).toBeCloseTo(0.1);
+    expect((parseCDN('.1') as CborFloat).value).toBeCloseTo(0.1);
   });
   test('.1e2 → 10', () => {
-    expect((parseEDN('.1e2') as CborFloat).value).toBe(10);
+    expect((parseCDN('.1e2') as CborFloat).value).toBe(10);
   });
 
   test('+0.0 → positive zero float', () => {
-    const n = parseEDN('+0.0') as CborFloat;
+    const n = parseCDN('+0.0') as CborFloat;
     expect(n).toBeInstanceOf(CborFloat);
     expect(Object.is(n.value, +0)).toBe(true);
   });
   test('+1.5 → 1.5', () => {
-    expect((parseEDN('+1.5') as CborFloat).value).toBe(1.5);
+    expect((parseCDN('+1.5') as CborFloat).value).toBe(1.5);
   });
   test('+Infinity', () => {
-    expect((parseEDN('+Infinity') as CborFloat).value).toBe(Infinity);
+    expect((parseCDN('+Infinity') as CborFloat).value).toBe(Infinity);
   });
   test('+Infinity_2 → precision=single', () => {
-    const n = parseEDN('+Infinity_2') as CborFloat;
+    const n = parseCDN('+Infinity_2') as CborFloat;
     expect(n.value).toBe(Infinity);
     expect(n.precision).toBe('single');
   });
@@ -154,134 +154,134 @@ describe('parseEDN — floats', () => {
   // ── NaN with encoding indicator ───────────────────────────────────────────
 
   test('NaN_1 → precision=half', () => {
-    const n = parseEDN('NaN_1') as CborFloat;
+    const n = parseCDN('NaN_1') as CborFloat;
     expect(isNaN(n.value)).toBe(true);
     expect(n.precision).toBe('half');
   });
   test('NaN_2 → precision=single', () => {
-    const n = parseEDN('NaN_2') as CborFloat;
+    const n = parseCDN('NaN_2') as CborFloat;
     expect(isNaN(n.value)).toBe(true);
     expect(n.precision).toBe('single');
   });
   test('NaN_3 → precision=double', () => {
-    const n = parseEDN('NaN_3') as CborFloat;
+    const n = parseCDN('NaN_3') as CborFloat;
     expect(isNaN(n.value)).toBe(true);
     expect(n.precision).toBe('double');
   });
   test('NaN_i → SyntaxError', () => {
-    expect(() => parseEDN('NaN_i')).toThrow(SyntaxError);
+    expect(() => parseCDN('NaN_i')).toThrow(SyntaxError);
   });
   test('NaN_0 → SyntaxError (_0 is not valid for floats)', () => {
-    expect(() => parseEDN('NaN_0')).toThrow(SyntaxError);
+    expect(() => parseCDN('NaN_0')).toThrow(SyntaxError);
   });
 
   // ── Infinity with encoding indicator ─────────────────────────────────────
 
   test('Infinity_1 → precision=half', () => {
-    const n = parseEDN('Infinity_1') as CborFloat;
+    const n = parseCDN('Infinity_1') as CborFloat;
     expect(n.value).toBe(Infinity);
     expect(n.precision).toBe('half');
   });
   test('Infinity_2 → precision=single', () => {
-    const n = parseEDN('Infinity_2') as CborFloat;
+    const n = parseCDN('Infinity_2') as CborFloat;
     expect(n.value).toBe(Infinity);
     expect(n.precision).toBe('single');
   });
   test('-Infinity_1 → precision=half', () => {
-    const n = parseEDN('-Infinity_1') as CborFloat;
+    const n = parseCDN('-Infinity_1') as CborFloat;
     expect(n.value).toBe(-Infinity);
     expect(n.precision).toBe('half');
   });
   test('-Infinity_2 → precision=single', () => {
-    const n = parseEDN('-Infinity_2') as CborFloat;
+    const n = parseCDN('-Infinity_2') as CborFloat;
     expect(n.value).toBe(-Infinity);
     expect(n.precision).toBe('single');
   });
   test('Infinity_i → SyntaxError', () => {
-    expect(() => parseEDN('Infinity_i')).toThrow(SyntaxError);
+    expect(() => parseCDN('Infinity_i')).toThrow(SyntaxError);
   });
   test('Infinity_0 → SyntaxError (_0 is not valid for floats)', () => {
-    expect(() => parseEDN('Infinity_0')).toThrow(SyntaxError);
+    expect(() => parseCDN('Infinity_0')).toThrow(SyntaxError);
   });
   test('-Infinity_0 → SyntaxError (_0 is not valid for floats)', () => {
-    expect(() => parseEDN('-Infinity_0')).toThrow(SyntaxError);
+    expect(() => parseCDN('-Infinity_0')).toThrow(SyntaxError);
   });
 
   // ── hex float literals ────────────────────────────────────────────────────
 
   test('0x1p+0 → 1.0', () => {
-    expect((parseEDN('0x1p+0') as CborFloat).value).toBe(1.0);
+    expect((parseCDN('0x1p+0') as CborFloat).value).toBe(1.0);
   });
   test('0x1.8p+0 → 1.5', () => {
-    expect((parseEDN('0x1.8p+0') as CborFloat).value).toBe(1.5);
+    expect((parseCDN('0x1.8p+0') as CborFloat).value).toBe(1.5);
   });
   test('-0x1.8p+0 → -1.5', () => {
-    expect((parseEDN('-0x1.8p+0') as CborFloat).value).toBe(-1.5);
+    expect((parseCDN('-0x1.8p+0') as CborFloat).value).toBe(-1.5);
   });
   test('0x0p+0 → +0 float', () => {
-    const n = parseEDN('0x0p+0') as CborFloat;
+    const n = parseCDN('0x0p+0') as CborFloat;
     expect(Object.is(n.value, 0)).toBe(true);
   });
 
   // Malformed hex floats must throw, not silently return NaN/0
   test('0x1p — no exponent digits → SyntaxError', () =>
-    expect(() => parseEDN('0x1p')).toThrow(SyntaxError));
+    expect(() => parseCDN('0x1p')).toThrow(SyntaxError));
   test('0x.p+1 — no mantissa digits → SyntaxError', () =>
-    expect(() => parseEDN('0x.p+1')).toThrow(SyntaxError));
+    expect(() => parseCDN('0x.p+1')).toThrow(SyntaxError));
   test('0xp+0 — no mantissa digits → SyntaxError', () =>
-    expect(() => parseEDN('0xp+0')).toThrow(SyntaxError));
+    expect(() => parseCDN('0xp+0')).toThrow(SyntaxError));
 
   test('1.0_1 → precision=half', () => {
-    const n = parseEDN('1.0_1') as CborFloat;
+    const n = parseCDN('1.0_1') as CborFloat;
     expect(n.value).toBe(1.0);
     expect(n.precision).toBe('half');
   });
   test('1.0_2 → precision=single', () => {
-    const n = parseEDN('1.0_2') as CborFloat;
+    const n = parseCDN('1.0_2') as CborFloat;
     expect(n.precision).toBe('single');
   });
   test('1.0_3 → precision=double', () => {
-    const n = parseEDN('1.0_3') as CborFloat;
+    const n = parseCDN('1.0_3') as CborFloat;
     expect(n.precision).toBe('double');
   });
 });
 
 // ─── Text strings ─────────────────────────────────────────────────────────────
 
-describe('parseEDN — text strings', () => {
+describe('parseCDN — text strings', () => {
   test('empty ""', () => {
-    const n = parseEDN('""') as CborTextString;
+    const n = parseCDN('""') as CborTextString;
     expect(n).toBeInstanceOf(CborTextString);
     expect(n.value).toBe('');
   });
   test('"hello"', () => {
-    expect((parseEDN('"hello"') as CborTextString).value).toBe('hello');
+    expect((parseCDN('"hello"') as CborTextString).value).toBe('hello');
   });
   test('escape sequences', () => {
-    expect((parseEDN('"\\n\\t\\r"') as CborTextString).value).toBe('\n\t\r');
+    expect((parseCDN('"\\n\\t\\r"') as CborTextString).value).toBe('\n\t\r');
   });
   test('\\u escape', () => {
-    expect((parseEDN('"\\u00fc"') as CborTextString).value).toBe('ü');
+    expect((parseCDN('"\\u00fc"') as CborTextString).value).toBe('ü');
   });
   test('string concatenation "a" + "b"', () => {
-    const n = parseEDN('"hello" + " " + "world"') as CborTextString;
+    const n = parseCDN('"hello" + " " + "world"') as CborTextString;
     expect(n).toBeInstanceOf(CborTextString);
     expect(n.value).toBe('hello world');
   });
   test('"Hello" + h\'20\' + "world" → CborTextString "Hello world"', () => {
     // text-leading: byte chunks are decoded as UTF-8 into the text string
-    const n = parseEDN('"Hello" + h\'20\' + "world"');
+    const n = parseCDN('"Hello" + h\'20\' + "world"');
     expect(n).toBeInstanceOf(CborTextString);
     expect((n as CborTextString).value).toBe('Hello world');
   });
   test('"Hello" + h\'48656c6c6f20776f726c64\' → same as "Hello world"', () => {
-    const n = parseEDN('"" + h\'48656c6c6f20776f726c64\' + ""');
+    const n = parseCDN('"" + h\'48656c6c6f20776f726c64\' + ""');
     expect(n).toBeInstanceOf(CborTextString);
     expect((n as CborTextString).value).toBe('Hello world');
   });
   test("'Hello ' + 'world' → CborByteString (bytes concat)", () => {
     // byte-leading: result is a byte string
-    const n = parseEDN("'Hello ' + 'world'");
+    const n = parseCDN("'Hello ' + 'world'");
     expect(n).toBeInstanceOf(CborByteString);
     expect((n as CborByteString).value).toEqual(
       new Uint8Array([
@@ -290,7 +290,7 @@ describe('parseEDN — text strings', () => {
     );
   });
   test("'Hello' + h'20' + 'world' → CborByteString (byte concat)", () => {
-    const n = parseEDN("'Hello' + h'20' + 'world'");
+    const n = parseCDN("'Hello' + h'20' + 'world'");
     expect(n).toBeInstanceOf(CborByteString);
     expect((n as CborByteString).value).toEqual(
       new Uint8Array([
@@ -300,149 +300,149 @@ describe('parseEDN — text strings', () => {
   });
   test('byte-leading concat with double-quoted text → UTF-8 encoded bytes', () => {
     // h'48' = 'H', + "ello" coerced to UTF-8 bytes → "Hello"
-    const n = parseEDN('h\'48\' + "ello"') as CborByteString;
+    const n = parseCDN('h\'48\' + "ello"') as CborByteString;
     expect(n).toBeInstanceOf(CborByteString);
     expect(n.value).toEqual(new TextEncoder().encode('Hello'));
   });
   test('byte-leading concat with backtick raw string → UTF-8 encoded bytes', () => {
-    const n = parseEDN("'' + `a`") as CborByteString;
+    const n = parseCDN("'' + `a`") as CborByteString;
     expect(n).toBeInstanceOf(CborByteString);
     expect(n.value).toEqual(new TextEncoder().encode('a'));
   });
 
   test('text-leading concat with invalid UTF-8 byte chunk → SyntaxError by default', () => {
     // h'ff' is not valid UTF-8; should throw without allowInvalidUtf8
-    expect(() => parseEDN('"a" + h\'ff\'')).toThrow(SyntaxError);
+    expect(() => parseCDN('"a" + h\'ff\'')).toThrow(SyntaxError);
   });
 
   test('text-leading concat with invalid UTF-8 byte chunk → U+FFFD with allowInvalidUtf8', () => {
-    const n = parseEDN('"a" + h\'ff\'', {
+    const n = parseCDN('"a" + h\'ff\'', {
       allowInvalidUtf8: true,
     }) as CborTextString;
     expect(n).toBeInstanceOf(CborTextString);
     expect(n.value).toBe('a\uFFFD');
   });
   test('escaped quote', () => {
-    expect((parseEDN('"\\""') as CborTextString).value).toBe('"');
+    expect((parseCDN('"\\""') as CborTextString).value).toBe('"');
   });
   test('escaped backslash', () => {
-    expect((parseEDN('"\\\\"') as CborTextString).value).toBe('\\');
+    expect((parseCDN('"\\\\"') as CborTextString).value).toBe('\\');
   });
 
   // ── Unicode escape \u{NNN} ──────────────────────────────────────────────────
 
   test('\\u{41} → "A"', () => {
-    expect((parseEDN('"\\u{41}"') as CborTextString).value).toBe('A');
+    expect((parseCDN('"\\u{41}"') as CborTextString).value).toBe('A');
   });
   test('\\u{FC} → "ü"', () => {
-    expect((parseEDN('"\\u{fc}"') as CborTextString).value).toBe('ü');
+    expect((parseCDN('"\\u{fc}"') as CborTextString).value).toBe('ü');
   });
   test('\\u{1F600} → emoji 😀', () => {
-    expect((parseEDN('"\\u{1F600}"') as CborTextString).value).toBe('😀');
+    expect((parseCDN('"\\u{1F600}"') as CborTextString).value).toBe('😀');
   });
   test('\\u{10FFFF} → last Unicode code point', () => {
-    const val = (parseEDN('"\\u{10FFFF}"') as CborTextString).value;
+    const val = (parseCDN('"\\u{10FFFF}"') as CborTextString).value;
     expect(val.codePointAt(0)).toBe(0x10ffff);
   });
   test('\\u{110000} → SyntaxError (out of range)', () => {
-    expect(() => parseEDN('"\\u{110000}"')).toThrow(SyntaxError);
+    expect(() => parseCDN('"\\u{110000}"')).toThrow(SyntaxError);
   });
   test('\\u{D800} → SyntaxError (surrogate not a scalar value)', () => {
-    expect(() => parseEDN('"\\u{D800}"')).toThrow(SyntaxError);
+    expect(() => parseCDN('"\\u{D800}"')).toThrow(SyntaxError);
   });
   test('\\u{DFFF} → SyntaxError (surrogate not a scalar value)', () => {
-    expect(() => parseEDN('"\\u{DFFF}"')).toThrow(SyntaxError);
+    expect(() => parseCDN('"\\u{DFFF}"')).toThrow(SyntaxError);
   });
   test('\\u{} → SyntaxError (empty)', () => {
-    expect(() => parseEDN('"\\u{}"')).toThrow(SyntaxError);
+    expect(() => parseCDN('"\\u{}"')).toThrow(SyntaxError);
   });
 
   // ── Surrogate pair \uXXXX\uXXXX ────────────────────────────────────────────
 
   test('valid surrogate pair \\uD83D\\uDE00 → "😀"', () => {
-    expect((parseEDN('"\\uD83D\\uDE00"') as CborTextString).value).toBe('😀');
+    expect((parseCDN('"\\uD83D\\uDE00"') as CborTextString).value).toBe('😀');
   });
   test('valid surrogate pair \\uD800\\uDC00 → U+10000', () => {
-    const val = (parseEDN('"\\uD800\\uDC00"') as CborTextString).value;
+    const val = (parseCDN('"\\uD800\\uDC00"') as CborTextString).value;
     expect(val.codePointAt(0)).toBe(0x10000);
   });
   test('lone high surrogate \\uD800 → SyntaxError', () => {
-    expect(() => parseEDN('"\\uD800"')).toThrow(SyntaxError);
+    expect(() => parseCDN('"\\uD800"')).toThrow(SyntaxError);
   });
   test('lone low surrogate \\uDFFF → SyntaxError', () => {
-    expect(() => parseEDN('"\\uDFFF"')).toThrow(SyntaxError);
+    expect(() => parseCDN('"\\uDFFF"')).toThrow(SyntaxError);
   });
   test('high surrogate followed by non-surrogate → SyntaxError', () => {
-    expect(() => parseEDN('"\\uD800\\u0041"')).toThrow(SyntaxError);
+    expect(() => parseCDN('"\\uD800\\u0041"')).toThrow(SyntaxError);
   });
 
   // ── Literal LF and CR in source ─────────────────────────────────────────────
 
   test('literal LF inside string is allowed (spec §2.5.1)', () => {
-    const val = (parseEDN('"hello\nworld"') as CborTextString).value;
+    const val = (parseCDN('"hello\nworld"') as CborTextString).value;
     expect(val).toBe('hello\nworld');
   });
   test('literal CR is stripped (cross-platform normalisation)', () => {
-    const val = (parseEDN('"hello\rworld"') as CborTextString).value;
+    const val = (parseCDN('"hello\rworld"') as CborTextString).value;
     expect(val).toBe('helloworld');
   });
   test('literal CRLF → only LF kept', () => {
-    const val = (parseEDN('"hello\r\nworld"') as CborTextString).value;
+    const val = (parseCDN('"hello\r\nworld"') as CborTextString).value;
     expect(val).toBe('hello\nworld');
   });
 
   // ── Escaped newline (§5.1 escapable1: \ newline → swallow) ──────────────────
 
-  // §5.1 escapable1: backslash-newline was removed in draft-ietf-cbor-edn-literals-21
-  test('backslash-LF is a SyntaxError (draft-21 §5.1)', () => {
-    expect(() => parseEDN('"hello\\\nworld"')).toThrow(SyntaxError);
+  // §5.1 escapable1 does not include backslash-newline.
+  test('backslash-LF is a SyntaxError (draft-25 §5.1)', () => {
+    expect(() => parseCDN('"hello\\\nworld"')).toThrow(SyntaxError);
   });
-  test('backslash-CRLF is a SyntaxError (draft-21 §5.1)', () => {
-    expect(() => parseEDN('"hello\\\r\nworld"')).toThrow(SyntaxError);
+  test('backslash-CRLF is a SyntaxError (draft-25 §5.1)', () => {
+    expect(() => parseCDN('"hello\\\r\nworld"')).toThrow(SyntaxError);
   });
-  test('backslash-CR is a SyntaxError (draft-21 §5.1)', () => {
-    expect(() => parseEDN('"hello\\\rworld"')).toThrow(SyntaxError);
+  test('backslash-CR is a SyntaxError (draft-25 §5.1)', () => {
+    expect(() => parseCDN('"hello\\\rworld"')).toThrow(SyntaxError);
   });
 });
 
 // ─── Raw string literals (backtick strings) ───────────────────────────────────
 
-describe('parseEDN — raw string literals (backtick)', () => {
+describe('parseCDN — raw string literals (backtick)', () => {
   // ── Single-backtick delimiter ────────────────────────────────────────────
 
   test('simple content `hello`', () => {
-    expect((parseEDN('`hello`') as CborTextString).value).toBe('hello');
+    expect((parseCDN('`hello`') as CborTextString).value).toBe('hello');
   });
 
   test('backslash is not an escape (literal \\n)', () => {
     // In a raw string, \n is two characters: backslash + n
-    expect((parseEDN('`\\n`') as CborTextString).value).toBe('\\n');
+    expect((parseCDN('`\\n`') as CborTextString).value).toBe('\\n');
   });
 
   test('backslash sequences stay literal', () => {
-    expect((parseEDN('`\\t\\r\\u0041`') as CborTextString).value).toBe(
+    expect((parseCDN('`\\t\\r\\u0041`') as CborTextString).value).toBe(
       '\\t\\r\\u0041'
     );
   });
 
   test('double-quote inside raw string', () => {
-    expect((parseEDN('`say "hello"`') as CborTextString).value).toBe(
+    expect((parseCDN('`say "hello"`') as CborTextString).value).toBe(
       'say "hello"'
     );
   });
 
   test('single-quote inside raw string', () => {
-    expect((parseEDN("`it's`") as CborTextString).value).toBe("it's");
+    expect((parseCDN("`it's`") as CborTextString).value).toBe("it's");
   });
 
   test('multiline content (no leading newline to strip)', () => {
-    const n = parseEDN('`line1\nline2`') as CborTextString;
+    const n = parseCDN('`line1\nline2`') as CborTextString;
     expect(n.value).toBe('line1\nline2');
   });
 
   test('CRLF is normalized to LF within content', () => {
     // \r before line2 is stripped; \n becomes content
-    const n = parseEDN('`line1\r\nline2`') as CborTextString;
+    const n = parseCDN('`line1\r\nline2`') as CborTextString;
     expect(n.value).toBe('line1\nline2');
   });
 
@@ -450,62 +450,62 @@ describe('parseEDN — raw string literals (backtick)', () => {
 
   test('leading LF is stripped', () => {
     // `\nhello` → "hello"
-    expect((parseEDN('`\nhello`') as CborTextString).value).toBe('hello');
+    expect((parseCDN('`\nhello`') as CborTextString).value).toBe('hello');
   });
 
   test('leading CRLF is stripped', () => {
-    expect((parseEDN('`\r\nhello`') as CborTextString).value).toBe('hello');
+    expect((parseCDN('`\r\nhello`') as CborTextString).value).toBe('hello');
   });
 
   test('only the first leading newline is stripped', () => {
     // `\n\nhello` → "\nhello"
-    expect((parseEDN('`\n\nhello`') as CborTextString).value).toBe('\nhello');
+    expect((parseCDN('`\n\nhello`') as CborTextString).value).toBe('\nhello');
   });
 
   // ── Multi-backtick delimiter (N > 1) ─────────────────────────────────────
 
   test('double-backtick delimiter allows single backtick in content (spec §2.5.3 example)', () => {
     // ``[^ \t\n\r"'`]`` from the spec
-    const n = parseEDN('``[^ \\t\\n\\r"\'`]``') as CborTextString;
+    const n = parseCDN('``[^ \\t\\n\\r"\'`]``') as CborTextString;
     expect(n).toBeInstanceOf(CborTextString);
     expect(n.value).toBe('[^ \\t\\n\\r"\'`]');
   });
 
   test('triple-backtick delimiter allows double backtick in content', () => {
     // ```a``b``` → "a``b"
-    const n = parseEDN('```a``b```') as CborTextString;
+    const n = parseCDN('```a``b```') as CborTextString;
     expect(n.value).toBe('a``b');
   });
 
   test('excess closing backticks become content (§2.5.3)', () => {
     // ```a = ``foo````` (3-backtick delimited, 5 closing) → "a = ``foo``"
-    const n = parseEDN('```a = ``foo`````') as CborTextString;
+    const n = parseCDN('```a = ``foo`````') as CborTextString;
     expect(n.value).toBe('a = ``foo``');
   });
 
   test('leading newline stripped with multi-backtick delimiter', () => {
     // ```\na``` → "a"
-    const n = parseEDN('```\na```') as CborTextString;
+    const n = parseCDN('```\na```') as CborTextString;
     expect(n.value).toBe('a');
   });
 
   // ── Encoding indicator and concatenation ─────────────────────────────────
 
   test('encoding indicator `hello`_1', () => {
-    const n = parseEDN('`hello`_1') as CborTextString;
+    const n = parseCDN('`hello`_1') as CborTextString;
     expect(n).toBeInstanceOf(CborTextString);
     expect(n.value).toBe('hello');
     expect(n.encodingWidth).toBe(1);
   });
 
   test('concatenation `foo` + `bar`', () => {
-    const n = parseEDN('`foo` + `bar`') as CborTextString;
+    const n = parseCDN('`foo` + `bar`') as CborTextString;
     expect(n).toBeInstanceOf(CborTextString);
     expect(n.value).toBe('foobar');
   });
 
   test('mixed concatenation `foo` + " " + `bar`', () => {
-    const n = parseEDN('`foo` + " " + `bar`') as CborTextString;
+    const n = parseCDN('`foo` + " " + `bar`') as CborTextString;
     expect(n).toBeInstanceOf(CborTextString);
     expect(n.value).toBe('foo bar');
   });
@@ -513,163 +513,163 @@ describe('parseEDN — raw string literals (backtick)', () => {
   // ── Error cases ──────────────────────────────────────────────────────────
 
   test('unterminated raw string throws SyntaxError', () => {
-    expect(() => parseEDN('`oops')).toThrow(SyntaxError);
+    expect(() => parseCDN('`oops')).toThrow(SyntaxError);
   });
 
   test('unterminated double-backtick raw string throws SyntaxError', () => {
-    expect(() => parseEDN('``oops`')).toThrow(SyntaxError);
+    expect(() => parseCDN('``oops`')).toThrow(SyntaxError);
   });
 
   // ── Empty raw strings are forbidden (§2.5.3) ─────────────────────────────
 
   test('empty bare raw string `` throws SyntaxError', () => {
-    expect(() => parseEDN('``')).toThrow(SyntaxError);
+    expect(() => parseCDN('``')).toThrow(SyntaxError);
   });
 
   test('empty double-backtick raw string ```` throws SyntaxError', () => {
-    expect(() => parseEDN('````')).toThrow(SyntaxError);
+    expect(() => parseCDN('````')).toThrow(SyntaxError);
   });
 
   test('raw string with only a leading newline (stripped → empty) throws SyntaxError', () => {
-    expect(() => parseEDN('`\n`')).toThrow(SyntaxError);
+    expect(() => parseCDN('`\n`')).toThrow(SyntaxError);
   });
 
-  // rawchars forbids HT (draft-21 §2.5.3)
+  // rawchars forbids HT (draft-25 §2.5.3)
   test('raw string containing literal HT (tab) throws SyntaxError', () => {
-    expect(() => parseEDN('`foo\tbar`')).toThrow(SyntaxError);
+    expect(() => parseCDN('`foo\tbar`')).toThrow(SyntaxError);
   });
 
   test('empty h backtick h`` throws SyntaxError', () => {
-    expect(() => parseEDN('h``')).toThrow(SyntaxError);
+    expect(() => parseCDN('h``')).toThrow(SyntaxError);
   });
 
   test('empty b64 backtick b64`` throws SyntaxError', () => {
-    expect(() => parseEDN('b64``')).toThrow(SyntaxError);
+    expect(() => parseCDN('b64``')).toThrow(SyntaxError);
   });
 
   test('empty dt backtick dt`` throws SyntaxError', () => {
-    expect(() => parseEDN('dt``')).toThrow(SyntaxError);
+    expect(() => parseCDN('dt``')).toThrow(SyntaxError);
   });
 });
 
 // ─── Byte strings ─────────────────────────────────────────────────────────────
 
-describe('parseEDN — byte strings', () => {
+describe('parseCDN — byte strings', () => {
   test("h'' (empty hex)", () => {
-    const n = parseEDN("h''") as CborByteString;
+    const n = parseCDN("h''") as CborByteString;
     expect(n).toBeInstanceOf(CborByteString);
     expect(n.value).toEqual(new Uint8Array(0));
   });
   test("h'0102'", () => {
-    const n = parseEDN("h'0102'") as CborByteString;
+    const n = parseCDN("h'0102'") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02]));
   });
   test("h'deadbeef'", () => {
-    const n = parseEDN("h'deadbeef'") as CborByteString;
+    const n = parseCDN("h'deadbeef'") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
   });
   test("b64'AQIDBA==' (padded) is accepted", () => {
-    const n = parseEDN("b64'AQIDBA=='") as CborByteString;
+    const n = parseCDN("b64'AQIDBA=='") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([1, 2, 3, 4]));
   });
   test("b64'AQIDBA' (no padding)", () => {
-    const n = parseEDN("b64'AQIDBA'") as CborByteString;
+    const n = parseCDN("b64'AQIDBA'") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([1, 2, 3, 4]));
   });
   test("b64'3q2-7w' (base64url alphabet)", () => {
     // 0xDE 0xAD 0xBE 0xEF in base64url is '3q2-7w'
-    const n = parseEDN("b64'3q2-7w'") as CborByteString;
+    const n = parseCDN("b64'3q2-7w'") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
   });
   test("hex with spaces h'01 02 03'", () => {
-    const n = parseEDN("h'01 02 03'") as CborByteString;
+    const n = parseCDN("h'01 02 03'") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([1, 2, 3]));
   });
 
   // ── h'...' comments (§2.5.5) ────────────────────────────────────────────────
 
   test("h'...' with / block comment /", () => {
-    const n = parseEDN("h'01 /first byte/ 02'") as CborByteString;
+    const n = parseCDN("h'01 /first byte/ 02'") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02]));
   });
   test("h'...' with multi-word block comment", () => {
-    const n = parseEDN("h'dead /skip this/ beef'") as CborByteString;
+    const n = parseCDN("h'dead /skip this/ beef'") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
   });
   test("h'...' with # line comment", () => {
-    const n = parseEDN("h'01 # first\n02'") as CborByteString;
+    const n = parseCDN("h'01 # first\n02'") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02]));
   });
   test("h'...' with mixed comments", () => {
-    const n = parseEDN(
+    const n = parseCDN(
       "h'\n  01 /byte one/\n  02 # byte two\n'"
     ) as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02]));
   });
   test("h'...' invalid character throws SyntaxError", () => {
-    expect(() => parseEDN("h'0g'")).toThrow(SyntaxError);
+    expect(() => parseCDN("h'0g'")).toThrow(SyntaxError);
   });
 
-  // lblank = %x0A / %x20 only — HT forbidden (draft-21 §5.2.1)
+  // lblank = %x0A / %x20 only — HT forbidden (draft-25 §5.2.1)
   test("h'...' with HT (tab) throws SyntaxError", () => {
-    expect(() => parseEDN("h'01\t02'")).toThrow(SyntaxError);
+    expect(() => parseCDN("h'01\t02'")).toThrow(SyntaxError);
   });
 
   // ── b64'...' comments — only # line comment; / is a base64 char ─────────────
 
-  // lblank = %x0A / %x20 only — HT forbidden (draft-21 §5.2.2)
+  // lblank = %x0A / %x20 only — HT forbidden (draft-25 §5.2.2)
   test("b64'...' with HT (tab) throws SyntaxError", () => {
-    expect(() => parseEDN("b64'AQID\tBA=='")).toThrow(SyntaxError);
+    expect(() => parseCDN("b64'AQID\tBA=='")).toThrow(SyntaxError);
   });
 
   test("b64'...' with # line comment", () => {
     // AQID = [1, 2, 3], BA== = [4]
-    const n = parseEDN("b64'AQID # first three\nBA=='") as CborByteString;
+    const n = parseCDN("b64'AQID # first three\nBA=='") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([1, 2, 3, 4]));
   });
   test("b64'...' / is treated as base64 character, not comment", () => {
     // '/' is a valid base64 character and must not be treated as a comment delimiter
-    const n = parseEDN("b64'AQIDBA=='") as CborByteString;
+    const n = parseCDN("b64'AQIDBA=='") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([1, 2, 3, 4]));
   });
 });
 
-describe('parseEDN — indefinite byte string', () => {
+describe('parseCDN — indefinite byte string', () => {
   test("(_ h'0102', h'030405')", () => {
-    const n = parseEDN("(_ h'0102', h'030405')") as CborIndefiniteByteString;
+    const n = parseCDN("(_ h'0102', h'030405')") as CborIndefiniteByteString;
     expect(n).toBeInstanceOf(CborIndefiniteByteString);
     expect(n.chunks).toHaveLength(2);
     expect(n.chunks[0].value).toEqual(new Uint8Array([0x01, 0x02]));
     expect(n.chunks[1].value).toEqual(new Uint8Array([0x03, 0x04, 0x05]));
   });
   test("''_ (empty indefinite byte string)", () => {
-    const n = parseEDN("''_") as CborIndefiniteByteString;
+    const n = parseCDN("''_") as CborIndefiniteByteString;
     expect(n).toBeInstanceOf(CborIndefiniteByteString);
     expect(n.chunks).toHaveLength(0);
   });
   test('(_ ) throws — ambiguous', () => {
-    expect(() => parseEDN('(_ )')).toThrow(SyntaxError);
+    expect(() => parseCDN('(_ )')).toThrow(SyntaxError);
   });
   test("(_ 'Hello', \" \", 'world') — mixed chunk types → SyntaxError", () => {
-    expect(() => parseEDN("(_ 'Hello', \" \", 'world')")).toThrow(SyntaxError);
+    expect(() => parseCDN("(_ 'Hello', \" \", 'world')")).toThrow(SyntaxError);
   });
 });
 
-describe('parseEDN — indefinite text string', () => {
+describe('parseCDN — indefinite text string', () => {
   test('(_ "strea", "ming")', () => {
-    const n = parseEDN('(_ "strea", "ming")') as CborIndefiniteTextString;
+    const n = parseCDN('(_ "strea", "ming")') as CborIndefiniteTextString;
     expect(n).toBeInstanceOf(CborIndefiniteTextString);
     expect(n.chunks).toHaveLength(2);
     expect(n.chunks[0].value).toBe('strea');
     expect(n.chunks[1].value).toBe('ming');
   });
   test('""_ (empty indefinite text string)', () => {
-    const n = parseEDN('""_') as CborIndefiniteTextString;
+    const n = parseCDN('""_') as CborIndefiniteTextString;
     expect(n).toBeInstanceOf(CborIndefiniteTextString);
     expect(n.chunks).toHaveLength(0);
   });
   test('(_ "Hello", h\'20\', "world") — mixed chunk types → SyntaxError', () => {
-    expect(() => parseEDN('(_ "Hello", h\'20\', "world")')).toThrow(
+    expect(() => parseCDN('(_ "Hello", h\'20\', "world")')).toThrow(
       SyntaxError
     );
   });
@@ -677,30 +677,30 @@ describe('parseEDN — indefinite text string', () => {
 
 // ─── Arrays ───────────────────────────────────────────────────────────────────
 
-describe('parseEDN — arrays', () => {
+describe('parseCDN — arrays', () => {
   test('[]', () => {
-    const n = parseEDN('[]') as CborArray;
+    const n = parseCDN('[]') as CborArray;
     expect(n).toBeInstanceOf(CborArray);
     expect(n.items).toHaveLength(0);
     expect(n.indefiniteLength).toBe(false);
   });
   test('[1, 2, 3]', () => {
-    const n = parseEDN('[1, 2, 3]') as CborArray;
+    const n = parseCDN('[1, 2, 3]') as CborArray;
     expect(n.items).toHaveLength(3);
     expect((n.items[0] as CborUint).value).toBe(1n);
   });
   test('[_ ]', () => {
-    const n = parseEDN('[_ ]') as CborArray;
+    const n = parseCDN('[_ ]') as CborArray;
     expect(n.indefiniteLength).toBe(true);
     expect(n.items).toHaveLength(0);
   });
   test('[_ 1, 2, 3]', () => {
-    const n = parseEDN('[_ 1, 2, 3]') as CborArray;
+    const n = parseCDN('[_ 1, 2, 3]') as CborArray;
     expect(n.indefiniteLength).toBe(true);
     expect(n.items).toHaveLength(3);
   });
   test('nested [1, [2, 3]]', () => {
-    const n = parseEDN('[1, [2, 3]]') as CborArray;
+    const n = parseCDN('[1, [2, 3]]') as CborArray;
     expect(n.items[1]).toBeInstanceOf(CborArray);
     expect(((n.items[1] as CborArray).items[0] as CborUint).value).toBe(2n);
   });
@@ -708,44 +708,44 @@ describe('parseEDN — arrays', () => {
   // ── optional commas ──────────────────────────────────────────────────────────
 
   test('[1 2 3] whitespace-separated (no commas)', () => {
-    const n = parseEDN('[1 2 3]') as CborArray;
+    const n = parseCDN('[1 2 3]') as CborArray;
     expect(n.items).toHaveLength(3);
     expect((n.items[0] as CborUint).value).toBe(1n);
     expect((n.items[2] as CborUint).value).toBe(3n);
   });
   test('[1 2,3] mixed comma and no-comma', () => {
-    const n = parseEDN('[1 2,3]') as CborArray;
+    const n = parseCDN('[1 2,3]') as CborArray;
     expect(n.items).toHaveLength(3);
   });
   test('[1,] trailing comma', () => {
-    const n = parseEDN('[1,]') as CborArray;
+    const n = parseCDN('[1,]') as CborArray;
     expect(n.items).toHaveLength(1);
   });
 });
 
 // ─── Maps ─────────────────────────────────────────────────────────────────────
 
-describe('parseEDN — maps', () => {
+describe('parseCDN — maps', () => {
   test('{}', () => {
-    const n = parseEDN('{}') as CborMap;
+    const n = parseCDN('{}') as CborMap;
     expect(n).toBeInstanceOf(CborMap);
     expect(n.entries).toHaveLength(0);
     expect(n.indefiniteLength).toBe(false);
   });
   test('{1: 2, 3: 4}', () => {
-    const n = parseEDN('{1: 2, 3: 4}') as CborMap;
+    const n = parseCDN('{1: 2, 3: 4}') as CborMap;
     expect(n.entries).toHaveLength(2);
     expect((n.entries[0][0] as CborUint).value).toBe(1n);
     expect((n.entries[0][1] as CborUint).value).toBe(2n);
   });
   test('{_ "a": 1}', () => {
-    const n = parseEDN('{_ "a": 1}') as CborMap;
+    const n = parseCDN('{_ "a": 1}') as CborMap;
     expect(n.indefiniteLength).toBe(true);
     expect(n.entries).toHaveLength(1);
     expect((n.entries[0][0] as CborTextString).value).toBe('a');
   });
   test('{_ }', () => {
-    const n = parseEDN('{_ }') as CborMap;
+    const n = parseCDN('{_ }') as CborMap;
     expect(n.indefiniteLength).toBe(true);
     expect(n.entries).toHaveLength(0);
   });
@@ -753,39 +753,39 @@ describe('parseEDN — maps', () => {
   // ── optional commas ──────────────────────────────────────────────────────────
 
   test('{1: 2 3: 4} whitespace-separated (no commas)', () => {
-    const n = parseEDN('{1: 2 3: 4}') as CborMap;
+    const n = parseCDN('{1: 2 3: 4}') as CborMap;
     expect(n.entries).toHaveLength(2);
     expect((n.entries[1][0] as CborUint).value).toBe(3n);
   });
   test('{1: 2,} trailing comma', () => {
-    const n = parseEDN('{1: 2,}') as CborMap;
+    const n = parseCDN('{1: 2,}') as CborMap;
     expect(n.entries).toHaveLength(1);
   });
 });
 
 // ─── Tags ─────────────────────────────────────────────────────────────────────
 
-describe('parseEDN — tags', () => {
+describe('parseCDN — tags', () => {
   test('0("2013-03-21T20:04:00Z")', () => {
-    const n = parseEDN('0("2013-03-21T20:04:00Z")') as CborTag;
+    const n = parseCDN('0("2013-03-21T20:04:00Z")') as CborTag;
     expect(n).toBeInstanceOf(CborTag);
     expect(n.tag).toBe(0n);
     expect((n.content as CborTextString).value).toBe('2013-03-21T20:04:00Z');
   });
   test('1(1363896240)', () => {
-    const n = parseEDN('1(1363896240)') as CborTag;
+    const n = parseCDN('1(1363896240)') as CborTag;
     expect(n.tag).toBe(1n);
     expect((n.content as CborUint).value).toBe(1363896240n);
   });
   test("23(h'01020304')", () => {
-    const n = parseEDN("23(h'01020304')") as CborTag;
+    const n = parseCDN("23(h'01020304')") as CborTag;
     expect(n.tag).toBe(23n);
     expect((n.content as CborByteString).value).toEqual(
       new Uint8Array([1, 2, 3, 4])
     );
   });
   test('nested tag: 1([1, 2])', () => {
-    const n = parseEDN('1([1, 2])') as CborTag;
+    const n = parseCDN('1([1, 2])') as CborTag;
     expect(n.tag).toBe(1n);
     expect(n.content).toBeInstanceOf(CborArray);
   });
@@ -793,45 +793,45 @@ describe('parseEDN — tags', () => {
 
 // ─── Simple values ────────────────────────────────────────────────────────────
 
-describe('parseEDN — simple values', () => {
-  test('true', () => expect(parseEDN('true')).toBe(CborSimple.TRUE));
-  test('false', () => expect(parseEDN('false')).toBe(CborSimple.FALSE));
-  test('null', () => expect(parseEDN('null')).toBe(CborSimple.NULL));
+describe('parseCDN — simple values', () => {
+  test('true', () => expect(parseCDN('true')).toBe(CborSimple.TRUE));
+  test('false', () => expect(parseCDN('false')).toBe(CborSimple.FALSE));
+  test('null', () => expect(parseCDN('null')).toBe(CborSimple.NULL));
   test('undefined', () =>
-    expect(parseEDN('undefined')).toBe(CborSimple.UNDEFINED));
+    expect(parseCDN('undefined')).toBe(CborSimple.UNDEFINED));
   test('simple(16)', () => {
-    const n = parseEDN('simple(16)') as CborSimple;
+    const n = parseCDN('simple(16)') as CborSimple;
     expect(n).toBeInstanceOf(CborSimple);
     expect(n.value).toBe(16);
   });
   test('simple(255)', () => {
-    expect((parseEDN('simple(255)') as CborSimple).value).toBe(255);
+    expect((parseCDN('simple(255)') as CborSimple).value).toBe(255);
   });
 });
 
 // ─── Whitespace tolerance ─────────────────────────────────────────────────────
 
-describe('parseEDN — whitespace', () => {
+describe('parseCDN — whitespace', () => {
   test('whitespace around brackets', () => {
-    const n = parseEDN('  [  1 ,  2  ]  ') as CborArray;
+    const n = parseCDN('  [  1 ,  2  ]  ') as CborArray;
     expect(n.items).toHaveLength(2);
   });
   test('newlines inside map', () => {
-    const n = parseEDN('{\n  "a": 1,\n  "b": 2\n}') as CborMap;
+    const n = parseCDN('{\n  "a": 1,\n  "b": 2\n}') as CborMap;
     expect(n.entries).toHaveLength(2);
   });
 });
 
 // ─── Offset / trailing input ─────────────────────────────────────────────────
 
-describe('parseEDN — offset and trailing input', () => {
+describe('parseCDN — offset and trailing input', () => {
   test('allowTrailing parses one item and reports source offsets', () => {
-    const first = parseEDN('1 2', { allowTrailing: true }) as CborUint;
+    const first = parseCDN('1 2', { allowTrailing: true }) as CborUint;
     expect(first.value).toBe(1n);
     expect(first.start).toBe(0);
     expect(first.end).toBe(1);
 
-    const second = parseEDN('1 2', {
+    const second = parseCDN('1 2', {
       offset: first.end,
       allowTrailing: true,
     }) as CborUint;
@@ -841,168 +841,168 @@ describe('parseEDN — offset and trailing input', () => {
   });
 
   test('offset starts parsing from the requested character position', () => {
-    const n = parseEDN('1  2', { offset: 1 }) as CborUint;
+    const n = parseCDN('1  2', { offset: 1 }) as CborUint;
     expect(n.value).toBe(2n);
     expect(n.start).toBe(3);
     expect(n.end).toBe(4);
   });
 
   test('trailing tokens still throw unless allowTrailing is true', () => {
-    expect(() => parseEDN('1 2', { offset: 0 })).toThrow(SyntaxError);
+    expect(() => parseCDN('1 2', { offset: 0 })).toThrow(SyntaxError);
   });
 
   test('last sequence item can omit allowTrailing to catch unexpected data', () => {
-    const first = parseEDN('1 2 3', { allowTrailing: true }) as CborUint;
-    const last = parseEDN('1 2', { offset: first.end }) as CborUint;
+    const first = parseCDN('1 2 3', { allowTrailing: true }) as CborUint;
+    const last = parseCDN('1 2', { offset: first.end }) as CborUint;
     expect(last.value).toBe(2n);
     expect(last.end).toBe(3);
 
-    expect(() => parseEDN('1 2 3', { offset: first.end })).toThrow(SyntaxError);
+    expect(() => parseCDN('1 2 3', { offset: first.end })).toThrow(SyntaxError);
   });
 
   test('offset at end of input is EOF, while offset beyond input is out of range', () => {
-    expect(() => parseEDN('1', { offset: 1 })).toThrow(SyntaxError);
-    expect(() => parseEDN('1', { offset: 2 })).toThrow(RangeError);
+    expect(() => parseCDN('1', { offset: 1 })).toThrow(SyntaxError);
+    expect(() => parseCDN('1', { offset: 2 })).toThrow(RangeError);
   });
 });
 
 // ─── Error cases ──────────────────────────────────────────────────────────────
 
-describe('parseEDN — errors', () => {
+describe('parseCDN — errors', () => {
   test('empty input throws', () => {
-    expect(() => parseEDN('')).toThrow(SyntaxError);
+    expect(() => parseCDN('')).toThrow(SyntaxError);
   });
   test('trailing garbage throws', () => {
-    expect(() => parseEDN('1 2')).toThrow(SyntaxError);
+    expect(() => parseCDN('1 2')).toThrow(SyntaxError);
   });
   test('unclosed array throws', () => {
-    expect(() => parseEDN('[1, 2')).toThrow(SyntaxError);
+    expect(() => parseCDN('[1, 2')).toThrow(SyntaxError);
   });
   test('unclosed map throws', () => {
-    expect(() => parseEDN('{1: 2')).toThrow(SyntaxError);
+    expect(() => parseCDN('{1: 2')).toThrow(SyntaxError);
   });
   test('invalid token throws', () => {
-    expect(() => parseEDN('@')).toThrow(SyntaxError);
+    expect(() => parseCDN('@')).toThrow(SyntaxError);
   });
   test('missing colon in map', () => {
-    expect(() => parseEDN('{1 2}')).toThrow(SyntaxError);
+    expect(() => parseCDN('{1 2}')).toThrow(SyntaxError);
   });
   test('negative tag number throws', () => {
-    expect(() => parseEDN('-1(42)')).toThrow(SyntaxError);
+    expect(() => parseCDN('-1(42)')).toThrow(SyntaxError);
   });
   test('h"abcd" → SyntaxError (double quotes not valid for byte prefix)', () => {
-    expect(() => parseEDN('h"abcd"')).toThrow(SyntaxError);
+    expect(() => parseCDN('h"abcd"')).toThrow(SyntaxError);
   });
   test('b64"AQID" → SyntaxError', () => {
-    expect(() => parseEDN('b64"AQID"')).toThrow(SyntaxError);
+    expect(() => parseCDN('b64"AQID"')).toThrow(SyntaxError);
   });
   test('IP"192.0.2.42" → SyntaxError', () => {
-    expect(() => parseEDN('IP"192.0.2.42"')).toThrow(SyntaxError);
+    expect(() => parseCDN('IP"192.0.2.42"')).toThrow(SyntaxError);
   });
   test('dt"2013-03-21T20:04:00Z" → SyntaxError', () => {
-    expect(() => parseEDN('dt"2013-03-21T20:04:00Z"')).toThrow(SyntaxError);
+    expect(() => parseCDN('dt"2013-03-21T20:04:00Z"')).toThrow(SyntaxError);
   });
 
   // ── #1: invalid escape sequences ────────────────────────────────────────
   test('\\q is not a valid escape sequence → SyntaxError', () => {
-    expect(() => parseEDN('"\\q"')).toThrow(SyntaxError);
+    expect(() => parseCDN('"\\q"')).toThrow(SyntaxError);
   });
   test('\\/ is valid in double-quoted strings', () => {
-    expect((parseEDN('"\\/url"') as CborTextString).value).toBe('/url');
+    expect((parseCDN('"\\/url"') as CborTextString).value).toBe('/url');
   });
   test('\\/ is valid in single-quoted strings (byte string)', () => {
-    const v = parseEDN("'\\/url'") as CborByteString;
+    const v = parseCDN("'\\/url'") as CborByteString;
     expect(v).toBeInstanceOf(CborByteString);
     expect(new TextDecoder().decode(v.value)).toBe('/url');
   });
   test('\\\\ (backslash) is valid in both quote styles', () => {
-    expect((parseEDN('"a\\\\b"') as CborTextString).value).toBe('a\\b');
+    expect((parseCDN('"a\\\\b"') as CborTextString).value).toBe('a\\b');
   });
 
   // ── #2: unescaped C0 control characters ─────────────────────────────────
   test('unescaped NUL (U+0000) in string → SyntaxError', () => {
-    expect(() => parseEDN('"a\x00b"')).toThrow(SyntaxError);
+    expect(() => parseCDN('"a\x00b"')).toThrow(SyntaxError);
   });
   test('unescaped TAB (U+0009) in string → SyntaxError', () => {
-    expect(() => parseEDN('"a\x09b"')).toThrow(SyntaxError);
+    expect(() => parseCDN('"a\x09b"')).toThrow(SyntaxError);
   });
   test('unescaped DEL (U+007F) in string → SyntaxError', () => {
-    expect(() => parseEDN('"a\x7fb"')).toThrow(SyntaxError);
+    expect(() => parseCDN('"a\x7fb"')).toThrow(SyntaxError);
   });
   test('literal LF inside string is allowed', () => {
     // LF is explicitly permitted per spec
-    expect((parseEDN('"a\nb"') as CborTextString).value).toBe('a\nb');
+    expect((parseCDN('"a\nb"') as CborTextString).value).toBe('a\nb');
   });
 
   // ── #3: \\u printable ASCII in single-quoted strings ────────────────────
   test("\\u0041 ('A') in single-quoted string → SyntaxError", () => {
-    expect(() => parseEDN("'\\u0041'")).toThrow(SyntaxError);
+    expect(() => parseCDN("'\\u0041'")).toThrow(SyntaxError);
   });
   test('\\u0020 (space) in single-quoted string → SyntaxError', () => {
-    expect(() => parseEDN("'\\u0020'")).toThrow(SyntaxError);
+    expect(() => parseCDN("'\\u0020'")).toThrow(SyntaxError);
   });
   test("\\u007E ('~') in single-quoted string → SyntaxError", () => {
-    expect(() => parseEDN("'\\u007e'")).toThrow(SyntaxError);
+    expect(() => parseCDN("'\\u007e'")).toThrow(SyntaxError);
   });
   test("\\u00fc ('ü') in single-quoted string is allowed (non-printable-ASCII)", () => {
     // U+00FC is not in U+0020–U+007E, so it is valid
-    const n = parseEDN("'\\u00fc'") as CborByteString;
+    const n = parseCDN("'\\u00fc'") as CborByteString;
     expect(n).toBeInstanceOf(CborByteString);
     expect(n.value).toEqual(new TextEncoder().encode('ü'));
   });
   test('\\u0041 in double-quoted string is allowed', () => {
-    expect((parseEDN('"\\u0041"') as CborTextString).value).toBe('A');
+    expect((parseCDN('"\\u0041"') as CborTextString).value).toBe('A');
   });
 });
 
 // ─── Encoding indicators ──────────────────────────────────────────────────────
 
-describe('parseEDN — encoding indicators on integers', () => {
+describe('parseCDN — encoding indicators on integers', () => {
   test('1_0 → CborUint(1n, encodingWidth=0)', () => {
-    const n = parseEDN('1_0') as CborUint;
+    const n = parseCDN('1_0') as CborUint;
     expect(n).toBeInstanceOf(CborUint);
     expect(n.value).toBe(1n);
     expect(n.encodingWidth).toBe(0);
   });
   test('1_1 → CborUint(1n, encodingWidth=1) — NOT a float', () => {
-    const n = parseEDN('1_1') as CborUint;
+    const n = parseCDN('1_1') as CborUint;
     expect(n).toBeInstanceOf(CborUint);
     expect(n.value).toBe(1n);
     expect(n.encodingWidth).toBe(1);
   });
   test('1_2 → CborUint(1n, encodingWidth=2)', () => {
-    const n = parseEDN('1_2') as CborUint;
+    const n = parseCDN('1_2') as CborUint;
     expect(n).toBeInstanceOf(CborUint);
     expect(n.encodingWidth).toBe(2);
   });
   test('1_3 → CborUint(1n, encodingWidth=3)', () => {
-    const n = parseEDN('1_3') as CborUint;
+    const n = parseCDN('1_3') as CborUint;
     expect(n).toBeInstanceOf(CborUint);
     expect(n.encodingWidth).toBe(3);
   });
   test('-1_1 → CborNint(-1n, encodingWidth=1)', () => {
-    const n = parseEDN('-1_1') as CborNint;
+    const n = parseCDN('-1_1') as CborNint;
     expect(n).toBeInstanceOf(CborNint);
     expect(n.value).toBe(-1n);
     expect(n.encodingWidth).toBe(1);
   });
   test('0_0 → CborUint(0n, encodingWidth=0)', () => {
-    const n = parseEDN('0_0') as CborUint;
+    const n = parseCDN('0_0') as CborUint;
     expect(n).toBeInstanceOf(CborUint);
     expect(n.value).toBe(0n);
     expect(n.encodingWidth).toBe(0);
   });
   test('0xff_1 → CborUint(255n, encodingWidth=1)', () => {
-    const n = parseEDN('0xff_1') as CborUint;
+    const n = parseCDN('0xff_1') as CborUint;
     expect(n).toBeInstanceOf(CborUint);
     expect(n.value).toBe(255n);
     expect(n.encodingWidth).toBe(1);
   });
 });
 
-describe('parseEDN — encoding indicators on tags', () => {
+describe('parseCDN — encoding indicators on tags', () => {
   test('5_1(42) → CborTag(5n, CborUint(42n), encodingWidth=1)', () => {
-    const n = parseEDN('5_1(42)') as CborTag;
+    const n = parseCDN('5_1(42)') as CborTag;
     expect(n).toBeInstanceOf(CborTag);
     expect(n.tag).toBe(5n);
     expect(n.encodingWidth).toBe(1);
@@ -1010,45 +1010,45 @@ describe('parseEDN — encoding indicators on tags', () => {
   });
 });
 
-describe('parseEDN — encoding indicators on strings', () => {
+describe('parseCDN — encoding indicators on strings', () => {
   test('"A"_1 → CborTextString("A", encodingWidth=1)', () => {
-    const n = parseEDN('"A"_1') as CborTextString;
+    const n = parseCDN('"A"_1') as CborTextString;
     expect(n).toBeInstanceOf(CborTextString);
     expect(n.value).toBe('A');
     expect(n.encodingWidth).toBe(1);
   });
   test("h'ff'_1 → CborByteString([0xff], encodingWidth=1)", () => {
-    const n = parseEDN("h'ff'_1") as CborByteString;
+    const n = parseCDN("h'ff'_1") as CborByteString;
     expect(n).toBeInstanceOf(CborByteString);
     expect(n.value).toEqual(new Uint8Array([0xff]));
     expect(n.encodingWidth).toBe(1);
   });
   test('"A" + "B"_1 → CborTextString("AB", encodingWidth=1)', () => {
-    const n = parseEDN('"A" + "B"_1') as CborTextString;
+    const n = parseCDN('"A" + "B"_1') as CborTextString;
     expect(n).toBeInstanceOf(CborTextString);
     expect(n.value).toBe('AB');
     expect(n.encodingWidth).toBe(1);
   });
 });
 
-describe('parseEDN — encoding indicators on arrays', () => {
+describe('parseCDN — encoding indicators on arrays', () => {
   test('[_0 1, 2] → CborArray, encodingWidth=0', () => {
-    const n = parseEDN('[_0 1, 2]') as CborArray;
+    const n = parseCDN('[_0 1, 2]') as CborArray;
     expect(n).toBeInstanceOf(CborArray);
     expect(n.indefiniteLength).toBe(false);
     expect(n.encodingWidth).toBe(0);
     expect(n.items).toHaveLength(2);
   });
   test('[_1 ] → empty CborArray, encodingWidth=1', () => {
-    const n = parseEDN('[_1 ]') as CborArray;
+    const n = parseCDN('[_1 ]') as CborArray;
     expect(n.encodingWidth).toBe(1);
     expect(n.items).toHaveLength(0);
   });
 });
 
-describe('parseEDN — encoding indicators on maps', () => {
+describe('parseCDN — encoding indicators on maps', () => {
   test('{_1 "a": 1} → CborMap, encodingWidth=1', () => {
-    const n = parseEDN('{_1 "a": 1}') as CborMap;
+    const n = parseCDN('{_1 "a": 1}') as CborMap;
     expect(n).toBeInstanceOf(CborMap);
     expect(n.indefiniteLength).toBe(false);
     expect(n.encodingWidth).toBe(1);
@@ -1056,32 +1056,32 @@ describe('parseEDN — encoding indicators on maps', () => {
   });
 });
 
-describe('toEDN — encoding indicators', () => {
+describe('toCDN — encoding indicators', () => {
   test('CborUint(1n, {encodingWidth:0}) → "1_0"', () => {
-    expect(toEDN(new CborUint(1n, { encodingWidth: 0 }))).toBe('1_0');
+    expect(toCDN(new CborUint(1n, { encodingWidth: 0 }))).toBe('1_0');
   });
   test('CborUint(1n, {encodingWidth:1}) → "1_1"', () => {
-    expect(toEDN(new CborUint(1n, { encodingWidth: 1 }))).toBe('1_1');
+    expect(toCDN(new CborUint(1n, { encodingWidth: 1 }))).toBe('1_1');
   });
   test('CborNint(-1n, {encodingWidth:1}) → "-1_1"', () => {
-    expect(toEDN(new CborNint(-1n, { encodingWidth: 1 }))).toBe('-1_1');
+    expect(toCDN(new CborNint(-1n, { encodingWidth: 1 }))).toBe('-1_1');
   });
   test('CborTag(1n, ..., {encodingWidth:1}) → "1_1(...)"', () => {
     expect(
-      toEDN(new CborTag(1n, new CborUint(42n), { encodingWidth: 1 }))
+      toCDN(new CborTag(1n, new CborUint(42n), { encodingWidth: 1 }))
     ).toBe('1_1(42)');
   });
   test('CborTextString("A", {encodingWidth:1}) → \'"A"_1\'', () => {
-    expect(toEDN(new CborTextString('A', { encodingWidth: 1 }))).toBe('"A"_1');
+    expect(toCDN(new CborTextString('A', { encodingWidth: 1 }))).toBe('"A"_1');
   });
   test('CborByteString([0xff], {encodingWidth:1}) → "h\'ff\'_1"', () => {
     expect(
-      toEDN(new CborByteString(new Uint8Array([0xff]), { encodingWidth: 1 }))
+      toCDN(new CborByteString(new Uint8Array([0xff]), { encodingWidth: 1 }))
     ).toBe("h'ff'_1");
   });
   test('CborArray with encodingWidth=0 → "[_0 1, 2]"', () => {
     expect(
-      toEDN(
+      toCDN(
         new CborArray([new CborUint(1n), new CborUint(2n)], {
           encodingWidth: 0,
         })
@@ -1090,7 +1090,7 @@ describe('toEDN — encoding indicators', () => {
   });
   test('CborMap with encodingWidth=1 → \'{_1 "a": 1}\'', () => {
     expect(
-      toEDN(
+      toCDN(
         new CborMap([[new CborTextString('a'), new CborUint(1n)]], {
           encodingWidth: 1,
         })
@@ -1101,55 +1101,55 @@ describe('toEDN — encoding indicators', () => {
 
 // ─── encodingWidth value-overflow validation ──────────────────────────────────
 
-describe('parseEDN — _i encoding indicator (immediate / inline encoding)', () => {
+describe('parseCDN — _i encoding indicator (immediate / inline encoding)', () => {
   test('5_i → CborUint(5n, encodingWidth="i")', () => {
-    const n = parseEDN('5_i') as CborUint;
+    const n = parseCDN('5_i') as CborUint;
     expect(n).toBeInstanceOf(CborUint);
     expect(n.value).toBe(5n);
     expect(n.encodingWidth).toBe('i');
   });
   test('23_i → CborUint(23n, encodingWidth="i") — boundary', () => {
-    const n = parseEDN('23_i') as CborUint;
+    const n = parseCDN('23_i') as CborUint;
     expect(n.value).toBe(23n);
     expect(n.encodingWidth).toBe('i');
   });
   test('-1_i → CborNint(-1n, encodingWidth="i")', () => {
-    const n = parseEDN('-1_i') as CborNint;
+    const n = parseCDN('-1_i') as CborNint;
     expect(n).toBeInstanceOf(CborNint);
     expect(n.value).toBe(-1n);
     expect(n.encodingWidth).toBe('i');
   });
   test('[_i 1, 2] → CborArray with encodingWidth="i"', () => {
-    const a = parseEDN('[_i 1, 2]') as CborArray;
+    const a = parseCDN('[_i 1, 2]') as CborArray;
     expect(a).toBeInstanceOf(CborArray);
     expect(a.indefiniteLength).toBe(false);
     expect(a.encodingWidth).toBe('i');
     expect(a.items).toHaveLength(2);
   });
   test('{_i "a": 1} → CborMap with encodingWidth="i"', () => {
-    const m = parseEDN('{_i "a": 1}') as CborMap;
+    const m = parseCDN('{_i "a": 1}') as CborMap;
     expect(m).toBeInstanceOf(CborMap);
     expect(m.indefiniteLength).toBe(false);
     expect(m.encodingWidth).toBe('i');
   });
   test('5_i(42) → CborTag with encodingWidth="i"', () => {
-    const t = parseEDN('5_i(42)') as CborTag;
+    const t = parseCDN('5_i(42)') as CborTag;
     expect(t).toBeInstanceOf(CborTag);
     expect(t.tag).toBe(5n);
     expect(t.encodingWidth).toBe('i');
   });
   test('1.5_i → SyntaxError (float cannot use _i)', () => {
-    expect(() => parseEDN('1.5_i')).toThrow(SyntaxError);
+    expect(() => parseCDN('1.5_i')).toThrow(SyntaxError);
   });
   test('1.5_0 → SyntaxError (float cannot use _0)', () => {
-    expect(() => parseEDN('1.5_0')).toThrow(SyntaxError);
+    expect(() => parseCDN('1.5_0')).toThrow(SyntaxError);
   });
   test('0.0_0 → SyntaxError (float cannot use _0)', () => {
-    expect(() => parseEDN('0.0_0')).toThrow(SyntaxError);
+    expect(() => parseCDN('0.0_0')).toThrow(SyntaxError);
   });
 });
 
-describe('toCBOR / toEDN — _i encoding indicator round-trip', () => {
+describe('toCBOR / toCDN — _i encoding indicator round-trip', () => {
   test('CborUint(5n, _i).toCBOR() → 0x05 (inline)', () => {
     expect(toHex(new CborUint(5n, { encodingWidth: 'i' }).toCBOR())).toBe('05');
   });
@@ -1163,11 +1163,11 @@ describe('toCBOR / toEDN — _i encoding indicator round-trip', () => {
       RangeError
     );
   });
-  test('CborUint(5n, _i).toEDN() → "5_i"', () => {
-    expect(toEDN(new CborUint(5n, { encodingWidth: 'i' }))).toBe('5_i');
+  test('CborUint(5n, _i).toCDN() → "5_i"', () => {
+    expect(toCDN(new CborUint(5n, { encodingWidth: 'i' }))).toBe('5_i');
   });
-  test('CborNint(-1n, _i).toEDN() → "-1_i"', () => {
-    expect(toEDN(new CborNint(-1n, { encodingWidth: 'i' }))).toBe('-1_i');
+  test('CborNint(-1n, _i).toCDN() → "-1_i"', () => {
+    expect(toCDN(new CborNint(-1n, { encodingWidth: 'i' }))).toBe('-1_i');
   });
   test('CborArray(2 items, _i).toCBOR() → 0x82 ... (inline length)', () => {
     const a = new CborArray([new CborUint(1n), new CborUint(2n)], {
@@ -1181,11 +1181,11 @@ describe('toCBOR / toEDN — _i encoding indicator round-trip', () => {
       RangeError
     );
   });
-  test('parse(toEDN(ast)) round-trip preserves _i on array', () => {
+  test('parse(toCDN(ast)) round-trip preserves _i on array', () => {
     const ast = new CborArray([new CborUint(1n), new CborUint(2n)], {
       encodingWidth: 'i',
     });
-    const reparsed = parseEDN(toEDN(ast)) as CborArray;
+    const reparsed = parseCDN(toCDN(ast)) as CborArray;
     expect(reparsed.encodingWidth).toBe('i');
     expect(toHex(reparsed.toCBOR())).toBe(toHex(ast.toCBOR()));
   });
@@ -1324,10 +1324,10 @@ describe('toCBOR — encoding indicator forces non-shortest header', () => {
 
 // ─── Round-trip: parse(serialize(ast)).toCBOR() === ast.toCBOR() ──────────────
 
-describe('round-trip: parse(toEDN(node)).toCBOR() === node.toCBOR()', () => {
-  function rt(node: ReturnType<typeof parseEDN>): void {
-    const edn = toEDN(node);
-    const reparsed = parseEDN(edn);
+describe('round-trip: parse(toCDN(node)).toCBOR() === node.toCBOR()', () => {
+  function rt(node: ReturnType<typeof parseCDN>): void {
+    const edn = toCDN(node);
+    const reparsed = parseCDN(edn);
     expect(toHex(reparsed.toCBOR())).toBe(toHex(node.toCBOR()));
   }
 
@@ -1430,86 +1430,86 @@ describe('round-trip: parse(toEDN(node)).toCBOR() === node.toCBOR()', () => {
       new CborUint(2n),
       new CborUint(3n),
     ]);
-    const edn = toEDN(node, { indent: 2 });
-    const reparsed = parseEDN(edn);
+    const edn = toCDN(node, { indent: 2 });
+    const reparsed = parseCDN(edn);
     expect(toHex(reparsed.toCBOR())).toBe(toHex(node.toCBOR()));
   });
 });
 
 // ─── Comments ─────────────────────────────────────────────────────────────────
 
-describe('parseEDN — CBOR-EDN comments (always enabled)', () => {
+describe('parseCDN — CDN comments (always enabled)', () => {
   test('# line comment before value', () => {
-    const n = parseEDN('# comment\n42') as CborUint;
+    const n = parseCDN('# comment\n42') as CborUint;
     expect(n.value).toBe(42n);
   });
   test('# line comment after value is ignored', () => {
-    const n = parseEDN('42 # comment') as CborUint;
+    const n = parseCDN('42 # comment') as CborUint;
     expect(n.value).toBe(42n);
   });
   test('# comment inside array', () => {
-    const a = parseEDN('[1, # one\n2]') as CborArray;
+    const a = parseCDN('[1, # one\n2]') as CborArray;
     expect(a.items).toHaveLength(2);
   });
   test('/ block comment / before value', () => {
-    const n = parseEDN('/this is a comment/42') as CborUint;
+    const n = parseCDN('/this is a comment/42') as CborUint;
     expect(n.value).toBe(42n);
   });
   test('/ block comment / between array items', () => {
-    const a = parseEDN('[1, /comment/ 2]') as CborArray;
+    const a = parseCDN('[1, /comment/ 2]') as CborArray;
     expect(a.items).toHaveLength(2);
   });
   test('/ block comment / spanning lines', () => {
-    const n = parseEDN('/line1\nline2/42') as CborUint;
+    const n = parseCDN('/line1\nline2/42') as CborUint;
     expect(n.value).toBe(42n);
   });
   test('unterminated / comment throws SyntaxError', () => {
-    expect(() => parseEDN('/unterminated 42')).toThrow(SyntaxError);
+    expect(() => parseCDN('/unterminated 42')).toThrow(SyntaxError);
   });
   test('multiple comments and whitespace', () => {
-    const n = parseEDN('# first\n/second/ 99 # trailing') as CborUint;
+    const n = parseCDN('# first\n/second/ 99 # trailing') as CborUint;
     expect(n.value).toBe(99n);
   });
 });
 
-describe('parseEDN — comments (§2.2)', () => {
+describe('parseCDN — comments (§2.2)', () => {
   test('// line comment before value', () => {
-    const n = parseEDN('// comment\n42') as CborUint;
+    const n = parseCDN('// comment\n42') as CborUint;
     expect(n.value).toBe(42n);
   });
   test('// line comment after value', () => {
-    const n = parseEDN('42 // comment') as CborUint;
+    const n = parseCDN('42 // comment') as CborUint;
     expect(n.value).toBe(42n);
   });
   test('/* block comment */ before value', () => {
-    const n = parseEDN('/* comment */42') as CborUint;
+    const n = parseCDN('/* comment */42') as CborUint;
     expect(n.value).toBe(42n);
   });
   test('/* block comment */ spanning lines', () => {
-    const n = parseEDN('/* line1\nline2 */42') as CborUint;
+    const n = parseCDN('/* line1\nline2 */42') as CborUint;
     expect(n.value).toBe(42n);
   });
   test('/* block comment */ inside array', () => {
-    const a = parseEDN('[1, /* comment */ 2]') as CborArray;
+    const a = parseCDN('[1, /* comment */ 2]') as CborArray;
     expect(a.items).toHaveLength(2);
   });
   test('/* block comment */ with slash in content', () => {
-    const n = parseEDN('/* HMAC 256/64 */42') as CborUint;
+    const n = parseCDN('/* HMAC 256/64 */42') as CborUint;
     expect(n.value).toBe(42n);
   });
   test('unterminated /* comment throws SyntaxError', () => {
-    expect(() => parseEDN('/* unterminated 42')).toThrow(SyntaxError);
+    expect(() => parseCDN('/* unterminated 42')).toThrow(SyntaxError);
   });
   test('# comment still works', () => {
-    const n = parseEDN('# edn comment\n42') as CborUint;
+    const n = parseCDN('# edn comment\n42') as CborUint;
     expect(n.value).toBe(42n);
   });
   test('/ ... / block comment still works', () => {
-    const n = parseEDN('/edn block/42') as CborUint;
+    const n = parseCDN('/edn block/42') as CborUint;
     expect(n.value).toBe(42n);
   });
   test('mixed: // and /.../ and # in same input', () => {
-    const a = parseEDN(
+    const a = parseCDN(
       `[
         // line comment
         1,
@@ -1523,257 +1523,257 @@ describe('parseEDN — comments (§2.2)', () => {
 
   // Comments inside h'...' byte string literals
   test("h'...' with // comment", () => {
-    const b = parseEDN("h'dead // skip\nbeef'") as CborByteString;
+    const b = parseCDN("h'dead // skip\nbeef'") as CborByteString;
     expect(b.value).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
   });
   test("h'...' with /* */ comment containing slash", () => {
-    const b = parseEDN("h'de /* algo 1/2 */ ad beef'") as CborByteString;
+    const b = parseCDN("h'de /* algo 1/2 */ ad beef'") as CborByteString;
     expect(b.value).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
   });
 
   // b64'...' supports only # comments (/ is a valid B64DIGIT so // is ambiguous)
   test("b64'...' with # comment", () => {
-    const b = parseEDN("b64'3q2+7w== # deadbeef in base64'") as CborByteString;
+    const b = parseCDN("b64'3q2+7w== # deadbeef in base64'") as CborByteString;
     expect(b.value).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
   });
   test("b64'//8=' parses // as base64 chars, not a comment", () => {
     // 0xFF 0xFF encodes to //8= in standard base64
-    const b = parseEDN("b64'//8='") as CborByteString;
+    const b = parseCDN("b64'//8='") as CborByteString;
     expect(b.value).toEqual(new Uint8Array([0xff, 0xff]));
   });
 
   // Comments inside b32'...' byte string literals (AAAAAAAA = 5 zero bytes)
   test("b32'...' with // comment", () => {
-    const b = parseEDN("b32'AA // skip\nAAAAAA'") as CborByteString;
+    const b = parseCDN("b32'AA // skip\nAAAAAA'") as CborByteString;
     expect(b.value).toEqual(new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00]));
   });
   test("b32'...' with /* */ comment", () => {
-    const b = parseEDN("b32'AAAA /* skip */ AAAA'") as CborByteString;
+    const b = parseCDN("b32'AAAA /* skip */ AAAA'") as CborByteString;
     expect(b.value).toEqual(new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00]));
   });
 });
 
-describe('parseEDN — embedded CBOR sequence (§2.5.6)', () => {
+describe('parseCDN — embedded CBOR sequence (§2.5.6)', () => {
   test('<<>> — empty sequence', () => {
-    const n = parseEDN('<<>>') as CborEmbeddedCBOR;
+    const n = parseCDN('<<>>') as CborEmbeddedCBOR;
     expect(n).toBeInstanceOf(CborEmbeddedCBOR);
     expect(n.items).toHaveLength(0);
     expect(n.toCBOR()).toEqual(new Uint8Array([0x40])); // h''
   });
 
   test('<<1>> — single item', () => {
-    const n = parseEDN('<<1>>') as CborEmbeddedCBOR;
+    const n = parseCDN('<<1>>') as CborEmbeddedCBOR;
     expect(n).toBeInstanceOf(CborEmbeddedCBOR);
     expect(n.toCBOR()).toEqual(new Uint8Array([0x41, 0x01])); // h'01'
   });
 
   test('<<1, 2>>', () => {
-    const n = parseEDN('<<1, 2>>') as CborEmbeddedCBOR;
+    const n = parseCDN('<<1, 2>>') as CborEmbeddedCBOR;
     expect(n.toCBOR()).toEqual(new Uint8Array([0x42, 0x01, 0x02])); // h'0102'
   });
 
   test('<<"hello", null>>', () => {
     // "hello" = 65 68656c6c6f, null/f6 — byte string wrapping both
-    const n = parseEDN('<<"hello", null>>') as CborEmbeddedCBOR;
+    const n = parseCDN('<<"hello", null>>') as CborEmbeddedCBOR;
     expect(n.toCBOR()).toEqual(
       new Uint8Array([0x47, 0x65, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0xf6])
     );
   });
 
   test('toJS() returns Uint8Array of content bytes', () => {
-    const n = parseEDN('<<1, 2>>') as CborEmbeddedCBOR;
+    const n = parseCDN('<<1, 2>>') as CborEmbeddedCBOR;
     expect(n.toJS()).toEqual(new Uint8Array([0x01, 0x02]));
   });
 
-  test('toEDN() round-trips as <<...>>', () => {
-    const n = parseEDN('<<1, 2>>') as CborEmbeddedCBOR;
-    expect(n.toEDN()).toBe('<<1,2>>');
+  test('toCDN() round-trips as <<...>>', () => {
+    const n = parseCDN('<<1, 2>>') as CborEmbeddedCBOR;
+    expect(n.toCDN()).toBe('<<1,2>>');
   });
 
-  test('toEDN() empty', () => {
-    expect(parseEDN('<<>>').toEDN()).toBe('<<>>');
+  test('toCDN() empty', () => {
+    expect(parseCDN('<<>>').toCDN()).toBe('<<>>');
   });
 
   test('nested: <<1, <<2>>>>', () => {
-    const n = parseEDN('<<1, <<2>>>>') as CborEmbeddedCBOR;
+    const n = parseCDN('<<1, <<2>>>>') as CborEmbeddedCBOR;
     expect(n).toBeInstanceOf(CborEmbeddedCBOR);
     expect(n.items[1]).toBeInstanceOf(CborEmbeddedCBOR);
   });
 
   test('trailing comma allowed', () => {
-    const n = parseEDN('<<1, 2,>>') as CborEmbeddedCBOR;
+    const n = parseCDN('<<1, 2,>>') as CborEmbeddedCBOR;
     expect(n.items).toHaveLength(2);
   });
 });
 
-describe('parseEDN — base32 / base32hex byte strings', () => {
+describe('parseCDN — base32 / base32hex byte strings', () => {
   // b32'...' — RFC 4648 §6 alphabet: A-Z 2-7
   test("b32'AEBAGBA' decodes correctly", () => {
     // AEBAGBA = [0x01, 0x02, 0x03, 0x04]
-    const n = parseEDN("b32'AEBAGBA'") as CborByteString;
+    const n = parseCDN("b32'AEBAGBA'") as CborByteString;
     expect(n).toBeInstanceOf(CborByteString);
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02, 0x03, 0x04]));
     expect(n.ednEncoding).toBe('base32');
   });
-  test('b32 round-trips via toEDN', () => {
-    const n = parseEDN("b32'AEBAGBA'");
-    expect(n.toEDN()).toBe("b32'AEBAGBA'");
+  test('b32 round-trips via toCDN', () => {
+    const n = parseCDN("b32'AEBAGBA'");
+    expect(n.toCDN()).toBe("b32'AEBAGBA'");
   });
   test("b32'GE======' (padded) is accepted", () => {
     // GE====== = [0x31]
-    const n = parseEDN("b32'GE======'") as CborByteString;
+    const n = parseCDN("b32'GE======'") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x31]));
   });
   test('b32 accepts lowercase', () => {
-    const n = parseEDN("b32'aebagba'") as CborByteString;
+    const n = parseCDN("b32'aebagba'") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02, 0x03, 0x04]));
   });
   test('b32 accepts whitespace and # comment', () => {
-    const n = parseEDN("b32'AEBA # first two bytes\nGBA'") as CborByteString;
+    const n = parseCDN("b32'AEBA # first two bytes\nGBA'") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02, 0x03, 0x04]));
   });
   test('b32 accepts /.../ block comment', () => {
-    const n = parseEDN("b32'AEBA /mid/ GBA'") as CborByteString;
+    const n = parseCDN("b32'AEBA /mid/ GBA'") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02, 0x03, 0x04]));
   });
   test('b32 invalid character throws SyntaxError', () => {
-    expect(() => parseEDN("b32'1!'")).toThrow(SyntaxError);
+    expect(() => parseCDN("b32'1!'")).toThrow(SyntaxError);
   });
   // RFC 4648: invalid unpadded lengths (mod 8 ∈ {1, 3, 6})
   test("b32'A' (length 1 mod 8) throws SyntaxError", () => {
-    expect(() => parseEDN("b32'A'")).toThrow(SyntaxError);
+    expect(() => parseCDN("b32'A'")).toThrow(SyntaxError);
   });
   test("b32'AAA' (length 3 mod 8) throws SyntaxError", () => {
-    expect(() => parseEDN("b32'AAA'")).toThrow(SyntaxError);
+    expect(() => parseCDN("b32'AAA'")).toThrow(SyntaxError);
   });
   test("b32'AAAAAA' (length 6 mod 8) throws SyntaxError", () => {
-    expect(() => parseEDN("b32'AAAAAA'")).toThrow(SyntaxError);
+    expect(() => parseCDN("b32'AAAAAA'")).toThrow(SyntaxError);
   });
   // RFC 4648 §3.5: non-zero trailing bits must be rejected
   test("b32'AB' non-zero trailing bits throws SyntaxError", () => {
     // A=0, B=1 → 00000 00001 → 1 byte (8 bits) + 2 trailing bits = 01 (non-zero)
-    expect(() => parseEDN("b32'AB'")).toThrow(SyntaxError);
+    expect(() => parseCDN("b32'AB'")).toThrow(SyntaxError);
   });
   test("b32'AA' zero trailing bits is valid (0x00)", () => {
     // A=0, A=0 → 00000 00000 → 1 byte = 0x00, trailing 2 bits = 00 (zero)
-    const n = parseEDN("b32'AA'") as CborByteString;
+    const n = parseCDN("b32'AA'") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x00]));
   });
 
   // h32'...' — RFC 4648 §7 alphabet: 0-9 A-V
   test("h32'04106' decodes correctly", () => {
     // 04106 in base32hex = [0x01, 0x02, 0x03]
-    const n = parseEDN("h32'04106'") as CborByteString;
+    const n = parseCDN("h32'04106'") as CborByteString;
     expect(n).toBeInstanceOf(CborByteString);
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02, 0x03]));
     expect(n.ednEncoding).toBe('base32hex');
   });
-  test('h32 round-trips via toEDN', () => {
-    const n = parseEDN("h32'04106'");
-    expect(n.toEDN()).toBe("h32'04106'");
+  test('h32 round-trips via toCDN', () => {
+    const n = parseCDN("h32'04106'");
+    expect(n.toCDN()).toBe("h32'04106'");
   });
   test('h32 invalid character throws SyntaxError', () => {
-    expect(() => parseEDN("h32'ZZ'")).toThrow(SyntaxError);
+    expect(() => parseCDN("h32'ZZ'")).toThrow(SyntaxError);
   });
 
   // bstrEncoding option
   test('serializeBytes base32', () => {
     const bs = new CborByteString(new Uint8Array([0x01, 0x02, 0x03]));
-    expect(bs.toEDN({ bstrEncoding: 'base32' })).toBe("b32'AEBAG'");
+    expect(bs.toCDN({ bstrEncoding: 'base32' })).toBe("b32'AEBAG'");
   });
   test('serializeBytes base32hex', () => {
     const bs = new CborByteString(new Uint8Array([0x01, 0x02, 0x03]));
-    expect(bs.toEDN({ bstrEncoding: 'base32hex' })).toBe("h32'04106'");
+    expect(bs.toCDN({ bstrEncoding: 'base32hex' })).toBe("h32'04106'");
   });
 });
 
 // ─── app-rstring: prefix + backtick raw string (§2.5.3 / app-rstring) ──────────
 
-describe('parseEDN — app-rstring (prefix + backtick)', () => {
+describe('parseCDN — app-rstring (prefix + backtick)', () => {
   test('h`0102` → CborByteString [0x01, 0x02]', () => {
-    const n = parseEDN('h`0102`') as CborByteString;
+    const n = parseCDN('h`0102`') as CborByteString;
     expect(n).toBeInstanceOf(CborByteString);
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02]));
   });
 
   test('h`01 02 03` with whitespace', () => {
-    const n = parseEDN('h`01 02 03`') as CborByteString;
+    const n = parseCDN('h`01 02 03`') as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02, 0x03]));
   });
 
   test('b64`AQID` → CborByteString [0x01, 0x02, 0x03]', () => {
-    const n = parseEDN('b64`AQID`') as CborByteString;
+    const n = parseCDN('b64`AQID`') as CborByteString;
     expect(n).toBeInstanceOf(CborByteString);
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02, 0x03]));
   });
 
   test('IP`192.0.2.42` → app-string extension picks it up', () => {
-    const n = parseEDN('IP`192.0.2.42`');
+    const n = parseCDN('IP`192.0.2.42`');
     // IP extension handles this — same result as IP'192.0.2.42'
-    const expected = parseEDN("IP'192.0.2.42'");
-    expect(n.toEDN()).toBe(expected.toEDN());
+    const expected = parseCDN("IP'192.0.2.42'");
+    expect(n.toCDN()).toBe(expected.toCDN());
   });
 
   test('dt`2013-03-21T20:04:00Z` → same as dt app-string', () => {
-    const n = parseEDN('dt`2013-03-21T20:04:00Z`');
-    const expected = parseEDN("dt'2013-03-21T20:04:00Z'");
-    expect(n.toEDN()).toBe(expected.toEDN());
+    const n = parseCDN('dt`2013-03-21T20:04:00Z`');
+    const expected = parseCDN("dt'2013-03-21T20:04:00Z'");
+    expect(n.toCDN()).toBe(expected.toCDN());
   });
 
   test('multi-backtick delimiter for app-rstring', () => {
     // h``0102`` - double backtick delimiter
-    const n = parseEDN('h``0102``') as CborByteString;
+    const n = parseCDN('h``0102``') as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02]));
   });
 
   // ── §5.3.3: h`` with block comments and ellipsis ──────────────────────────
 
   test('h`` with / block comment / (§5.3.3)', () => {
-    const n = parseEDN('h`01 /first byte/ 02`') as CborByteString;
+    const n = parseCDN('h`01 /first byte/ 02`') as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02]));
   });
 
   test('h`` with multi-word block comment', () => {
-    const n = parseEDN('h`dead /skip this/ beef`') as CborByteString;
+    const n = parseCDN('h`dead /skip this/ beef`') as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
   });
 
   test('h`` with # line comment (§5.3.3)', () => {
-    const n = parseEDN('h`01 # first byte\n02`') as CborByteString;
+    const n = parseCDN('h`01 # first byte\n02`') as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02]));
   });
 
   test('h`` with trailing # comment before closing delimiter (§5.3.3)', () => {
-    const n = parseEDN('h`\n  deadbeef\n  # the bytes\n`') as CborByteString;
+    const n = parseCDN('h`\n  deadbeef\n  # the bytes\n`') as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
   });
 
   test('h`` with ellipsis produces CborEllipsis (§5.3.3)', () => {
-    const n = parseEDN('h`01...ff`');
+    const n = parseCDN('h`01...ff`');
     expect(n).toBeInstanceOf(CborEllipsis);
   });
 
   test('h`` ellipsis with surrounding comments', () => {
-    const n = parseEDN('h`\n  01 /start/\n  ... # elided\n  ff\n`');
+    const n = parseCDN('h`\n  01 /start/\n  ... # elided\n  ff\n`');
     expect(n).toBeInstanceOf(CborEllipsis);
   });
 
   // ── §5.3.4: b64`` with # line comments ───────────────────────────────────
 
   test('b64`` with # line comment (§5.3.4)', () => {
-    const n = parseEDN('b64`AQID # first three\nBA==`') as CborByteString;
+    const n = parseCDN('b64`AQID # first three\nBA==`') as CborByteString;
     expect(n.value).toEqual(new Uint8Array([1, 2, 3, 4]));
   });
 
   test('b64`` with trailing # comment before closing delimiter', () => {
-    const n = parseEDN(
+    const n = parseCDN(
       'b64`\n  AQIDBA==\n  # these are the bytes [1,2,3,4]\n`'
     ) as CborByteString;
     expect(n.value).toEqual(new Uint8Array([1, 2, 3, 4]));
   });
 
   test('b64`` multiline with # comments between chunks', () => {
-    const n = parseEDN(
+    const n = parseCDN(
       'b64`\n  AQID # first three bytes\n  BA== # fourth byte\n`'
     ) as CborByteString;
     expect(n.value).toEqual(new Uint8Array([1, 2, 3, 4]));
@@ -1783,28 +1783,28 @@ describe('parseEDN — app-rstring (prefix + backtick)', () => {
 
   test("b32`` with / block comment / (same as b32'')", () => {
     // AEBA = [0x01, 0x02] in base32
-    const quoted = parseEDN("b32'AEBA'") as CborByteString;
-    const raw = parseEDN('b32`AEBA`') as CborByteString;
+    const quoted = parseCDN("b32'AEBA'") as CborByteString;
+    const raw = parseCDN('b32`AEBA`') as CborByteString;
     expect(raw.value).toEqual(quoted.value);
   });
 
   test('b32`` with / block comment / does not regress', () => {
-    const n = parseEDN('b32`AE /skip/ BA`') as CborByteString;
-    const expected = parseEDN("b32'AEBA'") as CborByteString;
+    const n = parseCDN('b32`AE /skip/ BA`') as CborByteString;
+    const expected = parseCDN("b32'AEBA'") as CborByteString;
     expect(n.value).toEqual(expected.value);
   });
 
   test('h32`` with # line comment', () => {
     // "00" in base32hex encodes a single zero byte
-    const n = parseEDN('h32`00 # comment\n`') as CborByteString;
+    const n = parseCDN('h32`00 # comment\n`') as CborByteString;
     expect(n).toBeInstanceOf(CborByteString);
     expect(n.value).toEqual(new Uint8Array([0x00]));
   });
 });
 
-describe('parseEDN — pluggable app-string extensions', () => {
+describe('parseCDN — pluggable app-string extensions', () => {
   test("user-defined extension: myext'hello' → CborTextString", () => {
-    const result = parseEDN("myext'hello'", {
+    const result = parseCDN("myext'hello'", {
       extensions: [
         {
           appStringPrefixes: ['myext'],
@@ -1817,7 +1817,7 @@ describe('parseEDN — pluggable app-string extensions', () => {
   });
 
   test('user extension overrides built-in dt', () => {
-    const result = parseEDN("dt'custom'", {
+    const result = parseCDN("dt'custom'", {
       extensions: [
         {
           appStringPrefixes: ['dt'],
@@ -1830,28 +1830,28 @@ describe('parseEDN — pluggable app-string extensions', () => {
   });
 
   test('unknown extension produces CPA999 stand-in by default', () => {
-    expect(parseEDN("unknown'hello'")).toBeInstanceOf(CborUnresolvedAppExt);
+    expect(parseCDN("unknown'hello'")).toBeInstanceOf(CborUnresolvedAppExt);
   });
 
-  test('CborUnresolvedAppExt.toEDN() escapes single quotes in content', () => {
+  test('CborUnresolvedAppExt.toCDN() escapes single quotes in content', () => {
     // foo`it's a test` → round-trips as foo'it\'s a test'
-    const n = parseEDN("foo`it's a test`");
-    expect(n.toEDN()).toBe("foo'it\\'s a test'");
+    const n = parseCDN("foo`it's a test`");
+    expect(n.toCDN()).toBe("foo'it\\'s a test'");
   });
 
-  test('CborUnresolvedAppExt.toEDN() escapes backslash in content', () => {
-    const n = parseEDN('foo`path\\to\\file`');
-    expect(n.toEDN()).toBe("foo'path\\\\to\\\\file'");
+  test('CborUnresolvedAppExt.toCDN() escapes backslash in content', () => {
+    const n = parseCDN('foo`path\\to\\file`');
+    expect(n.toCDN()).toBe("foo'path\\\\to\\\\file'");
   });
 
   test("unknown extension throws SyntaxError with unresolvedExtension: 'error'", () => {
     expect(() =>
-      parseEDN("unknown'hello'", { unresolvedExtension: 'error' })
+      parseCDN("unknown'hello'", { unresolvedExtension: 'error' })
     ).toThrow(SyntaxError);
   });
 
   test('user extension with <<...>> form via parseAppSequence', () => {
-    const result = parseEDN('myext<<42, "hello">>', {
+    const result = parseCDN('myext<<42, "hello">>', {
       extensions: [
         {
           appStringPrefixes: ['myext'],
@@ -1866,7 +1866,7 @@ describe('parseEDN — pluggable app-string extensions', () => {
 
   test('extension without parseAppSequence rejects <<...>> form', () => {
     expect(() =>
-      parseEDN('noSeq<<"hello">>', {
+      parseCDN('noSeq<<"hello">>', {
         extensions: [
           {
             appStringPrefixes: ['noSeq'],
@@ -1878,7 +1878,7 @@ describe('parseEDN — pluggable app-string extensions', () => {
   });
 
   test("hyphenated prefix: my-ext'hello'", () => {
-    const result = parseEDN("my-ext'hello'", {
+    const result = parseCDN("my-ext'hello'", {
       extensions: [
         {
           appStringPrefixes: ['my-ext'],
@@ -1891,7 +1891,7 @@ describe('parseEDN — pluggable app-string extensions', () => {
   });
 
   test("uppercase prefix: MY'hello'", () => {
-    const result = parseEDN("MY'hello'", {
+    const result = parseCDN("MY'hello'", {
       extensions: [
         {
           appStringPrefixes: ['MY'],
@@ -1904,10 +1904,10 @@ describe('parseEDN — pluggable app-string extensions', () => {
   });
 
   test("mixed-case prefix fOO'...' is rejected as unknown identifier", () => {
-    expect(() => parseEDN("fOO'hello'")).toThrow(SyntaxError);
+    expect(() => parseCDN("fOO'hello'")).toThrow(SyntaxError);
   });
 
   test("underscore prefix my_ext'...' is rejected as unknown identifier", () => {
-    expect(() => parseEDN("my_ext'hello'")).toThrow(SyntaxError);
+    expect(() => parseCDN("my_ext'hello'")).toThrow(SyntaxError);
   });
 });

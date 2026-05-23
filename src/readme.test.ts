@@ -25,27 +25,27 @@ describe('README examples', () => {
     expect(value).toEqual({ hello: 'world', n: 42 });
   });
 
-  test('CBOR bytes to CBOR-EDN', () => {
+  test('CBOR bytes to CDN', () => {
     const text = CBOR.fromCBOR(
       new Uint8Array([0x83, 0x01, 0x02, 0x03])
-    ).toEDN();
+    ).toCDN();
 
     expect(text).toBe('[1,2,3]');
   });
 
-  test('CBOR-EDN to CBOR bytes', () => {
-    const bytes = CBOR.fromEDN('[1, 2, 3]').toCBOR();
+  test('CDN to CBOR bytes', () => {
+    const bytes = CBOR.fromCDN('[1, 2, 3]').toCBOR();
 
     expect(bytes).toEqual(new Uint8Array([0x83, 0x01, 0x02, 0x03]));
   });
 
-  test('JavaScript to CBOR-EDN', () => {
+  test('JavaScript to CDN', () => {
     const text = CBOR.stringify({ a: 1, b: true, c: null });
 
     expect(text).toBe('{"a":1,"b":true,"c":null}');
   });
 
-  test('pretty CBOR-EDN', () => {
+  test('pretty CDN', () => {
     const text = CBOR.stringify({ items: [1, 2, 3], ok: true }, { indent: 2 });
 
     expect(text).toBe(
@@ -60,7 +60,7 @@ describe('README examples', () => {
     );
   });
 
-  test('CBOR-EDN to JavaScript', () => {
+  test('CDN to JavaScript', () => {
     const value = CBOR.parse("[1, h'deadbeef', true, null]");
 
     expect(value).toEqual([
@@ -71,7 +71,7 @@ describe('README examples', () => {
     ]);
   });
 
-  test('normalize CBOR-EDN', () => {
+  test('normalize CDN', () => {
     const text = CBOR.format('{ "b" : [ 1,2 ], "a" : true }', {
       indent: 2,
     });
@@ -102,15 +102,15 @@ describe('README examples', () => {
     );
   });
 
-  test('textStringFormat splits text strings containing CBOR-EDN', () => {
-    const text = CBOR.format('{"edn": "[1,2,3]"}', {
+  test('textStringFormat splits text strings containing CDN', () => {
+    const text = CBOR.format('{"cdn": "[1,2,3]"}', {
       indent: 2,
-      textStringFormat: ['cboredn'],
+      textStringFormat: ['cdn'],
     });
 
     expect(text).toBe(
       '{\n' +
-        '  "edn": "[" +\n' +
+        '  "cdn": "[" +\n' +
         '      "1," +\n' +
         '      "2," +\n' +
         '      "3" +\n' +
@@ -120,24 +120,24 @@ describe('README examples', () => {
   });
 
   test('AST item methods', () => {
-    const item = CBOR.fromEDN('{ "x": 1 }');
+    const item = CBOR.fromCDN('{ "x": 1 }');
 
     expect(item.toCBOR()).toBeInstanceOf(Uint8Array);
-    expect(item.toEDN()).toBe('{"x":1}');
+    expect(item.toCDN()).toBe('{"x":1}');
     expect(item.toJS()).toEqual({ x: 1 });
   });
 
   test('parse to AST, then serialize', () => {
-    const item = CBOR.fromEDN('[_ 1, 2, 3]');
+    const item = CBOR.fromCDN('[_ 1, 2, 3]');
 
-    expect(item.toEDN()).toBe('[_ 1,2,3]');
+    expect(item.toCDN()).toBe('[_ 1,2,3]');
     expect(item.toCBOR()).toBeInstanceOf(Uint8Array);
   });
 
-  test('decode to AST, then inspect as EDN', () => {
+  test('decode to AST, then inspect as CDN', () => {
     const item = CBOR.fromCBOR(new Uint8Array([0x83, 0x01, 0x02, 0x03]));
 
-    expect(item.toEDN()).toBe('[1,2,3]');
+    expect(item.toCDN()).toBe('[1,2,3]');
     expect(item.toJS()).toEqual([1, 2, 3]);
   });
 
@@ -261,7 +261,7 @@ describe('README examples', () => {
   });
 
   test('hex dumps can be produced', () => {
-    const item = CBOR.fromEDN('[_ 1, [2, 3]]');
+    const item = CBOR.fromCDN('[_ 1, [2, 3]]');
     const dump = item.toHexDump();
 
     expect(dump).toContain('9F        -- Start indefinite-length array');
@@ -275,6 +275,6 @@ describe('README examples', () => {
    03     -- 3
 `);
 
-    expect(item.toEDN()).toBe('[1,2,3]');
+    expect(item.toCDN()).toBe('[1,2,3]');
   });
 });

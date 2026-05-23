@@ -6,12 +6,12 @@
  * Also serves as a namespace for simple-value utilities.
  *
  * @example
- * const v = CBOR.fromEDN('simple(19)').toJS();
+ * const v = CBOR.fromCDN('simple(19)').toJS();
  * Simple.is(v);    // true
  * Simple.get(v);   // 19
  *
  * const node = CBOR.fromJS(new Simple(19));
- * node.toEDN();    // "simple(19)"
+ * node.toCDN();    // "simple(19)"
  */
 export class Simple {
   readonly value: number;
