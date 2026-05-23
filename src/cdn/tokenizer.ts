@@ -1313,7 +1313,7 @@ export class Tokenizer {
     }
 
     // Byte-string prefixes or app-string extensions.
-    // App-prefix grammar (§3 of draft-ietf-cbor-edn-literals):
+    // App-prefix grammar (§3 of draft-ietf-cbor-edn-literals-25):
     //   app-prefix = lcalpha *lcldh / ucalpha *ucldh
     //   lcldh = lcalpha / DIGIT / "-"
     //   ucldh = ucalpha / DIGIT / "-"

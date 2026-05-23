@@ -1,7 +1,7 @@
 /**
- * §4.1 draft-ietf-cbor-edn-literals-20 — Stand-in for unknown app-extensions.
+ * §4.1 of draft-ietf-cbor-edn-literals-25 — Stand-in for unknown app-extensions.
  *
- * When the EDN parser encounters an unrecognised application-extension
+ * When the CDN parser encounters an unrecognised application-extension
  * identifier (the default `unresolvedExtension: 'cpa999'` behaviour), it wraps
  * the literal in a CPA999 tag instead of throwing a SyntaxError.
  *

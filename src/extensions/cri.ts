@@ -1,5 +1,5 @@
 /**
- * Standard EDN "cri" / "CRI" application-extension (§5.2.5 draft-ietf-cbor-edn-literals-20).
+ * Standard CDN "cri" / "CRI" application-extension (§3.4 and §5.2.5 of draft-ietf-cbor-edn-literals-25).
  *
  * Converts URI references (RFC 3986) to CRI (Constrained Resource Identifier,
  * draft-ietf-core-href) CBOR array format and back.
@@ -24,7 +24,7 @@
  *   discard   = uint — number of path segments to remove from base before appending
  *               (1 = same directory, 2 = one level up "../", N = (N-1) levels up)
  *
- * Tag number 99 is used for the tagged "CRI" variant (draft-ietf-cbor-edn-literals-21 §3.4).
+ * Tag number 99 is used for the tagged "CRI" variant (§3.4 of draft-ietf-cbor-edn-literals-25).
  */
 
 import type { ToCDNOptions } from '../types';
@@ -45,7 +45,7 @@ const PREFIX_CRI = 'cri';
 const PREFIX_CRI_TAGGED = 'CRI';
 
 /**
- * CBOR tag number for the tagged CRI variant (draft-ietf-cbor-edn-literals-21 §3.4 / §5.2.5).
+ * CBOR tag number for the tagged CRI variant (§3.4 and §5.2.5 of draft-ietf-cbor-edn-literals-25).
  */
 export const TAG_CRI = 99n;
 
@@ -678,7 +678,7 @@ function buildCriValue(prefix: string, uri: string): CborItem {
 // ─── Extension factory ────────────────────────────────────────────────────────
 
 /**
- * Create the cri/CRI CborExtension (§5.2.5 draft-ietf-cbor-edn-literals-20).
+ * Create the cri/CRI CborExtension (§3.4 and §5.2.5 of draft-ietf-cbor-edn-literals-25).
  *
  * - `cri'uri'`        → CborCriExt (bare CRI array, no CBOR tag)
  * - `CRI'uri'`        → CborTaggedCriExt tag(99, CRI array)

@@ -101,7 +101,7 @@ describe('CborBigNint', () => {
   });
 });
 
-// ─── EDN parser — bignum auto-detection ──────────────────────────────────────
+// ─── CDN parser — bignum auto-detection ──────────────────────────────────────
 
 describe('parseCDN — bignum integers', () => {
   test('2^64 → CborBigUint', () => {

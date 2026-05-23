@@ -18,7 +18,7 @@ import { fromJS } from '../js/fromJS';
 import { Tag } from '../tag';
 
 // ─── dt / DT extension (§3.1) ─────────────────────────────────────────────────
-// Table 3 from draft-ietf-cbor-edn-literals-20 §3.1
+// Table 4 from draft-ietf-cbor-edn-literals-25 §3.1
 
 describe('dt — dt app-string', () => {
   test("dt'1969-07-21T02:56:16Z' → CborEpochDtExtNint(-14159024n)", () => {

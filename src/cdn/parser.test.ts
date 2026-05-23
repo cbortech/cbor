@@ -110,7 +110,7 @@ describe('parseCDN — floats', () => {
   });
 
   // ── positive sign ─────────────────────────────────────────────────────────
-  // Per draft-ietf-cbor-edn-literals-20 §2.4: 0, +0, -0 are all uint (00).
+  // Per draft-ietf-cbor-edn-literals-25 §2.4: 0, +0, -0 are all uint (00).
 
   test('+0 → uint 0 (same as 0)', () => {
     const n = parseCDN('+0') as CborUint;
@@ -393,14 +393,14 @@ describe('parseCDN — text strings', () => {
 
   // ── Escaped newline (§5.1 escapable1: \ newline → swallow) ──────────────────
 
-  // §5.1 escapable1: backslash-newline was removed in draft-ietf-cbor-edn-literals-21
-  test('backslash-LF is a SyntaxError (draft-21 §5.1)', () => {
+  // §5.1 escapable1 does not include backslash-newline.
+  test('backslash-LF is a SyntaxError (draft-25 §5.1)', () => {
     expect(() => parseCDN('"hello\\\nworld"')).toThrow(SyntaxError);
   });
-  test('backslash-CRLF is a SyntaxError (draft-21 §5.1)', () => {
+  test('backslash-CRLF is a SyntaxError (draft-25 §5.1)', () => {
     expect(() => parseCDN('"hello\\\r\nworld"')).toThrow(SyntaxError);
   });
-  test('backslash-CR is a SyntaxError (draft-21 §5.1)', () => {
+  test('backslash-CR is a SyntaxError (draft-25 §5.1)', () => {
     expect(() => parseCDN('"hello\\\rworld"')).toThrow(SyntaxError);
   });
 });
@@ -534,7 +534,7 @@ describe('parseCDN — raw string literals (backtick)', () => {
     expect(() => parseCDN('`\n`')).toThrow(SyntaxError);
   });
 
-  // rawchars forbids HT (draft-21 §2.5.3)
+  // rawchars forbids HT (draft-25 §2.5.3)
   test('raw string containing literal HT (tab) throws SyntaxError', () => {
     expect(() => parseCDN('`foo\tbar`')).toThrow(SyntaxError);
   });
@@ -610,14 +610,14 @@ describe('parseCDN — byte strings', () => {
     expect(() => parseCDN("h'0g'")).toThrow(SyntaxError);
   });
 
-  // lblank = %x0A / %x20 only — HT forbidden (draft-21 §5.2.1)
+  // lblank = %x0A / %x20 only — HT forbidden (draft-25 §5.2.1)
   test("h'...' with HT (tab) throws SyntaxError", () => {
     expect(() => parseCDN("h'01\t02'")).toThrow(SyntaxError);
   });
 
   // ── b64'...' comments — only # line comment; / is a base64 char ─────────────
 
-  // lblank = %x0A / %x20 only — HT forbidden (draft-21 §5.2.2)
+  // lblank = %x0A / %x20 only — HT forbidden (draft-25 §5.2.2)
   test("b64'...' with HT (tab) throws SyntaxError", () => {
     expect(() => parseCDN("b64'AQID\tBA=='")).toThrow(SyntaxError);
   });
@@ -1438,7 +1438,7 @@ describe('round-trip: parse(toCDN(node)).toCBOR() === node.toCBOR()', () => {
 
 // ─── Comments ─────────────────────────────────────────────────────────────────
 
-describe('parseCDN — CBOR-EDN comments (always enabled)', () => {
+describe('parseCDN — CDN comments (always enabled)', () => {
   test('# line comment before value', () => {
     const n = parseCDN('# comment\n42') as CborUint;
     expect(n.value).toBe(42n);

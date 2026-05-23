@@ -51,7 +51,7 @@ export interface ToJSOptions {
    * - `'object'`: always `Record<string, unknown>` — non-string keys are
    *   converted via `String()`. Duplicate keys are overwritten (last wins).
    * - `'entries'`: always `MapEntries` (a typed `Array` subclass) — preserves all
-   *   entries including duplicate keys (§2.6.2 of draft-ietf-cbor-edn-literals-20).
+   *   entries including duplicate keys (§2.6.3 of draft-ietf-cbor-edn-literals-25).
    *   `fromJS()` recognises `MapEntries` instances and converts them back to `CborMap`.
    * @default 'auto'
    */
@@ -185,7 +185,7 @@ export interface FromCDNOptions {
 
   /**
    * How to handle unrecognised application-extension identifiers
-   * (§4.1 draft-ietf-cbor-edn-literals-20).
+   * (§4.1 of draft-ietf-cbor-edn-literals-25).
    *
    * - `'cpa999'`: wrap the literal in a `CPA999` tag
    *   (`CborUnresolvedAppExt`) instead of failing. The resulting node

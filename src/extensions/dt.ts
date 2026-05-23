@@ -1,5 +1,5 @@
 /**
- * Standard EDN "dt" / "DT" application-extension (§3.1 draft-ietf-cbor-edn-literals-20).
+ * Standard CDN "dt" / "DT" application-extension (§3.1 of draft-ietf-cbor-edn-literals-25).
  *
  * Parses RFC 3339 date-time app-strings into epoch-based numeric CBOR values.
  * The resulting CborItem subclasses override toCDN() so the value round-trips

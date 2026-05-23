@@ -4,7 +4,7 @@
  * Hex float format:
  *   [-] 0x [hex digits] [. [hex digits]] p [+-] [decimal exponent]
  *
- * This notation appears in CBOR-EDN (draft-ietf-cbor-edn-literals) as an
+ * This notation appears in CDN (draft-ietf-cbor-edn-literals-25) as an
  * alternative representation for floating-point values (major type 7).
  */
 
@@ -77,7 +77,7 @@ export function parseHexFloat(s: string): number {
 
 /**
  * Convert a JS number to a normalized hex float string compatible with
- * CBOR-EDN diagnostic notation.
+ * CDN diagnostic notation.
  *
  * - Normal values: `0x1.[hex fraction]p[+-][exp]`  (e.g. `0x1.8p+0` for 1.5)
  * - Subnormal values: `0x0.[hex fraction]p-1022`

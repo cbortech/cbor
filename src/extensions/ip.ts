@@ -1,5 +1,5 @@
 /**
- * EDN "ip" / "IP" application-extension (§3.3 draft-ietf-cbor-edn-literals-20).
+ * CDN "ip" / "IP" application-extension (§3.2 of draft-ietf-cbor-edn-literals-25).
  *
  * Parses IPv4 / IPv6 address strings (RFC 3986 §3.2.2) into byte strings,
  * and optionally wraps them in CBOR tags per RFC 9164:
@@ -197,7 +197,7 @@ function buildIpValue(prefix: string, content: string): CborItem {
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
 /**
- * Create an ip/IP CborExtension (RFC 9164 / §3.3 draft-ietf-cbor-edn-literals-20).
+ * Create an ip/IP CborExtension (RFC 9164 / §3.2 of draft-ietf-cbor-edn-literals-25).
  *
  * - `ip'addr'`          → CborIpExt (bare byte string, 4 or 16 bytes)
  * - `IP'addr'`          → CborTaggedIpExt  tag(52 or 54, bytes)
