@@ -1,11 +1,11 @@
 {
   "name": "@cbortech/cbor",
-  "version": "0.24.0",
-  "description": "Convert between CBOR, CBOR-EDN, and JavaScript values",
+  "version": "0.25.0",
+  "description": "Convert between CBOR, CDN, and JavaScript values",
   "keywords": [
     "cbor",
+    "cdn",
     "cbor-edn",
-    "edn",
     "diagnostic-notation",
     "json",
     "jsonc",
@@ -82,16 +82,16 @@
   },
   "devDependencies": {
     "@types/node": "^24.12.4",
-    "@vitest/browser": "^4.1.6",
-    "@vitest/browser-playwright": "^4.1.6",
-    "@vitest/coverage-v8": "^4.1.6",
-    "@vitest/ui": "^4.1.6",
+    "@vitest/browser": "^4.1.7",
+    "@vitest/browser-playwright": "^4.1.7",
+    "@vitest/coverage-v8": "^4.1.7",
+    "@vitest/ui": "^4.1.7",
     "cross-env": "^10.1.0",
     "playwright": "^1.60.0",
     "prettier": "^3.8.3",
     "typescript": "^5.9.3",
-    "vite": "^8.0.12",
+    "vite": "^8.0.13",
     "vite-plugin-dts": "^4.5.4",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.7"
   }
 }

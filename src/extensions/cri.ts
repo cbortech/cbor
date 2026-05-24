@@ -1,5 +1,5 @@
 /**
- * Standard EDN "cri" / "CRI" application-extension (§5.2.5 draft-ietf-cbor-edn-literals-20).
+ * Standard CDN "cri" / "CRI" application-extension (§3.4 and §5.2.5 of draft-ietf-cbor-edn-literals-25).
  *
  * Converts URI references (RFC 3986) to CRI (Constrained Resource Identifier,
  * draft-ietf-core-href) CBOR array format and back.
@@ -24,10 +24,10 @@
  *   discard   = uint — number of path segments to remove from base before appending
  *               (1 = same directory, 2 = one level up "../", N = (N-1) levels up)
  *
- * Tag number 99 is used for the tagged "CRI" variant (draft-ietf-cbor-edn-literals-21 §3.4).
+ * Tag number 99 is used for the tagged "CRI" variant (§3.4 of draft-ietf-cbor-edn-literals-25).
  */
 
-import type { ToEDNOptions } from '../types';
+import type { ToCDNOptions } from '../types';
 import type { CborExtension } from './types';
 import type { CborItem } from '../ast/CborItem';
 import { CborArray } from '../ast/CborArray';
@@ -45,7 +45,7 @@ const PREFIX_CRI = 'cri';
 const PREFIX_CRI_TAGGED = 'CRI';
 
 /**
- * CBOR tag number for the tagged CRI variant (draft-ietf-cbor-edn-literals-21 §3.4 / §5.2.5).
+ * CBOR tag number for the tagged CRI variant (§3.4 and §5.2.5 of draft-ietf-cbor-edn-literals-25).
  */
 export const TAG_CRI = 99n;
 
@@ -623,22 +623,22 @@ function criItemsToUri(items: readonly CborItem[]): string {
 // ─── CborItem subclasses ──────────────────────────────────────────────────────
 
 /**
- * Bare CRI array whose toEDN() emits cri'…' notation.
+ * Bare CRI array whose toCDN() emits cri'…' notation.
  * Falls back to generic array notation if the content cannot be expressed as a URI.
  */
 export class CborCriExt extends CborArray {
-  override _toEDN(options: ToEDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toEDN(options, depth);
+  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
+    if (options?.appStrings === false) return super._toCDN(options, depth);
     try {
       return `${PREFIX_CRI}'${criItemsToUri(this.items)}'`;
     } catch {
-      return super._toEDN(options, depth);
+      return super._toCDN(options, depth);
     }
   }
 }
 
 /**
- * tag(99, CRI array) whose toEDN() emits CRI'…' notation.
+ * tag(99, CRI array) whose toCDN() emits CRI'…' notation.
  * Falls back to generic tag notation if the content cannot be expressed as a URI.
  */
 export class CborTaggedCriExt extends CborTag {
@@ -646,12 +646,12 @@ export class CborTaggedCriExt extends CborTag {
     super(TAG_CRI, content);
   }
 
-  override _toEDN(options: ToEDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toEDN(options, depth);
+  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
+    if (options?.appStrings === false) return super._toCDN(options, depth);
     try {
       return `${PREFIX_CRI_TAGGED}'${criItemsToUri((this.content as CborArray).items)}'`;
     } catch {
-      return super._toEDN(options, depth);
+      return super._toCDN(options, depth);
     }
   }
 }
@@ -678,7 +678,7 @@ function buildCriValue(prefix: string, uri: string): CborItem {
 // ─── Extension factory ────────────────────────────────────────────────────────
 
 /**
- * Create the cri/CRI CborExtension (§5.2.5 draft-ietf-cbor-edn-literals-20).
+ * Create the cri/CRI CborExtension (§3.4 and §5.2.5 of draft-ietf-cbor-edn-literals-25).
  *
  * - `cri'uri'`        → CborCriExt (bare CRI array, no CBOR tag)
  * - `CRI'uri'`        → CborTaggedCriExt tag(99, CRI array)

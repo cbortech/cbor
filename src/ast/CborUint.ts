@@ -1,4 +1,4 @@
-import type { ToEDNOptions, ToJSOptions, ToCBOROptions } from '../types';
+import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import { MT_UINT } from '../cbor/constants';
 import { writeHead, type EncodingWidth } from '../cbor/encode';
@@ -25,7 +25,7 @@ export class CborUint extends CborItem {
     return writeHead(MT_UINT, this.value, this.encodingWidth);
   }
 
-  _toEDN(options: ToEDNOptions | undefined, _depth: number): string {
+  _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
     const suffix =
       this.encodingWidth !== undefined ? `_${this.encodingWidth}` : '';
     const v = this.value;

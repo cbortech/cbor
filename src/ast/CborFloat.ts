@@ -1,9 +1,9 @@
-import type { ToEDNOptions, ToJSOptions, ToCBOROptions } from '../types';
+import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import { MT_SIMPLE, AI_2BYTE, AI_4BYTE, AI_8BYTE } from '../cbor/constants';
 import { autoSelectFloatPrecision } from '../cbor/encode';
 import { writeFloat16 } from '../utils/float16';
-import { floatValueToString, floatSuffix } from '../edn/serialize-utils';
+import { floatValueToString, floatSuffix } from '../cdn/serialize-utils';
 import { floatToHexFloat } from '../utils/hexfloat';
 
 export type FloatPrecision = 'half' | 'single' | 'double';
@@ -55,7 +55,7 @@ export class CborFloat extends CborItem {
     return buf;
   }
 
-  _toEDN(options: ToEDNOptions | undefined, _depth: number): string {
+  _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
     const autoSelected = autoSelectFloatPrecision(this.value);
     const numStr =
       options?.floatFormat === 'hex'

@@ -1,4 +1,4 @@
-import type { ToEDNOptions, ToJSOptions, ToCBOROptions } from '../types';
+import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import { MT_NINT } from '../cbor/constants';
 import { writeHead, type EncodingWidth } from '../cbor/encode';
@@ -41,7 +41,7 @@ export class CborNint extends CborItem {
     return writeHead(MT_NINT, this.argument, this.encodingWidth);
   }
 
-  _toEDN(options: ToEDNOptions | undefined, _depth: number): string {
+  _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
     const suffix =
       this.encodingWidth !== undefined ? `_${this.encodingWidth}` : '';
     const abs = this.argument + 1n; // absolute value of the negative number

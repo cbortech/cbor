@@ -170,4 +170,5 @@ vite.config.ts.timestamp-*
 
 # Local/private notes
 SPEC.md
+PLAN.md
 scratch.ts

@@ -1,5 +1,5 @@
 /**
- * EDN "ip" / "IP" application-extension (§3.3 draft-ietf-cbor-edn-literals-20).
+ * CDN "ip" / "IP" application-extension (§3.2 of draft-ietf-cbor-edn-literals-25).
  *
  * Parses IPv4 / IPv6 address strings (RFC 3986 §3.2.2) into byte strings,
  * and optionally wraps them in CBOR tags per RFC 9164:
@@ -20,7 +20,7 @@
  * wraps it in the IANA address family tag (52 for IPv4, 54 for IPv6).
  */
 
-import type { ToEDNOptions } from '../types';
+import type { ToCDNOptions } from '../types';
 import type { CborExtension } from './types';
 import type { CborItem } from '../ast/CborItem';
 import { CborByteString } from '../ast/CborByteString';
@@ -87,17 +87,17 @@ function expandToFull(truncated: Uint8Array, fullLen: number): Uint8Array {
 // ─── CborItem subclasses ─────────────────────────────────────────────────────
 
 /**
- * Bare IP address byte string whose toEDN() emits ip'…' notation.
+ * Bare IP address byte string whose toCDN() emits ip'…' notation.
  */
 export class CborIpExt extends CborByteString {
-  override _toEDN(options: ToEDNOptions | undefined, _depth: number): string {
-    if (options?.appStrings === false) return super._toEDN(options, _depth);
+  override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
+    if (options?.appStrings === false) return super._toCDN(options, _depth);
     return `${PREFIX_IP}'${formatAddress(this.value)}'`;
   }
 }
 
 /**
- * Bare IP address prefix (CIDR) whose toEDN() emits ip'…/prefix' notation.
+ * Bare IP address prefix (CIDR) whose toCDN() emits ip'…/prefix' notation.
  * Encoded as [prefixLen, truncatedBytes] per RFC 9164 §2.3, without a tag.
  */
 export class CborIpPrefixExt extends CborArray {
@@ -108,8 +108,8 @@ export class CborIpPrefixExt extends CborArray {
     this._isV4 = isV4;
   }
 
-  override _toEDN(options: ToEDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toEDN(options, depth);
+  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
+    if (options?.appStrings === false) return super._toCDN(options, depth);
     const prefixLen = Number((this.items[0] as CborUint).value);
     const truncated = (this.items[1] as CborByteString).value;
     const full = expandToFull(truncated, this._isV4 ? 4 : 16);
@@ -118,7 +118,7 @@ export class CborIpPrefixExt extends CborArray {
 }
 
 /**
- * CBOR tag(52/54, …) IP address whose toEDN() emits IP'…' notation.
+ * CBOR tag(52/54, …) IP address whose toCDN() emits IP'…' notation.
  * Content may be a byte string (plain address) or an array [prefix, bytes]
  * (CIDR prefix per RFC 9164).
  */
@@ -127,8 +127,8 @@ export class CborTaggedIpExt extends CborTag {
     super(tag, content);
   }
 
-  override _toEDN(options: ToEDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toEDN(options, depth);
+  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
+    if (options?.appStrings === false) return super._toCDN(options, depth);
     const fullLen = this.tag === TAG_IPV4 ? 4 : 16;
     const c = this.content as CborItem;
     if (c instanceof CborByteString) {
@@ -144,7 +144,7 @@ export class CborTaggedIpExt extends CborTag {
       const full = expandToFull((c.items[1] as CborByteString).value, fullLen);
       return `${PREFIX_IP_TAGGED}'${formatAddress(full)}/${prefixLen}'`;
     }
-    return super._toEDN(options, depth);
+    return super._toCDN(options, depth);
   }
 }
 
@@ -197,7 +197,7 @@ function buildIpValue(prefix: string, content: string): CborItem {
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
 /**
- * Create an ip/IP CborExtension (RFC 9164 / §3.3 draft-ietf-cbor-edn-literals-20).
+ * Create an ip/IP CborExtension (RFC 9164 / §3.2 of draft-ietf-cbor-edn-literals-25).
  *
  * - `ip'addr'`          → CborIpExt (bare byte string, 4 or 16 bytes)
  * - `IP'addr'`          → CborTaggedIpExt  tag(52 or 54, bytes)

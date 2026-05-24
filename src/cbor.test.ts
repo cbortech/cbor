@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, vi } from 'vitest';
 import { CBOR } from './cbor';
 import { CborUint } from './ast/CborUint';
 import { CborNint } from './ast/CborNint';
@@ -87,44 +87,44 @@ describe('CBOR.fromCBOR()', () => {
   });
 });
 
-// ─── CBOR.fromEDN ────────────────────────────────────────────────────────────
+// ─── CBOR.fromCDN ────────────────────────────────────────────────────────────
 
-describe('CBOR.fromEDN()', () => {
+describe('CBOR.fromCDN()', () => {
   test('parses integer', () => {
-    const node = CBOR.fromEDN('42');
+    const node = CBOR.fromCDN('42');
     expect(node).toBeInstanceOf(CborUint);
     expect((node as CborUint).value).toBe(42n);
   });
 
   test('parses string', () => {
-    const node = CBOR.fromEDN('"hello"');
+    const node = CBOR.fromCDN('"hello"');
     expect(node).toBeInstanceOf(CborTextString);
     expect((node as CborTextString).value).toBe('hello');
   });
 
   test('parses byte string', () => {
-    const node = CBOR.fromEDN("h'0102'");
+    const node = CBOR.fromCDN("h'0102'");
     expect(node).toBeInstanceOf(CborByteString);
     expect((node as CborByteString).value).toEqual(new Uint8Array([1, 2]));
   });
 
   test('parses array', () => {
-    const node = CBOR.fromEDN('[1, 2, 3]');
+    const node = CBOR.fromCDN('[1, 2, 3]');
     expect(node).toBeInstanceOf(CborArray);
     expect((node as CborArray).items).toHaveLength(3);
   });
 
   test('parses true/false/null', () => {
-    expect(CBOR.fromEDN('true')).toBe(CborSimple.TRUE);
-    expect(CBOR.fromEDN('false')).toBe(CborSimple.FALSE);
-    expect(CBOR.fromEDN('null')).toBe(CborSimple.NULL);
+    expect(CBOR.fromCDN('true')).toBe(CborSimple.TRUE);
+    expect(CBOR.fromCDN('false')).toBe(CborSimple.FALSE);
+    expect(CBOR.fromCDN('null')).toBe(CborSimple.NULL);
   });
 
   test('supports offset and allowTrailing', () => {
-    const first = CBOR.fromEDN('1 2', {
+    const first = CBOR.fromCDN('1 2', {
       allowTrailing: true,
     }) as CborUint;
-    const second = CBOR.fromEDN('1 2', {
+    const second = CBOR.fromCDN('1 2', {
       offset: first.end,
       allowTrailing: true,
     }) as CborUint;
@@ -244,26 +244,26 @@ describe('CBOR.encode()', () => {
   });
 });
 
-// ─── CBOR.cborToCborEdn / CBOR.cborEdnToCbor ────────────────────────────────
+// ─── CBOR.cborToCdn / CBOR.cborEdnToCbor ────────────────────────────────
 
-describe('CBOR.cborToCborEdn()', () => {
-  test('converts CBOR bytes to compact CBOR-EDN text', () => {
-    expect(CBOR.cborToCborEdn(hex('83010203'))).toBe('[1,2,3]');
+describe('CBOR.cborToCdn()', () => {
+  test('converts CBOR bytes to compact CDN text', () => {
+    expect(CBOR.cborToCdn(hex('83010203'))).toBe('[1,2,3]');
   });
 
-  test('accepts ToEDNOptions', () => {
-    expect(CBOR.cborToCborEdn(hex('83010203'), { indent: 2 })).toBe(
+  test('accepts ToCDNOptions', () => {
+    expect(CBOR.cborToCdn(hex('83010203'), { indent: 2 })).toBe(
       '[\n  1,\n  2,\n  3\n]'
     );
   });
 });
 
 describe('CBOR.cborEdnToCbor()', () => {
-  test('converts CBOR-EDN text to CBOR bytes', () => {
+  test('converts CDN text to CBOR bytes', () => {
     expect(toHex(CBOR.cborEdnToCbor('[1, 2, 3]'))).toBe('83010203');
   });
 
-  test('accepts FromEDNOptions', () => {
+  test('accepts FromCDNOptions', () => {
     expect(
       toHex(
         CBOR.cborEdnToCbor("h'68' + h'69'", {
@@ -377,69 +377,86 @@ describe('CBOR.format()', () => {
     ).toBe('{"text":"line1\\nline2"}');
   });
 
-  test('splits text strings containing CBOR-EDN when requested', () => {
+  test('splits text strings containing CDN when requested', () => {
+    expect(
+      CBOR.format('{"json": "{\\"key\\":\\"value\\"}"}', {
+        indent: 2,
+        textStringFormat: ['cdn'],
+      })
+    ).toBe('{\n  "json": "{" +\n      "\\"key\\":\\"value\\"" +\n    "}"\n}');
+  });
+
+  test('accepts cboredn as a deprecated alias for cdn text string formatting', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
     expect(
       CBOR.format('{"json": "{\\"key\\":\\"value\\"}"}', {
         indent: 2,
         textStringFormat: ['cboredn'],
       })
     ).toBe('{\n  "json": "{" +\n      "\\"key\\":\\"value\\"" +\n    "}"\n}');
+
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      "`textStringFormat: ['cboredn']` is deprecated; use `textStringFormat: ['cdn']` instead."
+    );
+    warn.mockRestore();
   });
 
-  test('combines CBOR-EDN split points with newline split points', () => {
+  test('combines CDN split points with newline split points', () => {
     expect(
       CBOR.format('{"edn": "[\\n1,2\\n]"}', {
         indent: 2,
-        textStringFormat: ['cboredn', 'newline'],
+        textStringFormat: ['cdn', 'newline'],
       })
     ).toBe('{\n  "edn": "[\\n" +\n      "1," +\n      "2\\n" +\n    "]"\n}');
   });
 
-  test('splits newlines inside CBOR-EDN text string chunks', () => {
+  test('splits newlines inside CDN text string chunks', () => {
     expect(
       CBOR.format('{"json": "{\\"key\\": \\"line1\\nline2\\"}"}', {
         indent: 2,
-        textStringFormat: ['newline', 'cboredn'],
+        textStringFormat: ['newline', 'cdn'],
       })
     ).toBe(
       '{\n  "json": "{" +\n      "\\"key\\": \\"line1\\n" +\n        "line2\\"" +\n    "}"\n}'
     );
   });
 
-  test('splits trailing comma before closing CBOR-EDN container', () => {
+  test('splits trailing comma before closing CDN container', () => {
     expect(
       CBOR.format('{"json":"{\\"a\\":\\"1\\",}"}', {
         indent: 2,
-        textStringFormat: ['newline', 'cboredn'],
+        textStringFormat: ['newline', 'cdn'],
       })
     ).toBe('{\n  "json": "{" +\n      "\\"a\\":\\"1\\"," +\n    "}"\n}');
   });
 
-  test('keeps CBOR-EDN container encoding indicators with the opener chunk', () => {
+  test('keeps CDN container encoding indicators with the opener chunk', () => {
     expect(
       CBOR.format('{"json":"{_1 \\"a\\":\\"1\\"}"}', {
         indent: 2,
-        textStringFormat: ['newline', 'cboredn'],
+        textStringFormat: ['newline', 'cdn'],
       })
     ).toBe('{\n  "json": "{_1 " +\n      "\\"a\\":\\"1\\"" +\n    "}"\n}');
   });
 
-  test('keeps CBOR-EDN indefinite marker with the opener chunk', () => {
+  test('keeps CDN indefinite marker with the opener chunk', () => {
     expect(
       CBOR.format('{"json":"{_ \\"a\\":\\"1\\"}"}', {
         indent: 2,
-        textStringFormat: ['newline', 'cboredn'],
+        textStringFormat: ['newline', 'cdn'],
       })
     ).toBe('{\n  "json": "{_ " +\n      "\\"a\\":\\"1\\"" +\n    "}"\n}');
   });
 
-  test('does not split empty CBOR-EDN containers with opener modifiers', () => {
+  test('does not split empty CDN containers with opener modifiers', () => {
     expect(
       CBOR.format(
         '{"object": "{_1 }", "array": "[_1 ]", "indefObject": "{_ }", "indefArray": "[_ ]"}',
         {
           indent: 2,
-          textStringFormat: ['cboredn'],
+          textStringFormat: ['cdn'],
         }
       )
     ).toBe(
@@ -447,51 +464,51 @@ describe('CBOR.format()', () => {
     );
   });
 
-  test('keeps CBOR-EDN array opener modifiers with the opener chunk', () => {
+  test('keeps CDN array opener modifiers with the opener chunk', () => {
     expect(
       CBOR.format('{"array":"[_ \\"a\\"]"}', {
         indent: 2,
-        textStringFormat: ['cboredn'],
+        textStringFormat: ['cdn'],
       })
     ).toBe('{\n  "array": "[_ " +\n      "\\"a\\"" +\n    "]"\n}');
   });
 
-  test('keeps CBOR-EDN layout whitespace at the end of previous chunks', () => {
+  test('keeps CDN layout whitespace at the end of previous chunks', () => {
     expect(
       CBOR.format('{ "json": "{\\n  1: 2\\n}" }', {
         indent: 2,
-        textStringFormat: ['cboredn'],
+        textStringFormat: ['cdn'],
       })
     ).toBe('{\n  "json": "{\\n  " +\n      "1: 2\\n" +\n    "}"\n}');
   });
 
-  test('indents nested CBOR-EDN text string chunks by content depth', () => {
+  test('indents nested CDN text string chunks by content depth', () => {
     expect(
       CBOR.format('{"json": "{\\"a\\":{\\"b\\":1}}"}', {
         indent: 2,
-        textStringFormat: ['cboredn'],
+        textStringFormat: ['cdn'],
       })
     ).toBe(
       '{\n  "json": "{" +\n      "\\"a\\":{" +\n        "\\"b\\":1" +\n      "}" +\n    "}"\n}'
     );
   });
 
-  test('does not split empty CBOR-EDN containers in text strings', () => {
+  test('does not split empty CDN containers in text strings', () => {
     expect(
       CBOR.format('{"object": "{}", "array": "[]"}', {
         indent: 2,
-        textStringFormat: ['cboredn'],
+        textStringFormat: ['cdn'],
       })
     ).toBe('{\n  "object": "{}",\n  "array": "[]"\n}');
   });
 
-  test('splits commented CBOR-EDN text strings without hiding comments in leading chunks', () => {
+  test('splits commented CDN text strings without hiding comments in leading chunks', () => {
     expect(
       CBOR.format(
         '{"json": "//leading comment\\n{\\n  1: 2,\\n  /* block comment */\\n  3: 4\\n}\\n// trailing comment"}',
         {
           indent: 2,
-          textStringFormat: ['cboredn'],
+          textStringFormat: ['cdn'],
         }
       )
     ).toBe(
@@ -499,11 +516,11 @@ describe('CBOR.format()', () => {
     );
   });
 
-  test('falls back to newline splitting when CBOR-EDN parsing fails', () => {
+  test('falls back to newline splitting when CDN parsing fails', () => {
     expect(
       CBOR.format('{"text": "line1\\nline2"}', {
         indent: 2,
-        textStringFormat: ['cboredn', 'newline'],
+        textStringFormat: ['cdn', 'newline'],
       })
     ).toBe('{\n  "text": "line1\\n" +\n    "line2"\n}');
   });
@@ -517,7 +534,7 @@ describe('CBOR.format()', () => {
     ).toBe('"line1\\n" +\n  "line2"_1');
   });
 
-  test('passes commas option through to toEDN', () => {
+  test('passes commas option through to toCDN', () => {
     expect(CBOR.format('[1, 2, 3]', { indent: 2, commas: 'trailing' })).toBe(
       '[\n  1,\n  2,\n  3,\n]'
     );
@@ -790,9 +807,9 @@ describe('CBOR.fromCBOR → toCBOR byte-exact round-trip (RFC 8949 Appendix A)',
   }
 });
 
-// ─── Complete 4-way round-trip: fromEDN → toCBOR → fromCBOR → toEDN ──────────
+// ─── Complete 4-way round-trip: fromCDN → toCBOR → fromCBOR → toCDN ──────────
 
-describe('4-way round-trip: fromEDN → toCBOR → fromCBOR → toEDN', () => {
+describe('4-way round-trip: fromCDN → toCBOR → fromCBOR → toCDN', () => {
   const cases: [string, string][] = [
     ['42', '42'],
     ['-5', '-5'],
@@ -811,10 +828,10 @@ describe('4-way round-trip: fromEDN → toCBOR → fromCBOR → toEDN', () => {
 
   for (const [edn, expectedEDN] of cases) {
     test(edn, () => {
-      const ast = CBOR.fromEDN(edn);
+      const ast = CBOR.fromCDN(edn);
       const cbor = ast.toCBOR();
       const reparsed = CBOR.fromCBOR(cbor);
-      expect(reparsed.toEDN()).toBe(expectedEDN);
+      expect(reparsed.toCDN()).toBe(expectedEDN);
     });
   }
 });

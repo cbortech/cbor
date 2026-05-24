@@ -17,7 +17,7 @@ import type { FromJSOptions } from '../types';
  * Plugin that extends EDN parsing, CBOR decoding, and `fromJS()` for specific
  * application-string prefixes or CBOR tag numbers.
  *
- * Pass instances via `FromEDNOptions.extensions`, `FromCBOROptions.extensions`,
+ * Pass instances via `FromCDNOptions.extensions`, `FromCBOROptions.extensions`,
  * or `FromJSOptions.extensions`.
  *
  * @example
@@ -28,7 +28,7 @@ import type { FromJSOptions } from '../types';
  *     return new CborByteString(parseIPv4(content));
  *   },
  * };
- * parseEDN("ip'192.0.2.1'", { extensions: [ipExtension] });
+ * parseCDN("ip'192.0.2.1'", { extensions: [ipExtension] });
  */
 export interface CborExtension {
   /**
@@ -40,7 +40,7 @@ export interface CborExtension {
   /**
    * CBOR tag numbers this extension handles (e.g. `[0n, 1n]`).
    * Extensions with `parseTag()` are invoked for these tag numbers during
-   * `fromCBOR()` and integer-tagged EDN items (`1(…)`) in `fromEDN()`.
+   * `fromCBOR()` and integer-tagged EDN items (`1(…)`) in `fromCDN()`.
    */
   readonly tagNumbers?: readonly bigint[];
 
@@ -60,7 +60,7 @@ export interface CborExtension {
 
   /**
    * Called when a `CborTag` is encountered during CBOR decode (`fromCBOR`)
-   * or EDN integer-tag parsing (`fromEDN`).
+   * or EDN integer-tag parsing (`fromCDN`).
    * Return `undefined` to fall back to the default `CborTag` representation.
    */
   parseTag?(tag: bigint, value: CborItem): CborItem | undefined;
