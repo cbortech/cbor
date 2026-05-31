@@ -339,6 +339,19 @@ class CDNParser {
         this.extByPrefix.set(prefix, ext);
       for (const tag of ext.tagNumbers ?? []) this.extByTag.set(tag, ext);
     }
+    this.t.onEscapeWarning = (msg, offset, line, col) => {
+      const w: ParseWarning = { message: msg, offset, line, column: col };
+      this._pendingWarnings.push(w);
+      if (this._options.onWarning) this._options.onWarning(w);
+      else if (!this._options.silent)
+        console.warn(
+          `CDN strict violation at line ${line}, column ${col}: ${msg}`
+        );
+      if (this._options.strict !== false)
+        throw new SyntaxError(
+          `EDN parse error at line ${line}, column ${col}: ${msg}`
+        );
+    };
   }
 
   parse(): CborItem {

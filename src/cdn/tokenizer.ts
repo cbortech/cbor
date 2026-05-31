@@ -97,6 +97,17 @@ export class Tokenizer {
   private _lastConsumedEndOffset: number;
   /** Comments encountered while scanning, appended in source order. */
   readonly comments: EdnComment[] = [];
+  /**
+   * When set, non-standard-but-JS-valid escape sequences are accepted instead
+   * of throwing.  The callback receives a message and the position of the `\`
+   * (offset, line, column) so the parser can forward it as a ParseWarning.
+   */
+  onEscapeWarning?: (
+    msg: string,
+    offset: number,
+    line: number,
+    col: number
+  ) => void;
   constructor(
     private readonly input: string,
     options?: TokenizerOptions
@@ -408,9 +419,11 @@ export class Tokenizer {
         );
 
       if (ch === '\\') {
-        this._advance();
-        const eLine = this.line,
+        // Capture position of the backslash itself before consuming it.
+        const eOffset = this.pos,
+          eLine = this.line,
           eCol = this.col;
+        this._advance();
         const e = this._advance();
         switch (e) {
           case 'n':
@@ -442,6 +455,83 @@ export class Tokenizer {
             }
             if (e === '/') {
               out += '/';
+              break;
+            }
+            // Non-standard JS escape sequences — accepted when onEscapeWarning is set.
+            if (this.onEscapeWarning) {
+              if (e === '0') {
+                this.onEscapeWarning(
+                  '\\0 is a non-standard escape sequence; use \\u0000 instead',
+                  eOffset,
+                  eLine,
+                  eCol
+                );
+                out += '\0';
+                break;
+              }
+              if (e === 'v') {
+                this.onEscapeWarning(
+                  '\\v is a non-standard escape sequence; use \\u000b instead',
+                  eOffset,
+                  eLine,
+                  eCol
+                );
+                out += '\v';
+                break;
+              }
+              if (e === 'x') {
+                // \xHH — two hex digits
+                const h1 = this._ch();
+                const h2 = this.input[this.pos + 1] ?? '';
+                if (!/[0-9a-fA-F]/.test(h1) || !/[0-9a-fA-F]/.test(h2)) {
+                  this._fail(
+                    '\\x escape requires exactly two hex digits',
+                    eLine,
+                    eCol
+                  );
+                }
+                this._advance();
+                this._advance();
+                const codePoint = parseInt(h1 + h2, 16);
+                this.onEscapeWarning(
+                  `\\x${h1}${h2} is a non-standard escape sequence; use \\u00${h1}${h2} instead`,
+                  eOffset,
+                  eLine,
+                  eCol
+                );
+                out += String.fromCharCode(codePoint);
+                break;
+              }
+              // Cross-quote delimiter (e.g. \" inside '...' or \' inside "...")
+              if (e === '"' || e === "'") {
+                this.onEscapeWarning(
+                  `\\${e} inside ${quote === '"' ? 'double' : 'single'}-quoted string is non-standard`,
+                  eOffset,
+                  eLine,
+                  eCol
+                );
+                out += e;
+                break;
+              }
+              // JS line continuation: \ + LF / CR / CRLF → nothing added
+              if (e === '\n' || e === '\r') {
+                if (e === '\r' && this._ch() === '\n') this._advance(); // consume CRLF
+                this.onEscapeWarning(
+                  'line continuation (\\<newline>) is non-standard; the newline is ignored',
+                  eOffset,
+                  eLine,
+                  eCol
+                );
+                break;
+              }
+              // Identity escape: \X → X (JS accepts any \X as just X)
+              this.onEscapeWarning(
+                `\\${e} is an unknown escape sequence; interpreted as '${e}'`,
+                eOffset,
+                eLine,
+                eCol
+              );
+              out += e;
               break;
             }
             this._fail(

@@ -1019,6 +1019,117 @@ describe('parseCDN — errors', () => {
   test('\\u0041 in double-quoted string is allowed', () => {
     expect((parseCDN('"\\u0041"') as CborTextString).value).toBe('A');
   });
+
+  // ── #4: non-standard JS escape sequences (strict: false) ────────────────
+  describe('non-standard JS escape sequences (strict: false)', () => {
+    const opts = { strict: false as const, silent: true };
+
+    test('\\0 → U+0000, warns, strict: true throws', () => {
+      expect(() => parseCDN('"\\0"')).toThrow(SyntaxError);
+      const warnings: ParseWarning[] = [];
+      const r = parseCDN('"\\0"', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      }) as CborTextString;
+      expect(r.value).toBe('\0');
+      expect(warnings[0].message).toMatch(/\\0.*non-standard/);
+      expect(r.warnings).toHaveLength(1);
+    });
+
+    test('\\v → U+000B (vertical tab), warns', () => {
+      expect(() => parseCDN('"\\v"')).toThrow(SyntaxError);
+      const r = parseCDN('"\\v"', opts) as CborTextString;
+      expect(r.value).toBe('\v');
+      expect(r.warnings?.[0]?.message).toMatch(/\\v.*non-standard/);
+    });
+
+    test('\\xHH → hex character, warns', () => {
+      expect(() => parseCDN('"\\x41"')).toThrow(SyntaxError);
+      const r = parseCDN('"\\x41"', opts) as CborTextString;
+      expect(r.value).toBe('A');
+      expect(r.warnings?.[0]?.message).toMatch(/\\x41.*non-standard/);
+    });
+
+    test('\\x in single-quoted string → byte', () => {
+      expect(() => parseCDN("'\\x41'")).toThrow(SyntaxError);
+      // \x41 = 'A' (ASCII), UTF-8 encoding is the same single byte 0x41
+      const r = parseCDN("'\\x41'", opts) as CborByteString;
+      expect(r).toBeInstanceOf(CborByteString);
+      expect(r.value[0]).toBe(0x41);
+    });
+
+    test('identity escape \\a → "a", warns', () => {
+      expect(() => parseCDN('"\\a"')).toThrow(SyntaxError);
+      const r = parseCDN('"\\a"', opts) as CborTextString;
+      expect(r.value).toBe('a');
+      expect(r.warnings?.[0]?.message).toMatch(/unknown escape/);
+    });
+
+    test("cross-quote \\' in double-quoted string, warns", () => {
+      expect(() => parseCDN('"\\\'"')).toThrow(SyntaxError);
+      const r = parseCDN('"\\\'"', opts) as CborTextString;
+      expect(r.value).toBe("'");
+      expect(r.warnings?.[0]?.message).toMatch(/non-standard/);
+    });
+
+    test('cross-quote \\" in single-quoted string, warns', () => {
+      expect(() => parseCDN("'\\\"'")).toThrow(SyntaxError);
+      const r = parseCDN("'\\\"'", opts) as CborByteString;
+      expect(r).toBeInstanceOf(CborByteString);
+      expect(new TextDecoder().decode(r.value)).toBe('"');
+      expect(r.warnings?.[0]?.message).toMatch(/non-standard/);
+    });
+
+    test('warning is attached to the string node, not a sibling', () => {
+      const r = parseCDN('[1, "\\v"]', opts) as CborArray;
+      expect(r.items[0].warnings).toBeUndefined();
+      expect(r.items[1].warnings).toHaveLength(1);
+    });
+
+    test('multiple escapes produce multiple warnings', () => {
+      const warnings: ParseWarning[] = [];
+      const r = parseCDN('"\\v\\0"', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      }) as CborTextString;
+      expect(r.value).toBe('\v\0');
+      expect(warnings).toHaveLength(2);
+      expect(r.warnings).toHaveLength(2);
+    });
+
+    test('onWarning is called before throw in strict: true', () => {
+      const warnings: ParseWarning[] = [];
+      expect(() =>
+        parseCDN('"\\v"', { onWarning: (w) => warnings.push(w) })
+      ).toThrow(SyntaxError);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].message).toMatch(/\\v.*non-standard/);
+    });
+
+    test('line continuation \\<LF> adds nothing, warns', () => {
+      expect(() => parseCDN('"a\\\nb"')).toThrow(SyntaxError);
+      const r = parseCDN('"a\\\nb"', opts) as CborTextString;
+      expect(r.value).toBe('ab');
+      expect(r.warnings?.[0]?.message).toMatch(/line continuation/);
+    });
+
+    test('line continuation \\<CRLF> adds nothing, warns', () => {
+      const r = parseCDN('"a\\\r\nb"', opts) as CborTextString;
+      expect(r.value).toBe('ab');
+      expect(r.warnings?.[0]?.message).toMatch(/line continuation/);
+    });
+
+    test('warning position points to the backslash, not the escape char', () => {
+      // "  \v" — the backslash is at offset 3, column 4 (1-based), \v at column 5
+      const warnings: ParseWarning[] = [];
+      parseCDN('"  \\v"', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(warnings[0].offset).toBe(3);
+      expect(warnings[0].column).toBe(4);
+    });
+  });
 });
 
 // ─── Encoding indicators ──────────────────────────────────────────────────────
