@@ -2,6 +2,7 @@
 export type {
   CBOROptions,
   CborExtension,
+  DecodeWarning,
   FromCBOROptions,
   ToCBOROptions,
   FromCDNOptions,

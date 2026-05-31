@@ -96,6 +96,16 @@ export interface ToJSOptions {
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface ToCBOROptions {}
 
+/**
+ * A CBOR validity violation detected during decoding.
+ */
+export interface DecodeWarning {
+  /** Human-readable description of the violation. */
+  message: string;
+  /** Byte offset within the decoded input where the violation was detected. */
+  offset: number;
+}
+
 export interface FromCBOROptions {
   /**
    * Byte offset within the supplied input at which CBOR decoding starts.
@@ -128,6 +138,42 @@ export interface FromCBOROptions {
    * `CborTag` node.
    */
   extensions?: CborExtension[];
+
+  /**
+   * Controls how CBOR validity violations are handled.
+   *
+   * - `true` (default): violations call `onWarning` and then throw, stopping
+   *   decoding immediately.
+   * - `false`: recoverable violations call `onWarning` and decoding continues
+   *   with a best-effort interpretation of the data.
+   *
+   * Truly malformed data (e.g. truncated input, reserved AI values) always
+   * throws regardless of this setting.
+   *
+   * @default true
+   */
+  strict?: boolean;
+
+  /**
+   * Callback invoked when a CBOR validity violation is detected.
+   *
+   * In strict mode (the default), this is called before the error is thrown.
+   * In non-strict mode (`strict: false`), this is called and decoding
+   * continues.
+   *
+   * If not supplied and `silent` is not `true`, violations are reported via
+   * `console.warn`.
+   */
+  onWarning?: (warning: DecodeWarning) => void;
+
+  /**
+   * When `true`, suppresses the default `console.warn` output for validity
+   * violations.  An explicit `onWarning` callback is still invoked even when
+   * `silent` is `true`.
+   *
+   * @default false
+   */
+  silent?: boolean;
 }
 
 /**

@@ -5,6 +5,7 @@ import type {
   ToHexDumpOptions,
   ToCBOROptions,
   CborComments,
+  DecodeWarning,
 } from '../types';
 import { CBOR_OMIT } from '../types';
 
@@ -42,6 +43,12 @@ export abstract class CborItem {
    * They do not affect CBOR bytes or JS conversion.
    */
   comments?: CborComments;
+
+  /**
+   * Validity violations detected during CBOR decoding of this node.
+   * Only populated when `strict: false` is set in `FromCBOROptions`.
+   */
+  warnings?: DecodeWarning[];
 
   /**
    * Default options bound by a {@link CBOR} instance factory method.

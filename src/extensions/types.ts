@@ -11,7 +11,7 @@
 // Type-only import avoids a runtime circular chain while giving API Extractor
 // the real CborItem type: extensions/types → ast/CborItem → types → extensions/types.
 import type { CborItem } from '../ast/CborItem';
-import type { FromJSOptions } from '../types';
+import type { FromCBOROptions, FromJSOptions } from '../types';
 
 /**
  * Plugin that extends EDN parsing, CBOR decoding, and `fromJS()` for specific
@@ -62,8 +62,17 @@ export interface CborExtension {
    * Called when a `CborTag` is encountered during CBOR decode (`fromCBOR`)
    * or EDN integer-tag parsing (`fromCDN`).
    * Return `undefined` to fall back to the default `CborTag` representation.
+   *
+   * `options` is supplied only from the binary CBOR decoder; it is `undefined`
+   * when called from the CDN parser.  Extensions that perform nested CBOR
+   * decoding (e.g. tag 24) should forward these options to propagate
+   * `strict`, `onWarning`, and `silent` into the inner decode.
    */
-  parseTag?(tag: bigint, value: CborItem): CborItem | undefined;
+  parseTag?(
+    tag: bigint,
+    value: CborItem,
+    options?: FromCBOROptions
+  ): CborItem | undefined;
 
   /**
    * Called during `fromJS()` for every value before the default conversion

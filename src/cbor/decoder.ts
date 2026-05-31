@@ -1,4 +1,4 @@
-import type { FromCBOROptions } from '../types';
+import type { FromCBOROptions, DecodeWarning } from '../types';
 import type { CborItem } from '../ast/CborItem';
 import { BUILTIN_EXTENSIONS } from '../extensions/builtins';
 import { CborUint } from '../ast/CborUint';
@@ -32,13 +32,107 @@ import {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const textDecoder = new TextDecoder('utf-8', {
+const textDecoderStrict = new TextDecoder('utf-8', {
   fatal: true,
+  ignoreBOM: true,
+});
+
+const textDecoderLenient = new TextDecoder('utf-8', {
+  fatal: false,
   ignoreBOM: true,
 });
 
 function decodeError(msg: string): never {
   throw new Error(`CBOR decode error: ${msg}`);
+}
+
+/**
+ * Emit a CBOR validity violation warning and, unless `strict: false`, throw.
+ * Returns the created `DecodeWarning` (only reachable in non-strict mode).
+ * For truly malformed data that cannot be recovered, use `decodeError` instead.
+ */
+function strictViolation(
+  msg: string,
+  offset: number,
+  options: FromCBOROptions | undefined
+): DecodeWarning {
+  const warning: DecodeWarning = { message: msg, offset };
+  if (options?.onWarning) {
+    options.onWarning(warning);
+  } else if (!options?.silent) {
+    console.warn(`CBOR strict violation at offset ${offset}: ${msg}`);
+  }
+  if (options?.strict !== false) {
+    throw new Error(`CBOR decode error: ${msg}`);
+  }
+  return warning;
+}
+
+function addWarning(node: CborItem, warning: DecodeWarning): void {
+  node.warnings ??= [];
+  node.warnings.push(warning);
+}
+
+/**
+ * Return a data-model fingerprint for a CBOR map key.
+ *
+ * The fingerprint is designed so that two keys are equal if and only if they
+ * represent the same CBOR data-model value, regardless of the encoding form:
+ *   - Integers: compared by numeric value (width differences ignored)
+ *   - Text strings: compared by Unicode string content (definite vs indefinite ignored)
+ *   - Byte strings: compared by raw byte sequence (definite vs indefinite ignored)
+ *   - Floats: compared by numeric value (precision ignored; all NaN treated equal)
+ *   - Simple values: compared by simple value number
+ *   - Arrays/maps/tags: recursively fingerprinted; maps are order-normalised
+ *
+ * Text strings and complex types are embedded via JSON.stringify so that
+ * delimiter characters inside a string value cannot collide with the
+ * structural delimiters used by complex-type fingerprints.
+ */
+function fingerprintKey(key: CborItem): string {
+  if (key instanceof CborUint) return `u:${key.value}`;
+  if (key instanceof CborNint) return `n:${key.value}`;
+  // JSON.stringify escapes quotes, commas, brackets etc. inside the text value.
+  if (key instanceof CborTextString) return `t:${JSON.stringify(key.value)}`;
+  if (key instanceof CborIndefiniteTextString)
+    return `t:${JSON.stringify(key.chunks.map((c) => c.value).join(''))}`;
+  if (key instanceof CborByteString) {
+    let h = 'b:';
+    for (const b of key.value) h += b.toString(16).padStart(2, '0');
+    return h;
+  }
+  if (key instanceof CborIndefiniteByteString) {
+    let h = 'b:';
+    for (const chunk of key.chunks)
+      for (const b of chunk.value) h += b.toString(16).padStart(2, '0');
+    return h;
+  }
+  if (key instanceof CborFloat) {
+    if (isNaN(key.value)) return 'f:NaN';
+    if (Object.is(key.value, -0)) return 'f:-0';
+    return `f:${key.value}`;
+  }
+  if (key instanceof CborSimple) return `s:${key.value}`;
+  // Complex types use JSON.stringify on a typed array so that sub-fingerprints
+  // (which may contain any character) are properly quoted and cannot collide
+  // with structural syntax.
+  if (key instanceof CborArray)
+    return JSON.stringify(['A', key.items.map(fingerprintKey)]);
+  if (key instanceof CborMap) {
+    // Maps are unordered in the data model: sort pairs to normalise order.
+    const pairs = key.entries.map(
+      ([k, v]) => [fingerprintKey(k), fingerprintKey(v)] as [string, string]
+    );
+    pairs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    return JSON.stringify(['M', pairs]);
+  }
+  if (key instanceof CborTag)
+    return JSON.stringify(['G', String(key.tag), fingerprintKey(key.content)]);
+  // Fallback for any remaining AST node (e.g. CborEmbeddedCBOR): canonical CBOR bytes.
+  const bytes = key.toCBOR();
+  let hex = 'c:';
+  for (const b of bytes) hex += b.toString(16).padStart(2, '0');
+  return hex;
 }
 
 /**
@@ -200,15 +294,21 @@ function decodeItemInner(
         length
       );
       let text: string;
+      let utf8Warning: DecodeWarning | undefined;
       try {
-        text = textDecoder.decode(bytes);
+        text = textDecoderStrict.decode(bytes);
       } catch {
-        decodeError('invalid UTF-8 sequence in text string');
+        utf8Warning = strictViolation(
+          'invalid UTF-8 sequence in text string',
+          dataOffset,
+          options
+        );
+        // Only reached in non-strict mode — decode with replacement characters
+        text = textDecoderLenient.decode(bytes);
       }
-      return {
-        value: new CborTextString(text),
-        nextOffset: dataOffset + length,
-      };
+      const textNode = new CborTextString(text);
+      if (utf8Warning) addWarning(textNode, utf8Warning);
+      return { value: textNode, nextOffset: dataOffset + length };
     }
 
     // ── Major Type 4: array ───────────────────────────────────────────────────
@@ -252,6 +352,8 @@ function decodeItemInner(
     case MT_MAP: {
       if (ai === AI_INDEFINITE) {
         const entries: [CborItem, CborItem][] = [];
+        const seenKeysIndef = new Set<string>();
+        const indefMapWarnings: DecodeWarning[] = [];
         let pos = offset;
         while (true) {
           if (pos >= view.byteLength)
@@ -261,15 +363,25 @@ function decodeItemInner(
             break;
           }
           const keyResult = decodeItem(view, pos, options);
+          const keyHex = fingerprintKey(keyResult.value);
+          if (seenKeysIndef.has(keyHex)) {
+            indefMapWarnings.push(
+              strictViolation(
+                `duplicate map key at offset ${keyResult.value.start}`,
+                keyResult.value.start!,
+                options
+              )
+            );
+          }
+          seenKeysIndef.add(keyHex);
           pos = keyResult.nextOffset;
           const valResult = decodeItem(view, pos, options);
           pos = valResult.nextOffset;
           entries.push([keyResult.value, valResult.value]);
         }
-        return {
-          value: new CborMap(entries, { indefiniteLength: true }),
-          nextOffset: pos,
-        };
+        const indefMapNode = new CborMap(entries, { indefiniteLength: true });
+        for (const w of indefMapWarnings) addWarning(indefMapNode, w);
+        return { value: indefMapNode, nextOffset: pos };
       }
       const { value: count, nextOffset: entriesStart } = readArgument(
         view,
@@ -278,15 +390,30 @@ function decodeItemInner(
       );
       const length = Number(count);
       const entries: [CborItem, CborItem][] = [];
+      const seenKeys = new Set<string>();
+      const mapWarnings: DecodeWarning[] = [];
       let pos = entriesStart;
       for (let i = 0; i < length; i++) {
         const keyResult = decodeItem(view, pos, options);
+        const keyHex = fingerprintKey(keyResult.value);
+        if (seenKeys.has(keyHex)) {
+          mapWarnings.push(
+            strictViolation(
+              `duplicate map key at offset ${keyResult.value.start}`,
+              keyResult.value.start!,
+              options
+            )
+          );
+        }
+        seenKeys.add(keyHex);
         pos = keyResult.nextOffset;
         const valResult = decodeItem(view, pos, options);
         pos = valResult.nextOffset;
         entries.push([keyResult.value, valResult.value]);
       }
-      return { value: new CborMap(entries), nextOffset: pos };
+      const mapNode = new CborMap(entries);
+      for (const w of mapWarnings) addWarning(mapNode, w);
+      return { value: mapNode, nextOffset: pos };
     }
 
     // ── Major Type 6: tagged item ─────────────────────────────────────────────
@@ -304,7 +431,7 @@ function decodeItemInner(
         ...BUILTIN_EXTENSIONS,
       ]) {
         if (ext.parseTag) {
-          const result = ext.parseTag(tagNum, contentResult.value);
+          const result = ext.parseTag(tagNum, contentResult.value, options);
           if (result !== undefined)
             return { value: result, nextOffset: contentResult.nextOffset };
         }
@@ -333,9 +460,15 @@ function decodeItemInner(
           decodeError('unexpected end of input');
         const simpleVal = view.getUint8(offset);
         if (simpleVal < 32) {
-          decodeError(
-            `simple value ${simpleVal} must be encoded in initial byte (0–31 reserved for extended encoding)`
+          const w = strictViolation(
+            `simple value ${simpleVal} must be encoded in initial byte (0–31 reserved for extended encoding)`,
+            offset - 1,
+            options
           );
+          // Only reached in non-strict mode — decode the value as-is
+          const simpleNode = new CborSimple(simpleVal);
+          addWarning(simpleNode, w);
+          return { value: simpleNode, nextOffset: offset + 1 };
         }
         return { value: new CborSimple(simpleVal), nextOffset: offset + 1 };
       }
