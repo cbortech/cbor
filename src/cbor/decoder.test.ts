@@ -682,7 +682,7 @@ describe('strict / onWarning option', () => {
   });
 
   test('strict: false: indefinite text key equal to definite text key is detected as duplicate', () => {
-    // {"ab": 1, indefinite("a"+"b"): 2} — both fingerprint as t:"ab"
+    // {"ab": 1, indefinite("a"+"b"): 2} — both fingerprint as ["t","ab"]
     // a2 62 61 62 01 7f 61 61 61 62 ff 02
     const warnings: { message: string; offset: number }[] = [];
     const result = decodeCBOR(hex('a2 62 61 62 01 7f 61 61 61 62 ff 02'), {
@@ -695,7 +695,7 @@ describe('strict / onWarning option', () => {
   });
 
   test('strict: false: definite array key and indefinite array key with same elements are detected as duplicate', () => {
-    // {[1]: "a", [_ 1]: "b"} — both fingerprint as ["A",["u:1"]]
+    // {[1]: "a", [_ 1]: "b"} — both fingerprint as ["A",[["u","1"]]]
     // a2 81 01 61 61 9f 01 ff 61 62
     const warnings: { message: string; offset: number }[] = [];
     const result = decodeCBOR(hex('a2 81 01 61 61 9f 01 ff 61 62'), {
@@ -708,7 +708,7 @@ describe('strict / onWarning option', () => {
   });
 
   test('strict: false: array keys containing floats of different widths but same value are detected as duplicate', () => {
-    // {[f16(1.0)]: "a", [f32(1.0)]: "b"} — both fingerprint as ["A",["f:1"]]
+    // {[f16(1.0)]: "a", [f32(1.0)]: "b"} — both fingerprint as ["A",[["f","1"]]]
     // a2 81 f9 3c 00 61 61 81 fa 3f 80 00 00 61 62
     const warnings: { message: string; offset: number }[] = [];
     const result = decodeCBOR(
@@ -731,6 +731,20 @@ describe('strict / onWarning option', () => {
       onWarning: (w) => warnings.push(w),
     });
     expect(warnings).toHaveLength(0);
+  });
+
+  test('strict: false: map keys with same entries in different insertion order are detected as duplicate', () => {
+    // {{1:2, 3:4}: "a", {3:4, 1:2}: "b"} — both fingerprint as ["M",...]
+    // with sorted key pairs, so they are data-model equal.
+    // a2 a2 01 02 03 04 61 61 a2 03 04 01 02 61 62
+    const warnings: { message: string; offset: number }[] = [];
+    const result = decodeCBOR(
+      hex('a2 a2 01 02 03 04 61 61 a2 03 04 01 02 61 62'),
+      { strict: false, onWarning: (w) => warnings.push(w) }
+    ) as CborMap;
+    expect(result).toBeInstanceOf(CborMap);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('duplicate map key');
   });
 });
 

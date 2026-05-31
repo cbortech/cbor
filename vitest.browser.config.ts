@@ -17,6 +17,7 @@ export default mergeConfig(
         headless: true,
       },
       include: ['src/**/*.test.ts'],
+      exclude: ['src/cbor/test-vectors.test.ts'],
       coverage: {
         provider: 'v8',
         reporter: ['text', 'json', 'html'],

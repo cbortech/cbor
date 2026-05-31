@@ -83,56 +83,65 @@ function addWarning(node: CborItem, warning: DecodeWarning): void {
  *   - Byte strings: compared by raw byte sequence (definite vs indefinite ignored)
  *   - Floats: compared by numeric value (precision ignored; all NaN treated equal)
  *   - Simple values: compared by simple value number
- *   - Arrays/maps/tags: recursively fingerprinted; maps are order-normalised
+ *   - Arrays/maps/tags: recursively fingerprinted
  *
- * Text strings and complex types are embedded via JSON.stringify so that
- * delimiter characters inside a string value cannot collide with the
- * structural delimiters used by complex-type fingerprints.
+ * Implemented as two functions: `fingerprintKeyVal` builds a nested-array
+ * structure (no pre-serialised strings), and `fingerprintKey` serialises it
+ * with a single JSON.stringify call.  Keeping recursion in the array domain
+ * avoids the exponential character-escaping blowup that occurs when
+ * pre-serialised JSON strings are embedded inside further JSON.stringify calls.
  */
-function fingerprintKey(key: CborItem): string {
-  if (key instanceof CborUint) return `u:${key.value}`;
-  if (key instanceof CborNint) return `n:${key.value}`;
-  // JSON.stringify escapes quotes, commas, brackets etc. inside the text value.
-  if (key instanceof CborTextString) return `t:${JSON.stringify(key.value)}`;
+function fingerprintKeyVal(key: CborItem): unknown {
+  if (key instanceof CborUint) return ['u', String(key.value)];
+  if (key instanceof CborNint) return ['n', String(key.value)];
+  if (key instanceof CborTextString) return ['t', key.value];
   if (key instanceof CborIndefiniteTextString)
-    return `t:${JSON.stringify(key.chunks.map((c) => c.value).join(''))}`;
+    return ['t', key.chunks.map((c) => c.value).join('')];
   if (key instanceof CborByteString) {
-    let h = 'b:';
+    let h = '';
     for (const b of key.value) h += b.toString(16).padStart(2, '0');
-    return h;
+    return ['b', h];
   }
   if (key instanceof CborIndefiniteByteString) {
-    let h = 'b:';
+    let h = '';
     for (const chunk of key.chunks)
       for (const b of chunk.value) h += b.toString(16).padStart(2, '0');
-    return h;
+    return ['b', h];
   }
   if (key instanceof CborFloat) {
-    if (isNaN(key.value)) return 'f:NaN';
-    if (Object.is(key.value, -0)) return 'f:-0';
-    return `f:${key.value}`;
+    // Use String() for all float cases: avoids JSON.stringify silently converting
+    // NaN and ±Infinity to null, and -0 to "0".
+    if (isNaN(key.value)) return ['f', 'NaN'];
+    if (Object.is(key.value, -0)) return ['f', '-0'];
+    return ['f', String(key.value)];
   }
-  if (key instanceof CborSimple) return `s:${key.value}`;
-  // Complex types use JSON.stringify on a typed array so that sub-fingerprints
-  // (which may contain any character) are properly quoted and cannot collide
-  // with structural syntax.
-  if (key instanceof CborArray)
-    return JSON.stringify(['A', key.items.map(fingerprintKey)]);
+  if (key instanceof CborSimple) return ['s', key.value];
+  if (key instanceof CborArray) return ['A', key.items.map(fingerprintKeyVal)];
   if (key instanceof CborMap) {
-    // Maps are unordered in the data model: sort pairs to normalise order.
-    const pairs = key.entries.map(
-      ([k, v]) => [fingerprintKey(k), fingerprintKey(v)] as [string, string]
-    );
-    pairs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-    return JSON.stringify(['M', pairs]);
+    // Sort by key fingerprint so that maps with the same entries in different
+    // insertion order fingerprint identically (RFC 8949 data model: unordered).
+    const pairs = key.entries.map(([k, v]) => [
+      fingerprintKeyVal(k),
+      fingerprintKeyVal(v),
+    ]);
+    pairs.sort((a, b) => {
+      const ak = JSON.stringify(a[0]);
+      const bk = JSON.stringify(b[0]);
+      return ak < bk ? -1 : ak > bk ? 1 : 0;
+    });
+    return ['M', pairs];
   }
   if (key instanceof CborTag)
-    return JSON.stringify(['G', String(key.tag), fingerprintKey(key.content)]);
+    return ['G', String(key.tag), fingerprintKeyVal(key.content)];
   // Fallback for any remaining AST node (e.g. CborEmbeddedCBOR): canonical CBOR bytes.
   const bytes = key.toCBOR();
-  let hex = 'c:';
+  let hex = '';
   for (const b of bytes) hex += b.toString(16).padStart(2, '0');
-  return hex;
+  return ['c', hex];
+}
+
+function fingerprintKey(key: CborItem): string {
+  return JSON.stringify(fingerprintKeyVal(key));
 }
 
 /**
