@@ -50,16 +50,15 @@ export function parseCDN(text: string, options?: FromCDNOptions): CborItem {
  *  integer token value and return both the numeric string and the width. */
 function parseIntegerRaw(raw: string): {
   numStr: string;
-  encodingWidth: EncodingWidth | undefined;
+  rawSuffix: string | undefined;
 } {
   let numStr = raw;
-  let encodingWidth: EncodingWidth | undefined;
-  if (/[_][0-3i]$/.test(raw)) {
-    const suffix = raw[raw.length - 1]!;
-    encodingWidth = suffix === 'i' ? 'i' : (Number(suffix) as EncodingWidth);
+  let rawSuffix: string | undefined;
+  if (/[_][0-7i]$/.test(raw)) {
+    rawSuffix = raw[raw.length - 1]!;
     numStr = raw.slice(0, -2);
   }
-  return { numStr, encodingWidth };
+  return { numStr, rawSuffix };
 }
 
 function parseBigInt(raw: string): bigint {
@@ -74,22 +73,34 @@ function parseFloatToken(
   value: number;
   precision: FloatPrecision | undefined;
 } {
-  if (raw === 'NaN') return { value: NaN, precision: undefined };
-  if (raw === 'Infinity') return { value: Infinity, precision: undefined };
-  if (raw === '-Infinity') return { value: -Infinity, precision: undefined };
-
-  // _0 and _i are not valid encoding indicators for floating-point values
-  // (floats use _1=half, _2=single, _3=double; _0 is 1-byte integer arg, _i is immediate)
+  // Strip any invalid encoding indicator first, before NaN/Infinity checks,
+  // so that e.g. "NaN_7" still resolves to NaN after the suffix is removed.
   if (raw.endsWith('_i') || raw.endsWith('_0')) {
     const msg =
       '_0 and _i encoding indicators are not valid for floating-point values';
     if (onRecoverableError) {
       onRecoverableError(msg);
-      raw = raw.slice(0, -2); // strip the invalid indicator and continue
+      raw = raw.slice(0, -2);
+    } else {
+      throw new SyntaxError(`EDN parse error: ${msg}`);
+    }
+  } else if (/[_][4567]$/.test(raw)) {
+    const suffix = raw[raw.length - 1]!;
+    const msg =
+      suffix === '7'
+        ? 'indefinite-length encoding (_7) is not valid for floating-point values'
+        : `encoding indicator _${suffix} (AI ${Number(suffix) + 24}) is reserved and not valid`;
+    if (onRecoverableError) {
+      onRecoverableError(msg);
+      raw = raw.slice(0, -2);
     } else {
       throw new SyntaxError(`EDN parse error: ${msg}`);
     }
   }
+
+  if (raw === 'NaN') return { value: NaN, precision: undefined };
+  if (raw === 'Infinity') return { value: Infinity, precision: undefined };
+  if (raw === '-Infinity') return { value: -Infinity, precision: undefined };
 
   let numStr = raw;
   let precision: FloatPrecision | undefined;
@@ -471,11 +482,13 @@ class CDNParser {
 
   private parseIntegerOrTag(): CborItem {
     const tok = this.t.consume(); // INTEGER
-    const { numStr, encodingWidth: embeddedEW } = parseIntegerRaw(tok.value);
+    const { numStr, rawSuffix } = parseIntegerRaw(tok.value);
     // Hex/octal/binary literals return before the suffix check in the tokenizer,
     // so their encoding indicator arrives as a separate ENCODING_INDICATOR token.
-    const encodingWidth =
-      embeddedEW !== undefined ? embeddedEW : this.consumeEncodingIndicator();
+    let encodingWidth =
+      rawSuffix !== undefined
+        ? this._resolveEncodingWidth(rawSuffix, tok)
+        : this.consumeEncodingIndicator();
     const n = parseBigInt(numStr);
 
     // Out-of-range integers become bignum tags per RFC 8949 §3.4.3.
@@ -487,6 +500,17 @@ class CDNParser {
     }
     if (n < -(0xffff_ffff_ffff_ffffn + 1n)) {
       return new CborBigNint(n);
+    }
+
+    // Validate that the value fits in the requested encoding width.
+    // For nint, the CBOR argument is abs(n)−1 (e.g. -1 → 0, -24 → 23).
+    if (encodingWidth !== undefined) {
+      const storedValue = n >= 0n ? n : -(n + 1n);
+      encodingWidth = this._validateEncodingFit(
+        storedValue,
+        encodingWidth,
+        tok
+      );
     }
 
     const intNode =
@@ -505,19 +529,32 @@ class CDNParser {
       if (!(intNode instanceof CborUint))
         this._fail('tag number must be non-negative', tok);
       this.t.consume(); // (
+      // Rescue setup warnings before content's parseValue() drains them into the content node.
+      const setupWarnings = this._pendingWarnings.splice(0);
       const content = this.parseValue();
       this.expect('RPAREN');
       const tagNum = intNode.value;
       const ext = this.extByTag.get(tagNum);
       if (ext?.parseTag) {
         const result = ext.parseTag(tagNum, content);
-        if (result !== undefined) return result;
+        if (result !== undefined) {
+          if (setupWarnings.length > 0) {
+            result.warnings ??= [];
+            result.warnings.push(...setupWarnings);
+          }
+          return result;
+        }
       }
-      return new CborTag(
+      const tagResult = new CborTag(
         tagNum,
         content,
         encodingWidth !== undefined ? { encodingWidth } : undefined
       );
+      if (setupWarnings.length > 0) {
+        tagResult.warnings ??= [];
+        tagResult.warnings.push(...setupWarnings);
+      }
+      return tagResult;
     }
     return intNode;
   }
@@ -540,7 +577,8 @@ class CDNParser {
 
     // Fast path: no concatenation
     if (this.t.peek().type !== 'PLUS') {
-      const ew = this.consumeEncodingIndicator();
+      const byteLen = BigInt(new TextEncoder().encode(tok.value).length);
+      const ew = this.consumeEncodingIndicator(byteLen);
       return new CborTextString(
         tok.value,
         ew !== undefined ? { encodingWidth: ew } : undefined
@@ -578,9 +616,11 @@ class CDNParser {
 
     if (!hasEllipsis) {
       // No ellipsis — join all text fragments into a single CborTextString
-      const ew = this.consumeEncodingIndicator();
+      const joined = parts.map((p) => ('text' in p ? p.text : '')).join('');
+      const byteLen = BigInt(new TextEncoder().encode(joined).length);
+      const ew = this.consumeEncodingIndicator(byteLen);
       return new CborTextString(
-        parts.map((p) => ('text' in p ? p.text : '')).join(''),
+        joined,
         ew !== undefined ? { encodingWidth: ew } : undefined
       );
     }
@@ -668,7 +708,7 @@ class CDNParser {
     firstSource: string
   ): CborByteString | CborEllipsis {
     if (this.t.peek().type !== 'PLUS') {
-      const ew = this.consumeEncodingIndicator();
+      const ew = this.consumeEncodingIndicator(BigInt(first.length));
       const ednEncoding = this._tokenTypeToCdnEncoding(firstType);
       return new CborByteString(first, {
         ednEncoding,
@@ -718,12 +758,13 @@ class CDNParser {
     }
 
     if (!hasEllipsis) {
-      const ew = this.consumeEncodingIndicator();
       const allBytes = parts.map((p) =>
         'bytes' in p ? p.bytes : new Uint8Array(0)
       );
+      const concat = this._concatBytes(allBytes);
+      const ew = this.consumeEncodingIndicator(BigInt(concat.length));
       return new CborByteString(
-        this._concatBytes(allBytes),
+        concat,
         ew !== undefined ? { encodingWidth: ew } : undefined
       );
     }
@@ -863,13 +904,25 @@ class CDNParser {
     this.t.consume(); // [
     let indefiniteLength = false;
     let encodingWidth: EncodingWidth | undefined;
+    let eiTok: Token | undefined;
     if (this.t.peek().type === 'UNDERSCORE') {
       this.t.consume();
       indefiniteLength = true;
     } else if (this.t.peek().type === 'ENCODING_INDICATOR') {
-      const v = this.t.consume().value;
-      encodingWidth = v === 'i' ? 'i' : (Number(v) as EncodingWidth);
+      eiTok = this.t.consume();
+      if (eiTok.value === '7') {
+        indefiniteLength = true;
+        const msg =
+          'encoding indicator _7 is non-standard; use _ to indicate indefinite length';
+        this._warn(msg, eiTok);
+        if (this._options.strict !== false) this._fail(msg, eiTok);
+        eiTok = undefined;
+      } else {
+        encodingWidth = this._resolveEncodingWidth(eiTok.value, eiTok);
+      }
     }
+    // Rescue setup warnings before inner parseValue() calls drain them into child nodes.
+    const setupWarnings = this._pendingWarnings.splice(0);
     const items: CborItem[] = [];
     while (this.t.peek().type !== 'RBRACKET') {
       if (items.length > 0 && this.t.peek().type === 'COMMA') {
@@ -879,20 +932,48 @@ class CDNParser {
       items.push(this.parseValue());
     }
     this.expect('RBRACKET');
-    return new CborArray(items, { indefiniteLength, encodingWidth });
+    if (encodingWidth !== undefined && eiTok !== undefined) {
+      encodingWidth = this._validateEncodingFit(
+        BigInt(items.length),
+        encodingWidth,
+        eiTok
+      );
+      // _validateEncodingFit may add to _pendingWarnings; outer parseValue() flushes those.
+    }
+    const arrayResult = new CborArray(items, {
+      indefiniteLength,
+      encodingWidth,
+    });
+    if (setupWarnings.length > 0) {
+      arrayResult.warnings ??= [];
+      arrayResult.warnings.push(...setupWarnings);
+    }
+    return arrayResult;
   }
 
   private parseMap(): CborMap {
     this.t.consume(); // {
     let indefiniteLength = false;
     let encodingWidth: EncodingWidth | undefined;
+    let eiTok: Token | undefined;
     if (this.t.peek().type === 'UNDERSCORE') {
       this.t.consume();
       indefiniteLength = true;
     } else if (this.t.peek().type === 'ENCODING_INDICATOR') {
-      const v = this.t.consume().value;
-      encodingWidth = v === 'i' ? 'i' : (Number(v) as EncodingWidth);
+      eiTok = this.t.consume();
+      if (eiTok.value === '7') {
+        indefiniteLength = true;
+        const msg =
+          'encoding indicator _7 is non-standard; use _ to indicate indefinite length';
+        this._warn(msg, eiTok);
+        if (this._options.strict !== false) this._fail(msg, eiTok);
+        eiTok = undefined;
+      } else {
+        encodingWidth = this._resolveEncodingWidth(eiTok.value, eiTok);
+      }
     }
+    // Rescue setup warnings before inner parseValue() calls drain them into child nodes.
+    const setupWarnings = this._pendingWarnings.splice(0);
     const entries: [CborItem, CborItem][] = [];
     while (this.t.peek().type !== 'RBRACE') {
       if (entries.length > 0 && this.t.peek().type === 'COMMA') {
@@ -905,7 +986,19 @@ class CDNParser {
       entries.push([key, val]);
     }
     this.expect('RBRACE');
-    return new CborMap(entries, { indefiniteLength, encodingWidth });
+    if (encodingWidth !== undefined && eiTok !== undefined) {
+      encodingWidth = this._validateEncodingFit(
+        BigInt(entries.length),
+        encodingWidth,
+        eiTok
+      );
+    }
+    const mapResult = new CborMap(entries, { indefiniteLength, encodingWidth });
+    if (setupWarnings.length > 0) {
+      mapResult.warnings ??= [];
+      mapResult.warnings.push(...setupWarnings);
+    }
+    return mapResult;
   }
 
   /** Parses `(_ chunk, chunk, ...)` — indefinite byte or text string. */
@@ -913,10 +1006,33 @@ class CDNParser {
     | CborIndefiniteByteString
     | CborIndefiniteTextString {
     this.t.consume(); // (
-    const us = this.t.peek();
-    if (us.type !== 'UNDERSCORE')
-      this._fail(`expected _ after (, got ${JSON.stringify(us.value)}`, us);
-    this.t.consume(); // _
+    const next = this.t.peek();
+    if (next.type === 'UNDERSCORE') {
+      this.t.consume(); // _
+    } else if (next.type === 'ENCODING_INDICATOR' && next.value === '7') {
+      this.t.consume(); // _7 — alias for _, but non-standard
+      const msg7 =
+        'encoding indicator _7 is non-standard; use _ to indicate indefinite length';
+      this._warn(msg7, next);
+      if (this._options.strict !== false) this._fail(msg7, next);
+    } else if (next.type === 'ENCODING_INDICATOR') {
+      // _0–_6: not meaningful here; warn and drop, then parse chunks
+      const tok = this.t.consume();
+      const msg = `encoding indicator _${tok.value} is not valid in an indefinite string group; use _`;
+      this._warn(msg, tok);
+      if (this._options.strict !== false) this._fail(msg, tok);
+    } else if (next.type !== 'RPAREN') {
+      // No indicator at all — warn that _ is expected, then parse chunks
+      const msg =
+        'indefinite string group is missing _ after (; interpreting as (_ ...)';
+      this._warn(msg, next);
+      if (this._options.strict !== false) this._fail(msg, next);
+      // Do not consume — the next token is the first chunk
+    }
+
+    // Rescue any warnings emitted above from _pendingWarnings before inner
+    // parseValue() calls for each chunk drain them into the wrong node.
+    const setupWarnings = this._pendingWarnings.splice(0);
 
     const chunks: CborItem[] = [];
     while (this.t.peek().type !== 'RPAREN') {
@@ -943,7 +1059,9 @@ class CDNParser {
           `indefinite byte string chunk ${i} must be a byte string, not a text string`
         );
       });
-      return new CborIndefiniteByteString(byteChunks);
+      const result = new CborIndefiniteByteString(byteChunks);
+      if (setupWarnings.length > 0) result.warnings = setupWarnings;
+      return result;
     }
     if (first instanceof CborTextString) {
       const textChunks = chunks.map((c, i) => {
@@ -952,18 +1070,30 @@ class CDNParser {
           `indefinite text string chunk ${i} must be a text string, not a byte string`
         );
       });
-      return new CborIndefiniteTextString(textChunks);
+      const result = new CborIndefiniteTextString(textChunks);
+      if (setupWarnings.length > 0) result.warnings = setupWarnings;
+      return result;
     }
     this._fail('indefinite group chunks must be byte strings or text strings');
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────
 
-  /** Consume an ENCODING_INDICATOR token if present, returning the width. */
-  private consumeEncodingIndicator(): EncodingWidth | undefined {
+  /**
+   * Consume an ENCODING_INDICATOR token if present.
+   * Validates the indicator type (reserved/indefinite), and when `storedValue`
+   * is supplied also checks that the value fits in the requested encoding width.
+   */
+  private consumeEncodingIndicator(
+    storedValue?: bigint
+  ): EncodingWidth | undefined {
     if (this.t.peek().type === 'ENCODING_INDICATOR') {
-      const v = this.t.consume().value;
-      return v === 'i' ? 'i' : (Number(v) as EncodingWidth);
+      const tok = this.t.consume();
+      let ew = this._resolveEncodingWidth(tok.value, tok);
+      if (ew !== undefined && storedValue !== undefined) {
+        ew = this._validateEncodingFit(storedValue, ew, tok);
+      }
+      return ew;
     }
     return undefined;
   }
@@ -976,6 +1106,55 @@ class CDNParser {
         tok
       );
     return tok;
+  }
+
+  /**
+   * Validate that `storedValue` fits in the given encoding width.
+   * Returns `ew` if valid; warns and returns `undefined` if not (throws in strict mode).
+   * `storedValue` is the CBOR argument: the integer itself for uint/tag, `abs(n)−1` for nint,
+   * the byte-length for strings, or the item count for arrays/maps.
+   */
+  private _validateEncodingFit(
+    storedValue: bigint,
+    ew: EncodingWidth,
+    tok: Token
+  ): EncodingWidth | undefined {
+    const maxForWidth: Record<EncodingWidth, bigint> = {
+      i: 23n,
+      0: 0xffn,
+      1: 0xffffn,
+      2: 0xffff_ffffn,
+      3: 0xffff_ffff_ffff_ffffn,
+    };
+    if (storedValue <= maxForWidth[ew]) return ew;
+    const label =
+      ew === 'i' ? '_i (max 23)' : `_${ew} (max ${maxForWidth[ew]})`;
+    const msg = `value ${storedValue} does not fit in encoding indicator ${label}`;
+    this._warn(msg, tok);
+    if (this._options.strict !== false) this._fail(msg, tok);
+    return undefined;
+  }
+
+  private _resolveEncodingWidth(
+    raw: string,
+    tok: Token
+  ): EncodingWidth | undefined {
+    if (raw === '4' || raw === '5' || raw === '6') {
+      const ai = Number(raw) + 24; // 28, 29, or 30 — reserved in RFC 8949
+      const msg = `encoding indicator _${raw} (AI ${ai}) is reserved and not valid`;
+      this._warn(msg, tok);
+      if (this._options.strict !== false) this._fail(msg, tok);
+      return undefined;
+    }
+    if (raw === '7') {
+      const msg =
+        'indefinite-length encoding (_7) is not valid here; use [_ ...] or {_ ...} for indefinite collections';
+      this._warn(msg, tok);
+      if (this._options.strict !== false) this._fail(msg, tok);
+      return undefined;
+    }
+    if (raw === 'i') return 'i';
+    return Number(raw) as EncodingWidth; // '0'–'3' → 0–3
   }
 
   private _warn(msg: string, tok?: Token): void {

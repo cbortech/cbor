@@ -676,6 +676,71 @@ describe('parseCDN — indefinite text string', () => {
   });
 });
 
+describe('parseCDN — indefinite group: _7 alias and missing _ recovery', () => {
+  test('(_7 "a", "b") strict: false warns and parses as indefinite text string', () => {
+    const warnings: ParseWarning[] = [];
+    const n = parseCDN('(_7 "a", "b")', {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborIndefiniteTextString;
+    expect(n).toBeInstanceOf(CborIndefiniteTextString);
+    expect(n.chunks).toHaveLength(2);
+    expect(n.chunks[0].value).toBe('a');
+    expect(n.chunks[1].value).toBe('b');
+    // _7 is non-standard but valid — warns without throwing
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toMatch(/_7.*non-standard/);
+    // Warning is on the group node, not on a chunk
+    expect(n.warnings).toHaveLength(1);
+    expect(n.chunks[0].warnings).toBeUndefined();
+  });
+
+  test("(_7 h'aa', h'bb') strict: false warns and parses as indefinite byte string", () => {
+    const n = parseCDN("(_7 h'aa', h'bb')", {
+      strict: false,
+      silent: true,
+    }) as CborIndefiniteByteString;
+    expect(n).toBeInstanceOf(CborIndefiniteByteString);
+    expect(n.chunks[0].value).toEqual(new Uint8Array([0xaa]));
+    expect(n.chunks[1].value).toEqual(new Uint8Array([0xbb]));
+    expect(n.warnings).toHaveLength(1);
+    expect(n.warnings![0].message).toMatch(/_7.*non-standard/);
+  });
+
+  test('(_7 "a") strict: true throws', () => {
+    expect(() => parseCDN('(_7 "a")')).toThrow(SyntaxError);
+  });
+
+  test('("a", "b") strict: true throws', () => {
+    expect(() => parseCDN('("a", "b")')).toThrow(SyntaxError);
+  });
+
+  test('("a", "b") strict: false warns and parses as indefinite text string', () => {
+    const warnings: ParseWarning[] = [];
+    const n = parseCDN('("a", "b")', {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborIndefiniteTextString;
+    expect(n).toBeInstanceOf(CborIndefiniteTextString);
+    expect(n.chunks).toHaveLength(2);
+    expect(n.chunks[0].value).toBe('a');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toMatch(/missing _/);
+    expect(n.warnings).toHaveLength(1);
+  });
+
+  test("(h'aa', h'bb') strict: false warns and parses as indefinite byte string", () => {
+    const warnings: ParseWarning[] = [];
+    const n = parseCDN("(h'aa', h'bb')", {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborIndefiniteByteString;
+    expect(n).toBeInstanceOf(CborIndefiniteByteString);
+    expect(n.chunks[0].value).toEqual(new Uint8Array([0xaa]));
+    expect(warnings[0].message).toMatch(/missing _/);
+  });
+});
+
 // ─── Arrays ───────────────────────────────────────────────────────────────────
 
 describe('parseCDN — arrays', () => {
@@ -2081,6 +2146,358 @@ describe('strict mode', () => {
       } finally {
         spy.mockRestore();
       }
+    });
+  });
+
+  describe('reserved encoding indicators _4 / _5 / _6', () => {
+    test('strict: true throws on _4 for integer', () => {
+      expect(() => parseCDN('1_4')).toThrow(SyntaxError);
+    });
+
+    test('strict: false warns and drops _4 for integer', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('1_4', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborUint);
+      expect((result as CborUint).value).toBe(1n);
+      expect((result as CborUint).encodingWidth).toBeUndefined();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].message).toMatch(/_4.*AI 28/);
+    });
+
+    test('strict: false warns and drops _6 for float', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('1.5_6', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborFloat);
+      expect((result as CborFloat).value).toBe(1.5);
+      expect(warnings[0].message).toMatch(/_6.*AI 30/);
+    });
+
+    test('strict: false warns and drops _5 for byte string', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN("h'ff'_5", {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborByteString);
+      expect((result as CborByteString).encodingWidth).toBeUndefined();
+      expect(warnings[0].message).toMatch(/_5.*AI 29/);
+    });
+
+    test('strict: false warns and drops _4 for array encoding width', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('[_4 1, 2]', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborArray);
+      expect((result as CborArray).encodingWidth).toBeUndefined();
+      expect(warnings[0].message).toMatch(/_4.*AI 28/);
+    });
+
+    test('reserved indicator warning attached to AST node', () => {
+      const result = parseCDN('42_6', { strict: false, silent: true });
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings![0].message).toMatch(/_6/);
+    });
+
+    test('NaN_5: warns and returns NaN', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('NaN_5', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborFloat);
+      expect(isNaN((result as CborFloat).value)).toBe(true);
+      expect(warnings[0].message).toMatch(/_5/);
+    });
+  });
+
+  describe('_7 as indefinite-length encoding indicator', () => {
+    test('[_7 ...] strict: true throws', () => {
+      expect(() => parseCDN('[_7 1, 2]')).toThrow(SyntaxError);
+    });
+
+    test('[_7 ...] strict: false warns and produces indefinite array', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('[_7 1, 2]', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborArray);
+      expect((result as CborArray).indefiniteLength).toBe(true);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].message).toMatch(/_7.*non-standard/);
+      expect(result.warnings).toHaveLength(1);
+    });
+
+    test('{_7 "k": "v"} strict: true throws', () => {
+      expect(() => parseCDN('{_7 "k": "v"}')).toThrow(SyntaxError);
+    });
+
+    test('{_7 "k": "v"} strict: false warns and produces indefinite map', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('{_7 "k": "v"}', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborMap);
+      expect((result as CborMap).indefiniteLength).toBe(true);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].message).toMatch(/_7.*non-standard/);
+      expect(result.warnings).toHaveLength(1);
+    });
+
+    test('strict: true throws _7 on integer', () => {
+      expect(() => parseCDN('1_7')).toThrow(SyntaxError);
+    });
+
+    test('strict: false warns and drops _7 on integer', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('1_7', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborUint);
+      expect((result as CborUint).value).toBe(1n);
+      expect((result as CborUint).encodingWidth).toBeUndefined();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].message).toMatch(/indefinite/);
+    });
+
+    test('strict: false warns and drops _7 on float', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('1.5_7', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborFloat);
+      expect((result as CborFloat).value).toBe(1.5);
+      expect(warnings[0].message).toMatch(/indefinite/);
+    });
+
+    test('strict: false warns and drops _7 on byte string', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN("h'ff'_7", {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborByteString);
+      expect((result as CborByteString).encodingWidth).toBeUndefined();
+      expect(warnings[0].message).toMatch(/indefinite/);
+    });
+
+    test('Infinity_7: warns and returns Infinity', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('Infinity_7', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborFloat);
+      expect((result as CborFloat).value).toBe(Infinity);
+      expect(warnings[0].message).toMatch(/indefinite/);
+    });
+  });
+
+  describe('warning attribution — setup warnings belong to the container node', () => {
+    test('[_4 1] warning on array node, not on item 1', () => {
+      const result = parseCDN('[_4 1]', { strict: false, silent: true });
+      expect(result).toBeInstanceOf(CborArray);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings![0].message).toMatch(/_4/);
+      // The child item must be clean
+      expect((result as CborArray).items[0].warnings).toBeUndefined();
+    });
+
+    test('{_5 "k": 1} warning on map node, not on key or value', () => {
+      const result = parseCDN('{_5 "k": 1}', { strict: false, silent: true });
+      expect(result).toBeInstanceOf(CborMap);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings![0].message).toMatch(/_5/);
+      const [key, val] = (result as CborMap).entries[0];
+      expect(key.warnings).toBeUndefined();
+      expect(val.warnings).toBeUndefined();
+    });
+
+    test('1_4("hello") warning on tag node, not on content', () => {
+      const result = parseCDN('1_4("hello")', { strict: false, silent: true });
+      expect(result).toBeInstanceOf(CborTag);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings![0].message).toMatch(/_4/);
+      const content = (result as CborTag).content;
+      expect(content.warnings).toBeUndefined();
+    });
+  });
+
+  describe('indefinite group: non-standard indicators _0/_1/_2/_3/_i', () => {
+    test('(_0 "a","b") strict: true throws', () => {
+      expect(() => parseCDN('(_0 "a","b")')).toThrow(SyntaxError);
+    });
+
+    test('(_0 "a","b") strict: false warns on group, not on first chunk', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('(_0 "a","b")', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      }) as CborIndefiniteTextString;
+      expect(result).toBeInstanceOf(CborIndefiniteTextString);
+      expect(result.chunks).toHaveLength(2);
+      // Warning is on the group node, not on a chunk
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings![0].message).toMatch(/_0/);
+      expect(result.chunks[0].warnings).toBeUndefined();
+      expect(warnings).toHaveLength(1);
+    });
+
+    test("(_3 h'aa') strict: false warns and produces indefinite byte string", () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN("(_3 h'aa')", {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      }) as CborIndefiniteByteString;
+      expect(result).toBeInstanceOf(CborIndefiniteByteString);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.chunks[0].warnings).toBeUndefined();
+    });
+  });
+
+  describe('encoding indicator overflow (parse-time validation)', () => {
+    // ── integers ──────────────────────────────────────────────────────────────
+    test('strict: true throws when uint exceeds _i range', () => {
+      expect(() => parseCDN('12345678_i')).toThrow(/does not fit.*_i/);
+    });
+
+    test('strict: true throws when uint exceeds _0 range', () => {
+      expect(() => parseCDN('300_0')).toThrow(/does not fit.*_0/);
+    });
+
+    test('strict: true throws when nint CBOR argument exceeds _i range', () => {
+      // -25 → argument = 24, which exceeds _i max of 23
+      expect(() => parseCDN('-25_i')).toThrow(/does not fit.*_i/);
+    });
+
+    test('strict: false warns and falls back to natural encoding for 12345678_i', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('12345678_i', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborUint);
+      expect((result as CborUint).value).toBe(12345678n);
+      expect((result as CborUint).encodingWidth).toBeUndefined();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].message).toMatch(/12345678.*_i/);
+      // toCBOR() must succeed with natural (4-byte) encoding
+      expect(result.toCBOR()).toEqual(
+        new Uint8Array([0x1a, 0x00, 0xbc, 0x61, 0x4e])
+      );
+    });
+
+    test('strict: false warns and falls back for -25_i', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('-25_i', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborNint);
+      expect((result as CborNint).value).toBe(-25n);
+      expect((result as CborNint).encodingWidth).toBeUndefined();
+      expect(warnings[0].message).toMatch(/24.*_i/);
+    });
+
+    test('nint within _i range is accepted: -24_i', () => {
+      // -24 → argument = 23, fits in _i
+      const result = parseCDN('-24_i');
+      expect(result).toBeInstanceOf(CborNint);
+      expect((result as CborNint).encodingWidth).toBe('i');
+    });
+
+    test('uint at _i boundary is accepted: 23_i', () => {
+      const result = parseCDN('23_i');
+      expect(result).toBeInstanceOf(CborUint);
+      expect((result as CborUint).encodingWidth).toBe('i');
+    });
+
+    // ── text strings ──────────────────────────────────────────────────────────
+    test('strict: true throws when text string byte-length exceeds _i range', () => {
+      // 24-character ASCII string → 24 UTF-8 bytes > 23
+      expect(() => parseCDN('"a 24-char string here!!!"_i')).toThrow(
+        /does not fit.*_i/
+      );
+    });
+
+    test('strict: false warns and drops _i on oversized text string', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('"a 24-char string here!!!"_i', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborTextString);
+      expect((result as CborTextString).encodingWidth).toBeUndefined();
+      expect(warnings[0].message).toMatch(/24.*_i/);
+    });
+
+    test('text string within _i range is accepted', () => {
+      const result = parseCDN('"hello"_i'); // 5 bytes
+      expect(result).toBeInstanceOf(CborTextString);
+      expect((result as CborTextString).encodingWidth).toBe('i');
+    });
+
+    // ── byte strings ──────────────────────────────────────────────────────────
+    test('strict: true throws when byte string length exceeds _i range', () => {
+      // 24 bytes (0x00–0x17) → does not fit in _i (max 23)
+      expect(() =>
+        parseCDN("h'000102030405060708090a0b0c0d0e0f1011121314151617'_i")
+      ).toThrow(/does not fit.*_i/);
+    });
+
+    test('strict: false warns and drops _i on oversized byte string', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN(
+        "h'000102030405060708090a0b0c0d0e0f1011121314151617'_i",
+        { strict: false, onWarning: (w) => warnings.push(w) }
+      );
+      expect(result).toBeInstanceOf(CborByteString);
+      expect((result as CborByteString).encodingWidth).toBeUndefined();
+      expect(warnings[0].message).toMatch(/24.*_i/);
+    });
+
+    // ── arrays ────────────────────────────────────────────────────────────────
+    test('strict: true throws when array item count exceeds _i range', () => {
+      const items = Array.from({ length: 24 }, (_, i) => i).join(', ');
+      expect(() => parseCDN(`[_i ${items}]`)).toThrow(/does not fit.*_i/);
+    });
+
+    test('strict: false warns and drops _i on oversized array', () => {
+      const warnings: ParseWarning[] = [];
+      const items = Array.from({ length: 24 }, (_, i) => i).join(', ');
+      const result = parseCDN(`[_i ${items}]`, {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborArray);
+      expect((result as CborArray).encodingWidth).toBeUndefined();
+      expect(warnings[0].message).toMatch(/24.*_i/);
+    });
+
+    test('array within _i count is accepted: [_i 1, 2, 3]', () => {
+      const result = parseCDN('[_i 1, 2, 3]');
+      expect(result).toBeInstanceOf(CborArray);
+      expect((result as CborArray).encodingWidth).toBe('i');
+    });
+
+    // ── maps ──────────────────────────────────────────────────────────────────
+    test('strict: true throws when map entry count exceeds _0 range', () => {
+      // build a map with 256 entries
+      const entries = Array.from({ length: 256 }, (_, i) => `${i}: ${i}`).join(
+        ', '
+      );
+      expect(() => parseCDN(`{_0 ${entries}}`)).toThrow(/does not fit.*_0/);
     });
   });
 });

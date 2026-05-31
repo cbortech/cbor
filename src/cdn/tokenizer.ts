@@ -1087,7 +1087,7 @@ export class Tokenizer {
         const after = rest[8] ?? '';
         const hasSuffix =
           after === '_' &&
-          /[0-3i]/.test(rest[9] ?? '') &&
+          /[0-7i]/.test(rest[9] ?? '') &&
           !/[a-zA-Z0-9_]/.test(rest[10] ?? '');
         if (!/[a-zA-Z0-9_]/.test(after) || hasSuffix) {
           this._advance(); // -
@@ -1106,7 +1106,7 @@ export class Tokenizer {
         const after = rest[8] ?? '';
         const hasSuffix =
           after === '_' &&
-          /[0-3i]/.test(rest[9] ?? '') &&
+          /[0-7i]/.test(rest[9] ?? '') &&
           !/[a-zA-Z0-9_]/.test(rest[10] ?? '');
         if (!/[a-zA-Z0-9_]/.test(after) || hasSuffix) {
           this._advance(); // +
@@ -1190,12 +1190,20 @@ export class Tokenizer {
           this._fail(`hex float missing 'p' exponent: ${raw}`, line, col);
         }
         if (isHexFloat) {
-          // Encoding-indicator suffix _0/_1/_2/_3/_i for hex floats
+          // Encoding-indicator suffix _0/_1/_2/_3/_4/_5/_6/_7/_i for hex floats
           if (this._ch() === '_') {
             const d = this.input[this.pos + 1] ?? '';
             const after = this.input[this.pos + 2] ?? '';
             if (
-              (d === '0' || d === '1' || d === '2' || d === '3' || d === 'i') &&
+              (d === '0' ||
+                d === '1' ||
+                d === '2' ||
+                d === '3' ||
+                d === '4' ||
+                d === '5' ||
+                d === '6' ||
+                d === '7' ||
+                d === 'i') &&
               !/[0-9a-zA-Z_]/.test(after)
             ) {
               raw += this._advance() + this._advance();
@@ -1246,12 +1254,20 @@ export class Tokenizer {
         );
     }
 
-    // Encoding-indicator suffix _0 / _1 / _2 / _3 (no whitespace, not followed by more ident chars)
+    // Encoding-indicator suffix _0–_7 / _i (no whitespace, not followed by more ident chars)
     if (this._ch() === '_') {
       const d = this.input[this.pos + 1] ?? '';
       const after = this.input[this.pos + 2] ?? '';
       if (
-        (d === '0' || d === '1' || d === '2' || d === '3' || d === 'i') &&
+        (d === '0' ||
+          d === '1' ||
+          d === '2' ||
+          d === '3' ||
+          d === '4' ||
+          d === '5' ||
+          d === '6' ||
+          d === '7' ||
+          d === 'i') &&
         !/[0-9a-zA-Z_]/.test(after)
       ) {
         // Include the suffix in the raw value.
@@ -1287,12 +1303,20 @@ export class Tokenizer {
       case 'NaN_1':
       case 'NaN_2':
       case 'NaN_3':
+      case 'NaN_4':
+      case 'NaN_5':
+      case 'NaN_6':
+      case 'NaN_7':
       case 'NaN_i':
       case 'Infinity':
       case 'Infinity_0':
       case 'Infinity_1':
       case 'Infinity_2':
       case 'Infinity_3':
+      case 'Infinity_4':
+      case 'Infinity_5':
+      case 'Infinity_6':
+      case 'Infinity_7':
       case 'Infinity_i':
         return { type: 'FLOAT', value: ident, line, col };
       case 'simple':
@@ -1308,6 +1332,16 @@ export class Tokenizer {
         return { type: 'ENCODING_INDICATOR', value: '2', line, col };
       case '_3':
         return { type: 'ENCODING_INDICATOR', value: '3', line, col };
+      case '_4':
+        return { type: 'ENCODING_INDICATOR', value: '4', line, col };
+      case '_5':
+        return { type: 'ENCODING_INDICATOR', value: '5', line, col };
+      case '_6':
+        return { type: 'ENCODING_INDICATOR', value: '6', line, col };
+      case '_7':
+        // _7 = AI 31 = indefinite-length; kept as ENCODING_INDICATOR so that
+        // bare `_` (UNDERSCORE) and explicit `_7` stay distinguishable.
+        return { type: 'ENCODING_INDICATOR', value: '7', line, col };
       case '_i':
         return { type: 'ENCODING_INDICATOR', value: 'i', line, col };
     }
