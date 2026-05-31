@@ -6,6 +6,7 @@ import type {
   ToCBOROptions,
   CborComments,
   DecodeWarning,
+  ParseWarning,
 } from '../types';
 import { CBOR_OMIT } from '../types';
 
@@ -45,10 +46,11 @@ export abstract class CborItem {
   comments?: CborComments;
 
   /**
-   * Validity violations detected during CBOR decoding of this node.
-   * Only populated when `strict: false` is set in `FromCBOROptions`.
+   * Validity violations detected while decoding or parsing this node.
+   * Populated when `strict: false` is set in `FromCBOROptions` or
+   * `FromCDNOptions`.
    */
-  warnings?: DecodeWarning[];
+  warnings?: (DecodeWarning | ParseWarning)[];
 
   /**
    * Default options bound by a {@link CBOR} instance factory method.

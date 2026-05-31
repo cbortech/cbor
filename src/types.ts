@@ -106,6 +106,20 @@ export interface DecodeWarning {
   offset: number;
 }
 
+/**
+ * A CDN/EDN validity violation detected during parsing.
+ */
+export interface ParseWarning {
+  /** Human-readable description of the violation. */
+  message: string;
+  /** Character offset within the input text where the violation was detected. */
+  offset?: number;
+  /** Line number (1-based) where the violation was detected. */
+  line?: number;
+  /** Column number (1-based) where the violation was detected. */
+  column?: number;
+}
+
 export interface FromCBOROptions {
   /**
    * Byte offset within the supplied input at which CBOR decoding starts.
@@ -264,6 +278,40 @@ export interface FromCDNOptions {
    * @default false
    */
   preserveComments?: boolean;
+
+  /**
+   * Controls how CDN/EDN validity violations are handled.
+   *
+   * - `true` (default): recoverable violations call `onWarning` and then throw.
+   * - `false`: recoverable violations call `onWarning` and parsing continues
+   *   with a best-effort interpretation of the input.
+   *
+   * Hard syntax errors (e.g. unterminated strings, unexpected tokens) always
+   * throw regardless of this setting.
+   *
+   * @default true
+   */
+  strict?: boolean;
+
+  /**
+   * Callback invoked when a CDN/EDN validity violation is detected.
+   *
+   * In strict mode (the default), this is called before the error is thrown.
+   * In non-strict mode (`strict: false`), this is called and parsing continues.
+   *
+   * If not supplied and `silent` is not `true`, violations are reported via
+   * `console.warn`.
+   */
+  onWarning?: (warning: ParseWarning) => void;
+
+  /**
+   * When `true`, suppresses the default `console.warn` output for validity
+   * violations.  An explicit `onWarning` callback is still invoked even when
+   * `silent` is `true`.
+   *
+   * @default false
+   */
+  silent?: boolean;
 }
 
 /**

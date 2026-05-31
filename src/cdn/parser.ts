@@ -5,7 +5,12 @@ import {
   type TokenType,
 } from './tokenizer';
 import type { CborItem } from '../ast/CborItem';
-import type { CborComment, FromCDNOptions, CborExtension } from '../types';
+import type {
+  CborComment,
+  FromCDNOptions,
+  CborExtension,
+  ParseWarning,
+} from '../types';
 import { CborUint } from '../ast/CborUint';
 import { CborNint } from '../ast/CborNint';
 import { CborByteString } from '../ast/CborByteString';
@@ -33,13 +38,7 @@ import { CborBigUint, CborBigNint } from '../ast/CborBignum';
  */
 export function parseCDN(text: string, options?: FromCDNOptions): CborItem {
   const tokenizer = new Tokenizer(text, { offset: options?.offset });
-  const parser = new CDNParser(
-    tokenizer,
-    options?.extensions,
-    options?.unresolvedExtension,
-    options?.allowInvalidUtf8,
-    options?.allowTrailing
-  );
+  const parser = new CDNParser(tokenizer, options ?? {});
   const node = parser.parse();
   if (options?.preserveComments) attachComments(node, tokenizer.comments, text);
   return node;
@@ -68,7 +67,10 @@ function parseBigInt(raw: string): bigint {
   return BigInt(raw);
 }
 
-function parseFloatToken(raw: string): {
+function parseFloatToken(
+  raw: string,
+  onRecoverableError?: (msg: string) => void
+): {
   value: number;
   precision: FloatPrecision | undefined;
 } {
@@ -78,10 +80,16 @@ function parseFloatToken(raw: string): {
 
   // _0 and _i are not valid encoding indicators for floating-point values
   // (floats use _1=half, _2=single, _3=double; _0 is 1-byte integer arg, _i is immediate)
-  if (raw.endsWith('_i') || raw.endsWith('_0'))
-    throw new SyntaxError(
-      `EDN parse error: _0 and _i encoding indicators are not valid for floating-point values`
-    );
+  if (raw.endsWith('_i') || raw.endsWith('_0')) {
+    const msg =
+      '_0 and _i encoding indicators are not valid for floating-point values';
+    if (onRecoverableError) {
+      onRecoverableError(msg);
+      raw = raw.slice(0, -2); // strip the invalid indicator and continue
+    } else {
+      throw new SyntaxError(`EDN parse error: ${msg}`);
+    }
+  }
 
   let numStr = raw;
   let precision: FloatPrecision | undefined;
@@ -119,7 +127,11 @@ function hexToBytes(hex: string): Uint8Array {
 const B32_ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 const H32_ALPHA = '0123456789ABCDEFGHIJKLMNOPQRSTUV';
 
-function base32Decode(str: string, alpha: string): Uint8Array {
+function base32Decode(
+  str: string,
+  alpha: string,
+  onRecoverableError?: (msg: string) => void
+): Uint8Array {
   // Padding is optional per the ABNF (§5.2.2 analogue for base32); strip it.
   const s = str.replace(/=+$/, '').toUpperCase();
   // RFC 4648 §6: valid unpadded lengths mod 8 are 0, 2, 4, 5, 7.
@@ -148,8 +160,14 @@ function base32Decode(str: string, alpha: string): Uint8Array {
     }
   }
   // RFC 4648 §3.5: trailing bits in the last quantum must be zero.
-  if (bufBits > 0 && (buf & ((1 << bufBits) - 1)) !== 0)
-    throw new SyntaxError('non-zero trailing bits in base32 input');
+  if (bufBits > 0 && (buf & ((1 << bufBits) - 1)) !== 0) {
+    const msg = 'non-zero trailing bits in base32 input';
+    if (onRecoverableError) {
+      onRecoverableError(msg); // warn and ignore the trailing bits
+    } else {
+      throw new SyntaxError(msg);
+    }
+  }
   return out;
 }
 
@@ -295,17 +313,17 @@ class CDNParser {
 
   private readonly unresolvedExtension: 'cpa999' | 'error';
 
+  /** Warnings accumulated during the current parseValue() call. */
+  private _pendingWarnings: ParseWarning[] = [];
+
   constructor(
     private readonly t: Tokenizer,
-    userExtensions?: CborExtension[],
-    unresolvedExtension?: 'cpa999' | 'error',
-    private readonly allowInvalidUtf8?: boolean,
-    private readonly allowTrailing?: boolean
+    private readonly _options: FromCDNOptions
   ) {
     this.extByPrefix = new Map();
     this.extByTag = new Map();
-    this.unresolvedExtension = unresolvedExtension ?? 'cpa999';
-    for (const ext of [...BUILTIN_EXTENSIONS, ...(userExtensions ?? [])]) {
+    this.unresolvedExtension = _options.unresolvedExtension ?? 'cpa999';
+    for (const ext of [...BUILTIN_EXTENSIONS, ...(_options.extensions ?? [])]) {
       for (const prefix of ext.appStringPrefixes ?? [])
         this.extByPrefix.set(prefix, ext);
       for (const tag of ext.tagNumbers ?? []) this.extByTag.set(tag, ext);
@@ -314,7 +332,7 @@ class CDNParser {
 
   parse(): CborItem {
     const value = this.parseValue();
-    if (this.allowTrailing) return value;
+    if (this._options.allowTrailing) return value;
     const next = this.t.peek();
     if (next.type !== 'EOF') {
       this._fail(
@@ -328,6 +346,11 @@ class CDNParser {
   parseValue(): CborItem {
     const start = this.t.peek().offset;
     const node = this._parseValueNode();
+    if (this._pendingWarnings.length > 0) {
+      node.warnings ??= [];
+      for (const w of this._pendingWarnings) node.warnings.push(w);
+      this._pendingWarnings = [];
+    }
     node.start = start;
     node.end = this.t.lastEndOffset;
     return node;
@@ -501,7 +524,11 @@ class CDNParser {
 
   private parseFloat(): CborItem {
     const tok = this.t.consume(); // FLOAT
-    const { value, precision } = parseFloatToken(tok.value);
+    const onRecoverableError = (msg: string) => {
+      this._warn(msg, tok);
+      if (this._options.strict !== false) this._fail(msg, tok);
+    };
+    const { value, precision } = parseFloatToken(tok.value, onRecoverableError);
     return new CborFloat(
       value,
       precision !== undefined ? { precision } : undefined
@@ -588,6 +615,10 @@ class CDNParser {
   }
 
   private _decodeBytesToken(tok: Token): Uint8Array {
+    const onRecoverableError = (msg: string) => {
+      this._warn(msg, tok);
+      if (this._options.strict !== false) this._fail(msg, tok);
+    };
     switch (tok.type) {
       case 'BYTES_HEX':
       case 'SQSTR':
@@ -595,21 +626,24 @@ class CDNParser {
       case 'BYTES_B64':
         return base64ToBytes(tok.value);
       case 'BYTES_B32':
-        return base32Decode(tok.value, B32_ALPHA);
+        return base32Decode(tok.value, B32_ALPHA, onRecoverableError);
       case 'BYTES_H32':
-        return base32Decode(tok.value, H32_ALPHA);
+        return base32Decode(tok.value, H32_ALPHA, onRecoverableError);
       default:
         this._fail(`expected byte string token`, tok);
     }
   }
 
   private _decodeUtf8(bytes: Uint8Array, tok: Token): string {
-    if (this.allowInvalidUtf8)
+    if (this._options.allowInvalidUtf8)
       return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
     try {
       return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     } catch {
-      this._fail('byte string in text concatenation is not valid UTF-8', tok);
+      const msg = 'byte string in text concatenation is not valid UTF-8';
+      this._warn(msg, tok);
+      if (this._options.strict !== false) this._fail(msg, tok);
+      return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
     }
   }
 
@@ -942,6 +976,22 @@ class CDNParser {
         tok
       );
     return tok;
+  }
+
+  private _warn(msg: string, tok?: Token): void {
+    const warning: ParseWarning = { message: msg };
+    if (tok !== undefined) {
+      warning.offset = tok.offset;
+      warning.line = tok.line;
+      warning.column = tok.col;
+    }
+    this._pendingWarnings.push(warning);
+    if (this._options.onWarning) {
+      this._options.onWarning(warning);
+    } else if (!this._options.silent) {
+      const loc = tok ? ` at line ${tok.line}, column ${tok.col}` : '';
+      console.warn(`CDN strict violation${loc}: ${msg}`);
+    }
   }
 
   private _fail(msg: string, tok?: Token): never {

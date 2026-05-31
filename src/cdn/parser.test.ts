@@ -1,5 +1,6 @@
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, vi } from 'vitest';
 import { parseCDN } from './parser';
+import type { ParseWarning } from '../types';
 import { toCDN } from './serializer';
 import { CborUint } from '../ast/CborUint';
 import { CborNint } from '../ast/CborNint';
@@ -1909,5 +1910,177 @@ describe('parseCDN — pluggable app-string extensions', () => {
 
   test("underscore prefix my_ext'...' is rejected as unknown identifier", () => {
     expect(() => parseCDN("my_ext'hello'")).toThrow(SyntaxError);
+  });
+});
+
+describe('strict mode', () => {
+  describe('float encoding indicator _0 / _i', () => {
+    test('strict: true (default) throws on _0', () => {
+      expect(() => parseCDN('1.0_0')).toThrow(SyntaxError);
+    });
+
+    test('strict: true (default) throws on _i', () => {
+      expect(() => parseCDN('1.5_i')).toThrow(SyntaxError);
+    });
+
+    test('strict: false warns and returns float for _0', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('1.0_0', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborFloat);
+      expect((result as CborFloat).value).toBe(1.0);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].message).toMatch(/_0 and _i/);
+    });
+
+    test('strict: false warns and returns float for _i', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('1.5_i', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborFloat);
+      expect((result as CborFloat).value).toBe(1.5);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].message).toMatch(/_0 and _i/);
+    });
+
+    test('strict: false warning carries line and column', () => {
+      const warnings: ParseWarning[] = [];
+      parseCDN('1.0_0', { strict: false, onWarning: (w) => warnings.push(w) });
+      expect(warnings[0].line).toBe(1);
+      expect(warnings[0].column).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('base32 non-zero trailing bits', () => {
+    // b32'AB' → 10 bits (0b0000000001), first byte 0x00, trailing bit = 1 (non-zero).
+    test('strict: true (default) throws', () => {
+      expect(() => parseCDN("b32'AB'")).toThrow(SyntaxError);
+    });
+
+    test('strict: false warns and returns bytes', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN("b32'AB'", {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborByteString);
+      expect((result as CborByteString).value).toEqual(new Uint8Array([0x00]));
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].message).toBe(
+        'non-zero trailing bits in base32 input'
+      );
+    });
+  });
+
+  describe('invalid UTF-8 in text concatenation', () => {
+    // "a" + h'ff': 0xff is not valid UTF-8.
+    test('strict: true (default) throws', () => {
+      expect(() => parseCDN('"a" + h\'ff\'')).toThrow(SyntaxError);
+    });
+
+    test('strict: false warns and returns text with replacement character', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('"a" + h\'ff\'', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborTextString);
+      expect((result as CborTextString).value).toBe('a�');
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].message).toBe(
+        'byte string in text concatenation is not valid UTF-8'
+      );
+    });
+
+    test('allowInvalidUtf8: true silently allows without warning', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('"a" + h\'ff\'', {
+        strict: false,
+        allowInvalidUtf8: true,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborTextString);
+      expect((result as CborTextString).value).toBe('a�');
+      expect(warnings).toHaveLength(0);
+    });
+  });
+
+  describe('warnings stored on AST node', () => {
+    test('float _0: warning attached to CborFloat node', () => {
+      const result = parseCDN('1.0_0', { strict: false, silent: true });
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings![0].message).toMatch(/_0 and _i/);
+    });
+
+    test('base32 trailing bits: warning attached to CborByteString node', () => {
+      const result = parseCDN("b32'AB'", { strict: false, silent: true });
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings![0].message).toBe(
+        'non-zero trailing bits in base32 input'
+      );
+    });
+
+    test('invalid UTF-8: warning attached to CborTextString node', () => {
+      const result = parseCDN('"a" + h\'ff\'', { strict: false, silent: true });
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings![0].message).toBe(
+        'byte string in text concatenation is not valid UTF-8'
+      );
+    });
+
+    test('inner element warning not leaked to outer array', () => {
+      const arr = parseCDN('[1.0_0]', { strict: false, silent: true });
+      expect(arr).toBeInstanceOf(CborArray);
+      expect(arr.warnings).toBeUndefined();
+      const inner = (arr as CborArray).items[0];
+      expect(inner.warnings).toHaveLength(1);
+    });
+  });
+
+  describe('onWarning and silent options', () => {
+    test('onWarning is called even when strict: true (before throw)', () => {
+      const warnings: ParseWarning[] = [];
+      expect(() =>
+        parseCDN('1.0_0', { strict: true, onWarning: (w) => warnings.push(w) })
+      ).toThrow(SyntaxError);
+      expect(warnings).toHaveLength(1);
+    });
+
+    test('onWarning suppresses console.warn (mutually exclusive)', () => {
+      const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        parseCDN('1.0_0', {
+          strict: false,
+          onWarning: () => {},
+        });
+        expect(spy).not.toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    test('silent: true suppresses console.warn', () => {
+      const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        parseCDN('1.0_0', { strict: false, silent: true });
+        expect(spy).not.toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    test('no onWarning and silent: false calls console.warn', () => {
+      const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        parseCDN('1.0_0', { strict: false, silent: false });
+        expect(spy).toHaveBeenCalledOnce();
+      } finally {
+        spy.mockRestore();
+      }
+    });
   });
 });
