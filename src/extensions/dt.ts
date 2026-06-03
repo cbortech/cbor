@@ -89,9 +89,21 @@ function stringFromAppSequence(items: CborItem[]): string {
  * before passing the remainder to Date.parse, so sub-millisecond precision
  * is preserved rather than being rounded to the nearest millisecond.
  */
+// RFC 3339 §5.6: date-time = full-date "T" full-time, where full-time requires
+// an offset (Z or ±HH:MM).  Anything shorter is rejected before Date.parse().
+const RFC3339_RE =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/i;
+
 export function parseDtAppString(
-  str: string
+  str: string,
+  onError?: (msg: string) => void
 ): CborEpochDtExtUint | CborEpochDtExtNint | CborEpochDtExtFloat {
+  if (!RFC3339_RE.test(str)) {
+    const msg = `dt: invalid RFC 3339 date-time: ${JSON.stringify(str)}`;
+    if (onError) onError(msg);
+    else throw new SyntaxError(msg);
+  }
+
   // Separate the fractional-seconds part (if any) from the rest of the string.
   // This avoids Date.parse() truncating to millisecond precision.
   // Pattern: ...THH:MM:SS(.frac)(Z|±HH:MM)
@@ -257,15 +269,23 @@ export function createDtExtension(options?: {
     appStringPrefixes: [PREFIX_DT, PREFIX_DT_TAGGED],
     tagNumbers: [TAG_EPOCH],
 
-    parseAppString(prefix: string, content: string): CborItem {
+    parseAppString(
+      prefix: string,
+      content: string,
+      onError?: (msg: string) => void
+    ): CborItem {
       if (prefix === PREFIX_DT_TAGGED) return makeTagged(content);
-      return parseDtAppString(content);
+      return parseDtAppString(content, onError);
     },
 
-    parseAppSequence(prefix: string, items: CborItem[]): CborItem {
+    parseAppSequence(
+      prefix: string,
+      items: CborItem[],
+      onError?: (msg: string) => void
+    ): CborItem {
       const str = stringFromAppSequence(items);
       if (prefix === PREFIX_DT_TAGGED) return makeTagged(str);
-      return parseDtAppString(str);
+      return parseDtAppString(str, onError);
     },
 
     parseTag(tag: bigint, value: CborItem): CborItem | undefined {

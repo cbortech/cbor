@@ -25,6 +25,7 @@ import { CborSimple } from '../ast/CborSimple';
 import { CborEmbeddedCBOR } from '../ast/CborEmbeddedCBOR';
 import type { EncodingWidth } from '../cbor/encode';
 import { parseHexFloat } from '../utils/hexfloat';
+import { float64ToFloat16Bits, float16BitsToFloat64 } from '../utils/float16';
 import { BUILTIN_EXTENSIONS } from '../extensions/builtins';
 import { CborUnresolvedAppExt } from '../ast/CborUnresolvedAppExt';
 import { CborEllipsis } from '../ast/CborEllipsis';
@@ -443,7 +444,11 @@ class CDNParser {
             tok
           );
         }
-        return ext.parseAppString(tok.appPrefix!, tok.value);
+        return ext.parseAppString(
+          tok.appPrefix!,
+          tok.value,
+          this._extOnError(tok)
+        );
       }
       case 'APP_SEQUENCE': {
         this.t.consume();
@@ -472,7 +477,11 @@ class CDNParser {
             `app-string extension ${JSON.stringify(tok.appPrefix)} does not support <<...>> form`,
             tok
           );
-        return seqExt.parseAppSequence(tok.appPrefix!, items);
+        return seqExt.parseAppSequence(
+          tok.appPrefix!,
+          items,
+          this._extOnError(tok)
+        );
       }
       case 'ELLIPSIS': {
         this.t.consume();
@@ -579,6 +588,18 @@ class CDNParser {
       if (this._options.strict !== false) this._fail(msg, tok);
     };
     const { value, precision } = parseFloatToken(tok.value, onRecoverableError);
+    if (precision === 'half' || precision === 'single') {
+      const roundTripped =
+        precision === 'half'
+          ? float16BitsToFloat64(float64ToFloat16Bits(value))
+          : Math.fround(value);
+      const lossless =
+        Object.is(value, roundTripped) || (isNaN(value) && isNaN(roundTripped));
+      if (!lossless)
+        onRecoverableError(
+          `${value} cannot be exactly represented as ${precision === 'half' ? 'f16 (_1)' : 'f32 (_2)'}; use _3 or remove the indicator`
+        );
+    }
     return new CborFloat(
       value,
       precision !== undefined ? { precision } : undefined
@@ -758,9 +779,16 @@ class CDNParser {
         this.t.consume();
         parts.push({ bytes: this._decodeBytesToken(next) });
       } else if (next.type === 'TSTR' || next.type === 'RAWSTRING') {
-        // Text strings in a byte-leading concat are UTF-8 encoded (same as
-        // single-quoted strings and text chunks in indefinite byte strings).
+        // §5.1: when a byte string leads, the right-hand side must also be a
+        // byte string.  Text strings are only allowed on the right of a
+        // text-leading concatenation.  In non-strict mode we UTF-8 encode
+        // the text and continue; in strict mode this is a hard error.
         this.t.consume();
+        const mixMsg =
+          'text string in a byte-string concatenation is not allowed; ' +
+          "use a byte string literal (h'...', b64'...', or '...') instead";
+        this._warn(mixMsg, next);
+        if (this._options.strict !== false) this._fail(mixMsg, next);
         parts.push({ bytes: new TextEncoder().encode(next.value) });
       } else {
         this._fail(
@@ -1168,6 +1196,14 @@ class CDNParser {
     }
     if (raw === 'i') return 'i';
     return Number(raw) as EncodingWidth; // '0'–'3' → 0–3
+  }
+
+  /** Builds the onError callback passed to extension parseAppString/parseAppSequence. */
+  private _extOnError(tok: Token): (msg: string) => void {
+    return (msg: string) => {
+      this._warn(msg, tok);
+      if (this._options.strict !== false) this._fail(msg, tok);
+    };
   }
 
   private _warn(msg: string, tok?: Token): void {

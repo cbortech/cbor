@@ -48,15 +48,30 @@ export interface CborExtension {
    * Parse an app-string literal: `prefix'content'` or `prefix"content"`.
    * Receives the matched `prefix` and the decoded string `content`.
    * Throw `SyntaxError` to report invalid content.
+   *
+   * The CDN parser always passes an `onError` callback.  Extensions may call
+   * `onError(msg)` instead of throwing to emit a recoverable violation; the
+   * callback emits a warning and, in strict mode, also throws.  Extensions
+   * that ignore `onError` and throw directly always hard-fail regardless of
+   * the `strict` setting.
    */
-  parseAppString?(prefix: string, content: string): CborItem;
+  parseAppString?(
+    prefix: string,
+    content: string,
+    onError?: (msg: string) => void
+  ): CborItem;
 
   /**
    * Parse an app-sequence literal: `prefix<<item, ...>>`.
    * Receives the matched `prefix` and the array of parsed CBOR values.
    * If omitted, the `<<...>>` form is rejected with a `SyntaxError`.
+   * The `onError` callback follows the same contract as in `parseAppString`.
    */
-  parseAppSequence?(prefix: string, items: CborItem[]): CborItem;
+  parseAppSequence?(
+    prefix: string,
+    items: CborItem[],
+    onError?: (msg: string) => void
+  ): CborItem;
 
   /**
    * Called when a `CborTag` is encountered during CBOR decode (`fromCBOR`)

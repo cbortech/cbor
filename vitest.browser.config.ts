@@ -20,6 +20,7 @@ export default mergeConfig(
       exclude: [
         'src/cbor/test-vectors.test.ts',
         'src/cdn/cdn-test-vectors.test.ts',
+        'src/cdn/edn-test-vectors.test.ts',
       ],
       coverage: {
         provider: 'v8',

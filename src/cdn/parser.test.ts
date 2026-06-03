@@ -299,16 +299,36 @@ describe('parseCDN — text strings', () => {
       ])
     );
   });
-  test('byte-leading concat with double-quoted text → UTF-8 encoded bytes', () => {
-    // h'48' = 'H', + "ello" coerced to UTF-8 bytes → "Hello"
-    const n = parseCDN('h\'48\' + "ello"') as CborByteString;
+  test('byte-leading concat with double-quoted text → strict:true throws', () => {
+    // §5.1: text string on the right of a byte-leading concat is not allowed
+    expect(() => parseCDN('h\'48\' + "ello"')).toThrow(SyntaxError);
+  });
+  test('byte-leading concat with double-quoted text → strict:false warns + UTF-8 encodes', () => {
+    const warnings: ParseWarning[] = [];
+    const n = parseCDN('h\'48\' + "ello"', {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborByteString;
     expect(n).toBeInstanceOf(CborByteString);
     expect(n.value).toEqual(new TextEncoder().encode('Hello'));
+    expect(warnings[0].message).toMatch(
+      /text string in a byte-string concatenation/
+    );
   });
-  test('byte-leading concat with backtick raw string → UTF-8 encoded bytes', () => {
-    const n = parseCDN("'' + `a`") as CborByteString;
+  test('byte-leading concat with backtick raw string → strict:true throws', () => {
+    expect(() => parseCDN("'' + `a`")).toThrow(SyntaxError);
+  });
+  test('byte-leading concat with backtick raw string → strict:false warns + UTF-8 encodes', () => {
+    const warnings: ParseWarning[] = [];
+    const n = parseCDN("'' + `a`", {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborByteString;
     expect(n).toBeInstanceOf(CborByteString);
     expect(n.value).toEqual(new TextEncoder().encode('a'));
+    expect(warnings[0].message).toMatch(
+      /text string in a byte-string concatenation/
+    );
   });
 
   test('text-leading concat with invalid UTF-8 byte chunk → SyntaxError by default', () => {
