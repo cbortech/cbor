@@ -294,8 +294,10 @@ export class Tokenizer {
     if (ch === '#') {
       while (!this._eof() && this._ch() !== '\n') {
         if (this._ch() === '\\') {
-          this._advance();
-          if (!this._eof() && this._ch() !== '\n') this._advance();
+          this._advance(); // consume '\'
+          if (this._eof() || this._ch() === '\n') continue;
+          const escaped = this._advance();
+          if (escaped === 'u') this._validateHexCommentUnicodeEscape();
           continue;
         }
         if (this._ch() === quote) break;
@@ -304,6 +306,80 @@ export class Tokenizer {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Validate a `\uXXXX` or `\u{N}` escape inside a hex-string comment.
+   *
+   * Called immediately after the `u` character has been consumed.  Rejects
+   * lone surrogates and invalid surrogate pairs; tolerates truncated/
+   * non-hex sequences (comments are informational, but surrogates are
+   * always illegal).
+   */
+  private _validateHexCommentUnicodeEscape(): void {
+    const line = this.line,
+      col = this.col;
+
+    // Extended form \u{XXXXXX}
+    if (!this._eof() && this._ch() === '{') {
+      this._advance(); // {
+      let hex = '';
+      while (!this._eof() && this._ch() !== '}' && this._ch() !== '\n')
+        hex += this._advance();
+      if (!this._eof() && this._ch() === '}') this._advance(); // }
+      const cp = parseInt(hex || '0', 16);
+      if (cp >= 0xd800 && cp <= 0xdfff)
+        this._fail(
+          `\\u{${hex}} is a surrogate code point, not allowed in hex string comments`,
+          line,
+          col
+        );
+      return;
+    }
+
+    // Standard \uXXXX — read up to 4 hex digits
+    let hex = '';
+    for (let i = 0; i < 4; i++) {
+      if (this._eof() || this._ch() === '\n') break;
+      if (!/[0-9a-fA-F]/.test(this._ch())) break;
+      hex += this._advance();
+    }
+    if (hex.length < 4) return; // truncated / non-hex — not our problem
+
+    const cp = parseInt(hex, 16);
+
+    // High surrogate: must be followed immediately by a low-surrogate escape
+    if (cp >= 0xd800 && cp <= 0xdbff) {
+      if (this._ch() !== '\\' || (this.input[this.pos + 1] ?? '') !== 'u')
+        this._fail(
+          `lone high surrogate \\u${hex} in hex string comment`,
+          line,
+          col
+        );
+      this._advance(); // \
+      this._advance(); // u
+      let hex2 = '';
+      for (let i = 0; i < 4; i++) {
+        if (this._eof() || this._ch() === '\n') break;
+        if (!/[0-9a-fA-F]/.test(this._ch())) break;
+        hex2 += this._advance();
+      }
+      const cp2 = parseInt(hex2 || '0', 16);
+      if (cp2 < 0xdc00 || cp2 > 0xdfff)
+        this._fail(
+          `\\u${hex} (high surrogate) not followed by valid low surrogate in hex string comment`,
+          line,
+          col
+        );
+      return;
+    }
+
+    if (cp >= 0xdc00 && cp <= 0xdfff)
+      this._fail(
+        `lone low surrogate \\u${hex} in hex string comment`,
+        line,
+        col
+      );
   }
 
   /**
@@ -391,13 +467,13 @@ export class Tokenizer {
    * - Literal LF (U+000A) is allowed; all other C0 controls and U+007F are rejected.
    * - Literal CR (U+000D) is silently stripped (source-level CRLF normalisation).
    * - Only spec-defined escape sequences are accepted; `\q` etc. throw SyntaxError.
-   * - `\/` is valid in both single- and double-quoted strings.
-   * - `\\` (backslash) is always a valid escape.
+   * - `\/` is valid only in double-quoted strings (not in escapable-s, §5.1).
+   * - `\\` (backslash) is valid in both single- and double-quoted strings.
    * - `\uXXXX` for a high surrogate must be immediately followed by `\uXXXX` for
    *   the corresponding low surrogate; lone surrogates are rejected.
    * - `\u{N}` … `\u{10FFFF}` extended syntax is supported; surrogates are rejected.
    * - In single-quoted strings, `\u` escapes to printable ASCII (U+0020–U+007E)
-   *   are forbidden (hexchar-s restriction, draft §2.5.2 / §5.1).
+   *   are forbidden (hexchar-s restriction, draft-25 §5.1).
    */
   private _readStringContent(quote: string): string {
     this._advance(); // opening quote
@@ -445,7 +521,7 @@ export class Tokenizer {
             out += '\\';
             break;
           case 'u':
-            out += this._readUnicodeEscape(quote);
+            out += this._readUnicodeEscape(quote, eOffset, eLine, eCol);
             break;
           default:
             // Escaped delimiter char (e.g. \' inside '...' or \" inside "...")
@@ -454,6 +530,12 @@ export class Tokenizer {
               break;
             }
             if (e === '/') {
+              if (quote === "'")
+                this._fail(
+                  `\\/ is not a valid escape in single-quoted byte strings (§5.1)`,
+                  eLine,
+                  eCol
+                );
               out += '/';
               break;
             }
@@ -561,31 +643,37 @@ export class Tokenizer {
    *   which is then decoded into the corresponding non-BMP code point.
    *
    * In single-quoted strings (`quote === "'"`), `\u` escapes that resolve to
-   * printable ASCII (U+0020–U+007E) are rejected per draft §2.5.2 / §5.1
-   * hexchar-s, except for backslash (U+005C) and single-quote (U+0027), which
-   * require escaping and cannot be written literally.
+   * printable ASCII (U+0020–U+007E) are rejected per draft-25 §5.1 hexchar-s.
+   * Use `\\` for backslash (U+005C) and `\'` for the single-quote delimiter.
    */
-  private _readUnicodeEscape(quote: string): string {
+  private _readUnicodeEscape(
+    quote: string,
+    bsOffset?: number,
+    bsLine?: number,
+    bsCol?: number
+  ): string {
     const line = this.line,
       col = this.col;
 
-    /** Throw if this is a single-quoted string and the code point is printable ASCII that can be written literally. */
+    /** Warn or throw when this is a single-quoted string and the code point is printable ASCII. */
     const checkSingleQuotedPrintable = (cp: number): void => {
-      // Backslash (0x5C) and the quote delimiter (0x27) require escaping even in single-quoted
-      // strings, so \u{} is a valid alternative to \\ and \'. All other printable ASCII chars
-      // must be written literally per hexchar-s.
-      if (
-        quote === "'" &&
-        cp >= 0x20 &&
-        cp <= 0x7e &&
-        cp !== 0x5c &&
-        cp !== 0x27
-      )
-        this._fail(
-          `\\u escape for printable ASCII U+${cp.toString(16).padStart(4, '0')} is not allowed in single-quoted strings; write the character literally`,
-          line,
-          col
-        );
+      // Per draft-25 §5.1 hexchar-s, \u escapes for printable ASCII (U+0020–U+007E)
+      // are not valid in single-quoted strings.  Use \\ for backslash and \' for
+      // the single-quote delimiter.  In lenient mode (onEscapeWarning set) we emit
+      // a warning and accept the value rather than hard-failing.
+      if (quote === "'" && cp >= 0x20 && cp <= 0x7e) {
+        const msg = `\\u escape for printable ASCII U+${cp.toString(16).padStart(4, '0').toUpperCase()} is not allowed in single-quoted strings (§5.1 hexchar-s)`;
+        if (this.onEscapeWarning) {
+          this.onEscapeWarning(
+            msg,
+            bsOffset ?? this.pos,
+            bsLine ?? line,
+            bsCol ?? col
+          );
+          return;
+        }
+        this._fail(msg, line, col);
+      }
     };
 
     // Extended form \u{NNN}

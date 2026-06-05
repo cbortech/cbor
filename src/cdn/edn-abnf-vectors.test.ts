@@ -24,49 +24,22 @@ const VECTORS_DIR = resolve(import.meta.dirname, 'test-vectors/edn-abnf');
 // ─── Known differences ────────────────────────────────────────────────────────
 
 /**
- * Corpus conflicts with hildjj/edn-test-vectors
+ * Corpus conflict: `\\` in single-quoted byte strings
  *
- * edn-abnf says `\\` and `\/` in single-quoted byte strings are invalid,
- * while hildjj/edn-test-vectors says they produce the same bytes as `\\` →
- * `\` and `\/` → `/`.  We follow hildjj here and skip the conflicting
- * edn-abnf assertions.  Note: `\u{5C}` is U+005C (backslash), so
- * `'foo\u{5C}bar'` = `'foo\\bar'` in hildjj but `'foo\\bar'` is invalid in
- * edn-abnf.
- *
- * Invalid surrogate pairs in hex-string comments
- *
- * `h'AA#foo\ud83eሴfoo'` uses an invalid surrogate pair inside a `#`
- * comment in a hex literal.  Validating surrogate correctness inside hex
- * comments is not yet implemented.
+ * edn-abnf encodes "`'foo\\bar'` is invalid" as a negative assertion
+ * `'foo\\bar' ≠ 'foo\\bar'` (same expression on both sides — valid input
+ * would produce equal bytes and fail; invalid input would throw and trivially
+ * pass).  However, draft-25 §5.1 escapable1 includes `\` (0x5C), so `\\` is
+ * a valid escape in single-quoted strings.  We follow draft-25 and skip this
+ * assertion.
  */
-
-// For "-" with output, knownSkip is keyed by rawInput alone (not "input ≠ output").
-// For "=" and "x", the key includes the output (e.g. "input = output").
+// For "-" with output, knownSkip is keyed by rawInput alone — NOT "input ≠ output".
+// For "=" and "x", the key includes the output (e.g. "input = output" / "input → hex").
 const BASIC_SKIP = new Map<string, string>([
-  // \\ corpus conflict
-  ["'foo\\\\bar'", "corpus conflict: hildjj accepts \\\\ → \\ in '...'"],
-  // \u{5C} = backslash: hildjj says 'foo\u{5C}bar' = 'foo\\bar', edn-abnf says ≠
+  // "-" op key = rawInput only
   [
-    "'foo\\u{5C}bar'",
-    'corpus conflict: hildjj accepts \\u{5C} and \\\\ producing same bytes',
-  ],
-  ["'foo\\u{5c}bar'", 'corpus conflict: same as \\u{5C}'],
-  ["'foo\\u{05c}bar'", 'corpus conflict: same as \\u{5C}'],
-  ["'foo\\u{005c}bar'", 'corpus conflict: same as \\u{5C}'],
-  ["'foo\\u{0005c}bar'", 'corpus conflict: same as \\u{5C}'],
-  ["'foo\\u{00000000000005c}bar'", 'corpus conflict: same as \\u{5C}'],
-  ["'foo\\u005cbar'", 'corpus conflict: same as \\u{5C}'],
-  ["'foo\\u005Cbar'", 'corpus conflict: same as \\u{5C}'],
-  // \/ corpus conflict
-  ["'foo\\/bar'", "corpus conflict: hildjj accepts \\/ → / in '...'"],
-  // invalid surrogate pair in hex comment
-  [
-    "h'AA#foo\\ud83e\\u1234foo'",
-    'surrogate pair validation in hex comments not yet implemented',
-  ],
-  [
-    "h'AA#foo\\udd13\\ud83efoo'",
-    'surrogate pair validation in hex comments not yet implemented',
+    "'foo\\\\bar'",
+    "corpus conflict: draft-25 §5.1 escapable1 includes \\\\ — 'foo\\\\bar' is valid",
   ],
 ]);
 

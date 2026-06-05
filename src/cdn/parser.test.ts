@@ -996,13 +996,41 @@ describe('parseCDN — errors', () => {
   test('\\/ is valid in double-quoted strings', () => {
     expect((parseCDN('"\\/url"') as CborTextString).value).toBe('/url');
   });
-  test('\\/ is valid in single-quoted strings (byte string)', () => {
-    const v = parseCDN("'\\/url'") as CborByteString;
-    expect(v).toBeInstanceOf(CborByteString);
-    expect(new TextDecoder().decode(v.value)).toBe('/url');
+  test('\\/ is invalid in single-quoted strings (§5.1)', () => {
+    expect(() => parseCDN("'\\/url'")).toThrow(SyntaxError);
   });
-  test('\\\\ (backslash) is valid in both quote styles', () => {
+  test('\\\\ (backslash) is valid in double-quoted strings', () => {
     expect((parseCDN('"a\\\\b"') as CborTextString).value).toBe('a\\b');
+  });
+  test('\\\\ (backslash) is valid in single-quoted strings (§5.1 escapable1)', () => {
+    const v = parseCDN("'a\\\\b'") as CborByteString;
+    expect(v).toBeInstanceOf(CborByteString);
+    expect(new TextDecoder().decode(v.value)).toBe('a\\b');
+  });
+  test('\\u005C (U+005C) in single-quoted strings is a SyntaxError in strict mode', () => {
+    expect(() => parseCDN("'a\\u005Cb'")).toThrow(SyntaxError);
+  });
+  test('\\u005C (U+005C) in single-quoted strings emits a warning in lenient mode', () => {
+    const warnings: string[] = [];
+    const v = parseCDN("'a\\u005Cb'", {
+      strict: false,
+      onWarning: (w) => warnings.push(w.message),
+    }) as CborByteString;
+    expect(v).toBeInstanceOf(CborByteString);
+    expect(new TextDecoder().decode(v.value)).toBe('a\\b');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/\\u.*005C.*single-quoted/i);
+  });
+  test('\\u{5C} (U+005C) in single-quoted strings emits a warning in lenient mode', () => {
+    const warnings: string[] = [];
+    const v = parseCDN("'a\\u{5C}b'", {
+      strict: false,
+      onWarning: (w) => warnings.push(w.message),
+    }) as CborByteString;
+    expect(v).toBeInstanceOf(CborByteString);
+    expect(new TextDecoder().decode(v.value)).toBe('a\\b');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/\\u.*005C.*single-quoted/i);
   });
 
   // ── #2: unescaped C0 control characters ─────────────────────────────────
