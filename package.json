@@ -67,9 +67,9 @@
     "start": "node dist/index.js",
     "dev": "npm run build && npm start",
     "clean": "node -e \"['dist','coverage'].forEach(d=>require('fs').rmSync(d,{recursive:true,force:true}))\"",
-    "test": "vitest run --exclude src/cdn/edn-test-vectors.test.ts",
+    "test": "vitest run --exclude src/cdn/edn-test-vectors.test.ts --exclude src/cdn/edn-abnf-vectors.test.ts",
     "test:exports": "npm run build && node scripts/check-package-exports.mjs",
-    "test:node": "vitest run --exclude src/cdn/edn-test-vectors.test.ts",
+    "test:node": "vitest run --exclude src/cdn/edn-test-vectors.test.ts --exclude src/cdn/edn-abnf-vectors.test.ts",
     "test:edn-vectors": "vitest run src/cdn/edn-test-vectors.test.ts",
     "test:chromium": "cross-env BROWSER=chromium vitest run --config vitest.browser.config.ts",
     "test:firefox": "cross-env BROWSER=firefox vitest run --config vitest.browser.config.ts",
@@ -79,7 +79,8 @@
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "test:edn-abnf": "vitest run src/cdn/edn-abnf-vectors.test.ts"
   },
   "devDependencies": {
     "@types/node": "^24.12.4",
