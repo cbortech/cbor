@@ -330,37 +330,118 @@ console.log(text);
 
 ## Optional Extensions
 
+This package includes several bundled extensions that are not enabled by
+default. Import what you need and pass it through the `extensions` option.
+
+### b32 / h32
+
+Byte-string literals using [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648)
+Base32 encoding. These prefixes are described in §8 of
+[RFC 8949](https://www.rfc-editor.org/rfc/rfc8949) and also mentioned in
+[draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/).
+
+- `b32` — §6 Base32 (`A–Z 2–7` alphabet)
+- `h32` — §7 Base32Hex (`0–9 A–V` alphabet)
+
+```ts
+import { CBOR, b32, h32 } from '@cbortech/cbor';
+
+const v1 = CBOR.fromCDN("b32'AEBAGBA'", { extensions: [b32] });
+console.log(v1.toCDN({ appStrings: false }));
+// h'01020304'
+
+const v2 = CBOR.fromCDN("h32'00P00'", { extensions: [h32] });
+console.log(v2.toCDN({ appStrings: false }));
+// h'003200'
+```
+
+### float
+
+Interprets a hex bit-pattern as an IEEE 754 floating-point value. This
+extension is described in
+[draft-bormann-cbor-edn-app-ext](https://datatracker.ietf.org/doc/draft-bormann-cbor-edn-app-ext/)
+and also used in [cbor-test-vectors](https://github.com/cbor-wg/cbor-test-vectors).
+
+```ts
+import { CBOR, float } from '@cbortech/cbor';
+
+const v = CBOR.fromCDN("float'7e00'", { extensions: [float] });
+console.log(v.toCDN({ appStrings: false }));
+// NaN
+
+// Interpret bytes as float bits
+const v2 = CBOR.fromCDN("float<<h'3f800000'>>", { extensions: [float] });
+console.log(v2.toCDN({ appStrings: false }));
+// 1.0_2
+```
+
+### same
+
+`same<<expr, expr, ...>>` verifies that every item in the sequence encodes to
+identical CBOR bytes and returns the first item. This extension is described in
+[draft-bormann-cbor-edn-app-ext](https://datatracker.ietf.org/doc/draft-bormann-cbor-edn-app-ext/).
+
+```ts
+import { CBOR, same } from '@cbortech/cbor';
+
+const v = CBOR.fromCDN("same<<h'0102', h'0102'>>", { extensions: [same] });
+console.log(v.toCDN({ appStrings: false }));
+// h'0102'
+
+// A single-item sequence always passes
+const v2 = CBOR.fromCDN('same<<42>>', { extensions: [same] });
+console.log(v2.toCDN({ appStrings: false }));
+// 42
+```
+
+---
+
 Additional application extensions are published as separate packages. Install
 the ones you need and pass them through the `extensions` option.
 
-`hash` is an application extension defined by the CDN specification, but
-it requires an external package. For that reason, it is not bundled with this
-package and is provided separately as `@cbortech/hash-extension`.
+### hash
 
-`uuid` is a library-specific application extension that is not defined by the
-CDN specification. To keep it distinct from standard CDN features, it
-is provided separately as `@cbortech/uuid-extension`.
+`hash` is an application extension defined in §3.3 of
+[draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/).
+It represents cryptographic hash values in the form `hash'algorithm:value'`.
+Because it requires an external cryptographic library, it is provided separately
+as [@cbortech/hash-extension](https://www.npmjs.com/package/@cbortech/hash-extension).
 
 ```bash
-npm install @cbortech/hash-extension @cbortech/uuid-extension
+npm install @cbortech/hash-extension
 ```
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
-import hashExtension from '@cbortech/hash-extension';
-import uuidExtension from '@cbortech/uuid-extension';
+import { hash } from '@cbortech/hash-extension';
 
-const cbor = new CBOR({
-  extensions: [hashExtension, uuidExtension],
-});
+const cbor = new CBOR({ extensions: [hash] });
 
-const digest = cbor.fromCDN("hash'foo'");
-console.log(digest.toCDN());
-// hash'foo'
+const digest = cbor.parse(
+  "hash'sha-256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='"
+);
+// Uint8Array(32) [227, 176, 196, 66, 152, 252, 28, 20, 154, 251, 244, 200,
+//                 153, 111, 185, 36, 39, 174, 65, 228, 100, 155, 147, 76,
+//                 164, 149, 153, 27, 120, 82, 184, 85]
+```
 
-const id = cbor.fromCDN("uuid'550e8400-e29b-41d4-a716-446655440000'");
-console.log(id.toCDN());
-// uuid'550e8400-e29b-41d4-a716-446655440000'
+### uuid
+
+`uuid` is a library-specific application extension, provided separately as
+[@cbortech/uuid-extension](https://www.npmjs.com/package/@cbortech/uuid-extension).
+
+```bash
+npm install @cbortech/uuid-extension
+```
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+import { uuid } from '@cbortech/uuid-extension';
+
+const cbor = new CBOR({ extensions: [uuid] });
+
+const id = cbor.parse("uuid'550e8400-e29b-41d4-a716-446655440000'");
+// Uint8Array(16) [85, 14, 132, 0, 226, 155, 65, 212, 167, 22, 68, 102, 85, 68, 0, 0]
 ```
 
 ## Tags

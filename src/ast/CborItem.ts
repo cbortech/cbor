@@ -5,8 +5,11 @@ import type {
   ToHexDumpOptions,
   ToCBOROptions,
   CborComments,
+  DecodeWarning,
+  ParseWarning,
 } from '../types';
 import { CBOR_OMIT } from '../types';
+import { convertCommentText } from '../cdn/serialize-utils';
 
 /** @internal One line of an annotated hex dump. */
 export interface AnnotatedLine {
@@ -44,6 +47,13 @@ export abstract class CborItem {
   comments?: CborComments;
 
   /**
+   * Validity violations detected while decoding or parsing this node.
+   * Populated when `strict: false` is set in `FromCBOROptions` or
+   * `FromCDNOptions`.
+   */
+  warnings?: (DecodeWarning | ParseWarning)[];
+
+  /**
    * Default options bound by a {@link CBOR} instance factory method.
    * Per-call options always take precedence.
    * @internal
@@ -62,13 +72,16 @@ export abstract class CborItem {
   toCDN(options?: ToCDNOptions): string {
     const merged = this._defaults ? { ...this._defaults, ...options } : options;
     const body = this._toCDN(merged, 0);
-    if (!merged?.preserveComments) return body;
-    const leading = this.comments?.leading?.map((c) => c.text) ?? [];
+    const pv = merged?.preserveComments;
+    if (!pv) return body;
+    const style = typeof pv === 'string' ? pv : undefined;
+    const leading =
+      this.comments?.leading?.map((c) => convertCommentText(c, style)) ?? [];
     const trailing = this.comments?.trailing ?? [];
     const bodyWithTrailing =
       trailing.length === 0
         ? body
-        : `${body} ${trailing.map((c) => c.text.trimEnd()).join(' ')}`;
+        : `${body} ${trailing.map((c) => convertCommentText(c, style).trimEnd()).join(' ')}`;
     return [...leading, bodyWithTrailing].join('\n');
   }
 

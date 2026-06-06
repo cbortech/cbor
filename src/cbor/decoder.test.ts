@@ -11,6 +11,7 @@ import { CborMap } from '../ast/CborMap';
 import { CborTag } from '../ast/CborTag';
 import { CborFloat } from '../ast/CborFloat';
 import { CborSimple } from '../ast/CborSimple';
+import { CborEmbeddedCBOR } from '../ast/CborEmbeddedCBOR';
 
 /** Convert a hex string (spaces allowed) to Uint8Array. */
 function hex(s: string): Uint8Array {
@@ -504,6 +505,287 @@ describe('error handling', () => {
   test('invalid UTF-8 in text string throws', () => {
     // 0x62 = 2-byte text string, then 0x80 0x80 = invalid UTF-8 continuation bytes
     expect(() => decodeCBOR(hex('62 80 80'))).toThrow('CBOR decode error');
+  });
+});
+
+// ─── strict / onWarning option ───────────────────────────────────────────────
+
+describe('strict / onWarning option', () => {
+  // ── Simple value < 32 in extended form (ai=24) ──────────────────────────────
+
+  test('strict mode (default): simple value < 32 in extended form throws', () => {
+    // 0xf8 0x18 → ai=24 (1-byte), simpleVal=0x18=24 — invalid (must use initial byte)
+    expect(() => decodeCBOR(hex('f8 18'))).toThrow('CBOR decode error');
+  });
+
+  test('strict: true: simple value < 32 in extended form calls onWarning then throws', () => {
+    const warnings: { message: string; offset: number }[] = [];
+    expect(() =>
+      decodeCBOR(hex('f8 18'), {
+        strict: true,
+        onWarning: (w) => warnings.push(w),
+      })
+    ).toThrow('CBOR decode error');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('simple value 24');
+    expect(warnings[0].offset).toBe(0);
+  });
+
+  test('strict: false: simple value < 32 in extended form warns and continues', () => {
+    const warnings: { message: string; offset: number }[] = [];
+    const result = decodeCBOR(hex('f8 18'), {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborSimple;
+    expect(result).toBeInstanceOf(CborSimple);
+    expect(result.value).toBe(24);
+    expect(result.warnings).toHaveLength(1);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('simple value 24');
+    expect(warnings[0].offset).toBe(0);
+  });
+
+  test('strict: false: falls back to console.warn when no onWarning is provided', () => {
+    const orig = console.warn;
+    const captured: string[] = [];
+    console.warn = (msg: string) => captured.push(msg);
+    try {
+      const result = decodeCBOR(hex('f8 00'), { strict: false }) as CborSimple;
+      expect(result).toBeInstanceOf(CborSimple);
+      expect(result.value).toBe(0);
+      expect(captured).toHaveLength(1);
+      expect(captured[0]).toContain('simple value 0');
+      expect(captured[0]).toContain('offset 0');
+    } finally {
+      console.warn = orig;
+    }
+  });
+
+  test('silent: true suppresses console.warn', () => {
+    const orig = console.warn;
+    const captured: string[] = [];
+    console.warn = (msg: string) => captured.push(msg);
+    try {
+      decodeCBOR(hex('f8 00'), { strict: false, silent: true });
+      expect(captured).toHaveLength(0);
+    } finally {
+      console.warn = orig;
+    }
+  });
+
+  test('silent: true does not suppress an explicit onWarning callback', () => {
+    const warnings: { message: string; offset: number }[] = [];
+    const result = decodeCBOR(hex('f8 00'), {
+      strict: false,
+      silent: true,
+      onWarning: (w) => warnings.push(w),
+    }) as CborSimple;
+    expect(result.value).toBe(0);
+    expect(warnings).toHaveLength(1);
+  });
+
+  // ── Invalid UTF-8 in text string ─────────────────────────────────────────────
+
+  test('strict mode (default): invalid UTF-8 throws', () => {
+    expect(() => decodeCBOR(hex('62 80 80'))).toThrow('CBOR decode error');
+  });
+
+  test('strict: false: invalid UTF-8 warns and returns string with replacement chars', () => {
+    const warnings: { message: string; offset: number }[] = [];
+    const result = decodeCBOR(hex('62 80 80'), {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborTextString;
+    expect(result).toBeInstanceOf(CborTextString);
+    // TextDecoder with fatal:false replaces invalid bytes with U+FFFD
+    expect(result.value).toContain('�');
+    expect(result.warnings).toHaveLength(1);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('UTF-8');
+    expect(warnings[0].offset).toBe(1); // text bytes start at offset 1
+  });
+
+  // ── Duplicate map keys ────────────────────────────────────────────────────────
+
+  test('strict mode (default): duplicate map keys throw', () => {
+    // {1: "a", 1: "b"} — key 0x01 appears twice
+    // a2 01 61 61  01 61 62
+    expect(() => decodeCBOR(hex('a2 01 61 61 01 61 62'))).toThrow(
+      'CBOR decode error'
+    );
+  });
+
+  test('strict: false: duplicate map keys warn and decode all entries', () => {
+    // {1: "a", 1: "b"} — key 0x01 appears twice
+    // a2=map(2), 01="1", 6161="a", 01="1"(dup at offset 4), 6162="b"
+    const warnings: { message: string; offset: number }[] = [];
+    const result = decodeCBOR(hex('a2 01 61 61 01 61 62'), {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborMap;
+    expect(result).toBeInstanceOf(CborMap);
+    expect(result.entries).toHaveLength(2);
+    expect(result.warnings).toHaveLength(1);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('duplicate map key');
+    expect(warnings[0].offset).toBe(4); // second key 0x01 is at offset 4
+  });
+
+  test('strict mode: different encodings of the same integer key are detected as duplicate', () => {
+    // {0: "a", 0_1: "b"} — a2 00 61 61  18 00 61 62
+    // key 0x00 = CborUint(0), key 0x1800 = CborUint(0) with extended encoding
+    // canonical re-encoding of both is "00" → duplicate detected
+    expect(() => decodeCBOR(hex('a2 00 61 61 18 00 61 62'))).toThrow(
+      'CBOR decode error'
+    );
+  });
+
+  test('strict: false: different encodings of same integer key warn and decode', () => {
+    const warnings: { message: string; offset: number }[] = [];
+    const result = decodeCBOR(hex('a2 00 61 61 18 00 61 62'), {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborMap;
+    expect(result.entries).toHaveLength(2);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('duplicate map key');
+  });
+
+  test('strict: false: indefinite map with duplicate keys warns and continues', () => {
+    // {_ 1: "a", 1: "b"} — bf 01 61 61 01 61 62 ff
+    const warnings: { message: string; offset: number }[] = [];
+    const result = decodeCBOR(hex('bf 01 61 61 01 61 62 ff'), {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborMap;
+    expect(result).toBeInstanceOf(CborMap);
+    expect(result.indefiniteLength).toBe(true);
+    expect(result.entries).toHaveLength(2);
+    expect(result.warnings).toHaveLength(1);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('duplicate map key');
+    expect(warnings[0].offset).toBe(4); // second key 0x01 is at offset 4
+  });
+
+  test('strict: false: float keys with same numeric value but different widths are detected as duplicate', () => {
+    // {f16(1.0): "a", f32(1.0): "b"} — both fingerprint as "f:1"
+    // f9 3c 00 = half 1.0, fa 3f 80 00 00 = single 1.0
+    // a2 f9 3c 00 61 61 fa 3f 80 00 00 61 62
+    const warnings: { message: string; offset: number }[] = [];
+    const result = decodeCBOR(hex('a2 f9 3c 00 61 61 fa 3f 80 00 00 61 62'), {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborMap;
+    expect(result).toBeInstanceOf(CborMap);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('duplicate map key');
+  });
+
+  test('strict: false: indefinite text key equal to definite text key is detected as duplicate', () => {
+    // {"ab": 1, indefinite("a"+"b"): 2} — both fingerprint as ["t","ab"]
+    // a2 62 61 62 01 7f 61 61 61 62 ff 02
+    const warnings: { message: string; offset: number }[] = [];
+    const result = decodeCBOR(hex('a2 62 61 62 01 7f 61 61 61 62 ff 02'), {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborMap;
+    expect(result).toBeInstanceOf(CborMap);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('duplicate map key');
+  });
+
+  test('strict: false: definite array key and indefinite array key with same elements are detected as duplicate', () => {
+    // {[1]: "a", [_ 1]: "b"} — both fingerprint as ["A",[["u","1"]]]
+    // a2 81 01 61 61 9f 01 ff 61 62
+    const warnings: { message: string; offset: number }[] = [];
+    const result = decodeCBOR(hex('a2 81 01 61 61 9f 01 ff 61 62'), {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborMap;
+    expect(result).toBeInstanceOf(CborMap);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('duplicate map key');
+  });
+
+  test('strict: false: array keys containing floats of different widths but same value are detected as duplicate', () => {
+    // {[f16(1.0)]: "a", [f32(1.0)]: "b"} — both fingerprint as ["A",[["f","1"]]]
+    // a2 81 f9 3c 00 61 61 81 fa 3f 80 00 00 61 62
+    const warnings: { message: string; offset: number }[] = [];
+    const result = decodeCBOR(
+      hex('a2 81 f9 3c 00 61 61 81 fa 3f 80 00 00 61 62'),
+      { strict: false, onWarning: (w) => warnings.push(w) }
+    ) as CborMap;
+    expect(result).toBeInstanceOf(CborMap);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('duplicate map key');
+  });
+
+  test('strict: false: array key ["a,t:b"] is NOT a duplicate of array key ["a"]', () => {
+    // Regression: raw string concatenation collided t:"a,t:b" with t:"a" inside
+    // array fingerprints.  With JSON.stringify escaping this must not warn.
+    // {["a,t:b"]: 1, ["a"]: 2}
+    // a2 81 65 61 2c 74 3a 62 01 81 61 61 02
+    const warnings: { message: string; offset: number }[] = [];
+    decodeCBOR(hex('a2 81 65 61 2c 74 3a 62 01 81 61 61 02'), {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    });
+    expect(warnings).toHaveLength(0);
+  });
+
+  test('strict: false: map keys with same entries in different insertion order are detected as duplicate', () => {
+    // {{1:2, 3:4}: "a", {3:4, 1:2}: "b"} — both fingerprint as ["M",...]
+    // with sorted key pairs, so they are data-model equal.
+    // a2 a2 01 02 03 04 61 61 a2 03 04 01 02 61 62
+    const warnings: { message: string; offset: number }[] = [];
+    const result = decodeCBOR(
+      hex('a2 a2 01 02 03 04 61 61 a2 03 04 01 02 61 62'),
+      { strict: false, onWarning: (w) => warnings.push(w) }
+    ) as CborMap;
+    expect(result).toBeInstanceOf(CborMap);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('duplicate map key');
+  });
+});
+
+// ─── tag 24 embedded CBOR options propagation ────────────────────────────────
+
+describe('tag 24 embedded CBOR options propagation', () => {
+  test('strict mode (default): tag 24 inner violation throws', () => {
+    // d8 18 = tag(24), 42 f8 18 = h'f818' (simple value 24 in extended form)
+    // In strict mode the extension re-throws so the outer decode also throws.
+    expect(() => decodeCBOR(hex('d8 18 42 f8 18'), { silent: true })).toThrow();
+  });
+
+  test('strict mode with onWarning: inner violation emits warning then throws', () => {
+    // onWarning IS called before the inner throw is re-thrown by the extension.
+    const warnings: { message: string; offset: number }[] = [];
+    expect(() =>
+      decodeCBOR(hex('d8 18 42 f8 18'), {
+        onWarning: (w) => warnings.push(w),
+      })
+    ).toThrow();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('simple value 24');
+  });
+
+  test('strict: false: violation inside tag 24 warns and produces embedded CBOR', () => {
+    // Previously (without options propagation) this fell back to CborTag because
+    // the inner decodeCBOR always used strict:true (default) and threw.
+    // Now strict:false is propagated so the inner decode recovers.
+    const warnings: { message: string; offset: number }[] = [];
+    const result = decodeCBOR(hex('d8 18 42 f8 18'), {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborTag;
+    expect(result).toBeInstanceOf(CborTag);
+    expect(result.tag).toBe(24n);
+    expect(result.content).toBeInstanceOf(CborEmbeddedCBOR);
+    const embedded = result.content as CborEmbeddedCBOR;
+    expect(embedded.items[0]).toBeInstanceOf(CborSimple);
+    expect((embedded.items[0] as CborSimple).value).toBe(24);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('simple value 24');
   });
 });
 

@@ -11,7 +11,7 @@
 // Type-only import avoids a runtime circular chain while giving API Extractor
 // the real CborItem type: extensions/types → ast/CborItem → types → extensions/types.
 import type { CborItem } from '../ast/CborItem';
-import type { FromJSOptions } from '../types';
+import type { FromCBOROptions, FromJSOptions } from '../types';
 
 /**
  * Plugin that extends EDN parsing, CBOR decoding, and `fromJS()` for specific
@@ -48,22 +48,57 @@ export interface CborExtension {
    * Parse an app-string literal: `prefix'content'` or `prefix"content"`.
    * Receives the matched `prefix` and the decoded string `content`.
    * Throw `SyntaxError` to report invalid content.
+   *
+   * The CDN parser always passes an `onError` callback.  Extensions may call
+   * `onError(msg)` instead of throwing to emit a recoverable violation; the
+   * callback emits a warning and, in strict mode, also throws.  Extensions
+   * that ignore `onError` and throw directly always hard-fail regardless of
+   * the `strict` setting.
    */
-  parseAppString?(prefix: string, content: string): CborItem;
+  parseAppString?(
+    prefix: string,
+    content: string,
+    onError?: (msg: string) => void
+  ): CborItem;
 
   /**
    * Parse an app-sequence literal: `prefix<<item, ...>>`.
    * Receives the matched `prefix` and the array of parsed CBOR values.
    * If omitted, the `<<...>>` form is rejected with a `SyntaxError`.
+   * The `onError` callback follows the same contract as in `parseAppString`.
    */
-  parseAppSequence?(prefix: string, items: CborItem[]): CborItem;
+  parseAppSequence?(
+    prefix: string,
+    items: CborItem[],
+    onError?: (msg: string) => void
+  ): CborItem;
+
+  /**
+   * When `true`, the CDN parser wraps the result of `parseAppSequence` in a
+   * `CborAppSeqResult` so that `toCDN()` round-trips the original
+   * `prefix<<...>>` notation when `appStrings !== false`.
+   *
+   * Extensions whose result is already a subclass that handles source
+   * preservation itself (e.g. `CborFloat` via its `ednSource` property) should
+   * leave this unset.
+   */
+  readonly preserveAppSeqSource?: boolean;
 
   /**
    * Called when a `CborTag` is encountered during CBOR decode (`fromCBOR`)
    * or EDN integer-tag parsing (`fromCDN`).
    * Return `undefined` to fall back to the default `CborTag` representation.
+   *
+   * `options` is supplied only from the binary CBOR decoder; it is `undefined`
+   * when called from the CDN parser.  Extensions that perform nested CBOR
+   * decoding (e.g. tag 24) should forward these options to propagate
+   * `strict`, `onWarning`, and `silent` into the inner decode.
    */
-  parseTag?(tag: bigint, value: CborItem): CborItem | undefined;
+  parseTag?(
+    tag: bigint,
+    value: CborItem,
+    options?: FromCBOROptions
+  ): CborItem | undefined;
 
   /**
    * Called during `fromJS()` for every value before the default conversion

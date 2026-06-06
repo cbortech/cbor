@@ -242,20 +242,65 @@ function collectCdnNewlineBreakpoints(value: string): StringBreakpoint[] {
     } else if (token.type === 'COMMA') {
       // Commas can create structural split points, but never contain newline
       // split points themselves.
-    } else if (TEXT_STRING_TOKENS.has(token.type)) {
+    } else if (token.type === 'TSTR') {
+      // TSTR uses escape sequences (\n, \r) for newlines in addition to
+      // literal newline characters.
+      const tokenText = value.slice(token.offset, token.endOffset);
+      for (const point of collectTstrNewlineBreakpoints(tokenText)) {
+        points.push({ point: token.offset + point, contentDepth: nesting + 1 });
+      }
+    } else if (token.type === 'RAWSTRING') {
+      // RAWSTRING has no escape sequences; only literal newlines apply.
       const tokenText = value.slice(token.offset, token.endOffset);
       for (const { point } of collectNewlineBreakpoints(tokenText, 0)) {
-        points.push({
-          point: token.offset + point,
-          contentDepth: nesting + 1,
-        });
+        points.push({ point: token.offset + point, contentDepth: nesting + 1 });
       }
     }
   }
   return points;
 }
 
-const TEXT_STRING_TOKENS = new Set<TokenType>(['TSTR', 'RAWSTRING']);
+// Scans the raw source of a CDN double-quoted string (TSTR) for newline
+// escape sequences (\n, \r) and literal newline characters, returning the
+// position within tokenText immediately after each such sequence.
+function collectTstrNewlineBreakpoints(tokenText: string): number[] {
+  const points: number[] = [];
+  let i = 1; // skip opening "
+  const end = tokenText.length - 1; // stop before closing "
+  while (i < end) {
+    const ch = tokenText[i];
+    if (ch === '\\') {
+      const next = tokenText[i + 1];
+      if (next === 'n' || next === 'r') {
+        points.push(i + 2);
+        i += 2;
+      } else if (next === 'u') {
+        if (tokenText[i + 2] === '{') {
+          const close = tokenText.indexOf('}', i + 3);
+          i = close >= 0 ? close + 1 : i + 2;
+        } else {
+          i += 6; // \uXXXX
+        }
+      } else {
+        i += 2; // \\, \", \t, etc.
+      }
+    } else if (ch === '\r') {
+      if (tokenText[i + 1] === '\n') {
+        points.push(i + 2);
+        i += 2;
+      } else {
+        points.push(i + 1);
+        i++;
+      }
+    } else if (ch === '\n') {
+      points.push(i + 1);
+      i++;
+    } else {
+      i++;
+    }
+  }
+  return points;
+}
 
 const OPENER_MODIFIER_TOKENS = new Set<TokenType>([
   'ENCODING_INDICATOR',

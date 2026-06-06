@@ -2,6 +2,8 @@
 export type {
   CBOROptions,
   CborExtension,
+  DecodeWarning,
+  ParseWarning,
   FromCBOROptions,
   ToCBOROptions,
   FromCDNOptions,
@@ -27,6 +29,9 @@ export { Simple } from './simple';
 export { MapEntries } from './mapEntries';
 
 // Extensions
+export { b32, h32 } from './extensions/b32';
+export { float } from './extensions/float';
+export { same } from './extensions/same';
 export { dt_as_Date } from './extensions/dt';
 
 // Main CBOR class

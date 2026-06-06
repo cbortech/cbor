@@ -5,7 +5,12 @@ import {
   type TokenType,
 } from './tokenizer';
 import type { CborItem } from '../ast/CborItem';
-import type { CborComment, FromCDNOptions, CborExtension } from '../types';
+import type {
+  CborComment,
+  FromCDNOptions,
+  CborExtension,
+  ParseWarning,
+} from '../types';
 import { CborUint } from '../ast/CborUint';
 import { CborNint } from '../ast/CborNint';
 import { CborByteString } from '../ast/CborByteString';
@@ -20,8 +25,10 @@ import { CborSimple } from '../ast/CborSimple';
 import { CborEmbeddedCBOR } from '../ast/CborEmbeddedCBOR';
 import type { EncodingWidth } from '../cbor/encode';
 import { parseHexFloat } from '../utils/hexfloat';
+import { float64ToFloat16Bits, float16BitsToFloat64 } from '../utils/float16';
 import { BUILTIN_EXTENSIONS } from '../extensions/builtins';
 import { CborUnresolvedAppExt } from '../ast/CborUnresolvedAppExt';
+import { CborAppSeqResult } from '../ast/CborAppSeqResult';
 import { CborEllipsis } from '../ast/CborEllipsis';
 import { CborBigUint, CborBigNint } from '../ast/CborBignum';
 
@@ -33,13 +40,7 @@ import { CborBigUint, CborBigNint } from '../ast/CborBignum';
  */
 export function parseCDN(text: string, options?: FromCDNOptions): CborItem {
   const tokenizer = new Tokenizer(text, { offset: options?.offset });
-  const parser = new CDNParser(
-    tokenizer,
-    options?.extensions,
-    options?.unresolvedExtension,
-    options?.allowInvalidUtf8,
-    options?.allowTrailing
-  );
+  const parser = new CDNParser(tokenizer, options ?? {});
   const node = parser.parse();
   if (options?.preserveComments) attachComments(node, tokenizer.comments, text);
   return node;
@@ -51,16 +52,15 @@ export function parseCDN(text: string, options?: FromCDNOptions): CborItem {
  *  integer token value and return both the numeric string and the width. */
 function parseIntegerRaw(raw: string): {
   numStr: string;
-  encodingWidth: EncodingWidth | undefined;
+  rawSuffix: string | undefined;
 } {
   let numStr = raw;
-  let encodingWidth: EncodingWidth | undefined;
-  if (/[_][0-3i]$/.test(raw)) {
-    const suffix = raw[raw.length - 1]!;
-    encodingWidth = suffix === 'i' ? 'i' : (Number(suffix) as EncodingWidth);
+  let rawSuffix: string | undefined;
+  if (/[_][0-7i]$/.test(raw)) {
+    rawSuffix = raw[raw.length - 1]!;
     numStr = raw.slice(0, -2);
   }
-  return { numStr, encodingWidth };
+  return { numStr, rawSuffix };
 }
 
 function parseBigInt(raw: string): bigint {
@@ -68,20 +68,41 @@ function parseBigInt(raw: string): bigint {
   return BigInt(raw);
 }
 
-function parseFloatToken(raw: string): {
+function parseFloatToken(
+  raw: string,
+  onRecoverableError?: (msg: string) => void
+): {
   value: number;
   precision: FloatPrecision | undefined;
 } {
+  // Strip any invalid encoding indicator first, before NaN/Infinity checks,
+  // so that e.g. "NaN_7" still resolves to NaN after the suffix is removed.
+  if (raw.endsWith('_i') || raw.endsWith('_0')) {
+    const msg =
+      '_0 and _i encoding indicators are not valid for floating-point values';
+    if (onRecoverableError) {
+      onRecoverableError(msg);
+      raw = raw.slice(0, -2);
+    } else {
+      throw new SyntaxError(`EDN parse error: ${msg}`);
+    }
+  } else if (/[_][4567]$/.test(raw)) {
+    const suffix = raw[raw.length - 1]!;
+    const msg =
+      suffix === '7'
+        ? 'indefinite-length encoding (_7) is not valid for floating-point values'
+        : `encoding indicator _${suffix} (AI ${Number(suffix) + 24}) is reserved and not valid`;
+    if (onRecoverableError) {
+      onRecoverableError(msg);
+      raw = raw.slice(0, -2);
+    } else {
+      throw new SyntaxError(`EDN parse error: ${msg}`);
+    }
+  }
+
   if (raw === 'NaN') return { value: NaN, precision: undefined };
   if (raw === 'Infinity') return { value: Infinity, precision: undefined };
   if (raw === '-Infinity') return { value: -Infinity, precision: undefined };
-
-  // _0 and _i are not valid encoding indicators for floating-point values
-  // (floats use _1=half, _2=single, _3=double; _0 is 1-byte integer arg, _i is immediate)
-  if (raw.endsWith('_i') || raw.endsWith('_0'))
-    throw new SyntaxError(
-      `EDN parse error: _0 and _i encoding indicators are not valid for floating-point values`
-    );
 
   let numStr = raw;
   let precision: FloatPrecision | undefined;
@@ -116,61 +137,85 @@ function hexToBytes(hex: string): Uint8Array {
   return out;
 }
 
-const B32_ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-const H32_ALPHA = '0123456789ABCDEFGHIJKLMNOPQRSTUV';
+function base64ToBytes(
+  b64: string,
+  onRecoverableError?: (msg: string) => void
+): Uint8Array {
+  // Separate data characters from trailing '=' padding.
+  const eqIdx = b64.indexOf('=');
+  const data = eqIdx >= 0 ? b64.slice(0, eqIdx) : b64;
+  const pad = eqIdx >= 0 ? b64.slice(eqIdx) : '';
 
-function base32Decode(str: string, alpha: string): Uint8Array {
-  // Padding is optional per the ABNF (§5.2.2 analogue for base32); strip it.
-  const s = str.replace(/=+$/, '').toUpperCase();
-  // RFC 4648 §6: valid unpadded lengths mod 8 are 0, 2, 4, 5, 7.
-  // Lengths 1, 3, 6 mod 8 cannot arise from any valid byte sequence.
-  const rem = s.length % 8;
-  if (rem === 1 || rem === 3 || rem === 6)
-    throw new SyntaxError(`invalid base32 length: ${s.length} characters`);
-  const lookup = new Uint8Array(128).fill(0xff);
-  for (let i = 0; i < alpha.length; i++) lookup[alpha.charCodeAt(i)] = i;
-  const out = new Uint8Array(Math.floor((s.length * 5) / 8));
-  let buf = 0,
-    bufBits = 0,
-    outIdx = 0;
-  for (const ch of s) {
-    const code = ch.charCodeAt(0);
-    const val = code < 128 ? lookup[code] : 0xff;
-    if (val === 0xff)
-      throw new SyntaxError(
-        `invalid character in byte string: ${JSON.stringify(ch)}`
-      );
-    buf = (buf << 5) | val;
-    bufBits += 5;
-    if (bufBits >= 8) {
-      bufBits -= 8;
-      out[outIdx++] = (buf >> bufBits) & 0xff;
+  // draft-25 b64dig = ALPHA / DIGIT / "-" / "_" / "+" / "/"
+  // Classic (+/) and URL-safe (-_) position-62/63 chars are both valid in the
+  // same literal. Reject anything outside this set as a hard error.
+  if (/[^A-Za-z0-9+/\-_]/.test(data)) {
+    const bad = [...data].find((c) => !/[A-Za-z0-9+/\-_]/.test(c)) ?? '';
+    throw new SyntaxError(
+      `invalid character ${JSON.stringify(bad)} in base64 data`
+    );
+  }
+  if (pad && !/^=+$/.test(pad))
+    throw new SyntaxError(`invalid character after base64 '=' padding`);
+
+  const rem = data.length % 4;
+
+  // rem === 1 cannot arise from any valid byte sequence (always invalid).
+  if (rem === 1)
+    throw new SyntaxError(
+      `invalid base64 length: ${data.length} data characters (length mod 4 = 1 is never valid)`
+    );
+
+  // Expected number of '=' characters for this data length.
+  const expectedPad = rem === 0 ? 0 : 4 - rem;
+
+  if (pad.length > expectedPad) {
+    const msg = `base64 has ${pad.length} '=' character${pad.length > 1 ? 's' : ''} but the data length (${data.length}) requires at most ${expectedPad}`;
+    if (onRecoverableError) onRecoverableError(msg);
+    else throw new SyntaxError(msg);
+  }
+
+  // Partial padding: some '=' present but fewer than the full required amount.
+  // draft-25 accommodates NO padding; any '=' present must be the full set.
+  if (pad.length > 0 && pad.length < expectedPad) {
+    const msg = `base64 has ${pad.length} '=' character${pad.length > 1 ? 's' : ''} but needs exactly ${expectedPad} — use full padding or no padding at all`;
+    if (onRecoverableError) onRecoverableError(msg);
+    else throw new SyntaxError(msg);
+  }
+  // Zero '=': draft-25 allows omitting padding entirely — always accepted.
+
+  // Non-zero trailing bits in the last data character (RFC 4648 §3.5).
+  // Normalize URL-safe chars first so the lookup is against the classic table.
+  // rem=2 (1-byte quantum): bottom 4 bits of the final char must be zero.
+  // rem=3 (2-byte quantum): bottom 2 bits of the final char must be zero.
+  if (rem !== 0 && data.length > 0) {
+    const ALPHA =
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const lastChar = data[data.length - 1]!.replace('-', '+').replace('_', '/');
+    const lastVal = ALPHA.indexOf(lastChar);
+    if (lastVal >= 0) {
+      const mask = rem === 2 ? 0x0f : 0x03;
+      if ((lastVal & mask) !== 0) {
+        const msg = `base64 has non-zero trailing bits in the final quantum (RFC 4648 §3.5)`;
+        if (onRecoverableError) onRecoverableError(msg);
+        else throw new SyntaxError(msg);
+      }
     }
   }
-  // RFC 4648 §3.5: trailing bits in the last quantum must be zero.
-  if (bufBits > 0 && (buf & ((1 << bufBits) - 1)) !== 0)
-    throw new SyntaxError('non-zero trailing bits in base32 input');
-  return out;
-}
 
-function base64ToBytes(b64: string): Uint8Array {
-  // Padding is optional but accepted per §5.2.2 ABNF
-  // ("accommodates, but does not require base64 padding").
+  // Normalize URL-safe chars to classic and add any missing padding so the
+  // underlying decoder accepts the input regardless of what was originally used.
+  const normalized =
+    data.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat(expectedPad);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (typeof (Uint8Array as any).fromBase64 === 'function') {
-    // Detect alphabet from content: base64url uses - or _
-    const alphabet = /[-_]/.test(b64) ? 'base64url' : 'base64';
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (Uint8Array as any).fromBase64(b64, {
-      alphabet,
+    return (Uint8Array as any).fromBase64(normalized, {
+      alphabet: 'base64',
       lastChunkHandling: 'loose',
     });
   }
-  // Accept both base64 (+/) and base64url (-_) alphabets.
-  // Add padding internally as needed for atob().
-  const normalized = b64.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
-  const binary = atob(padded);
+  const binary = atob(normalized);
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
   return out;
@@ -295,26 +340,39 @@ class CDNParser {
 
   private readonly unresolvedExtension: 'cpa999' | 'error';
 
+  /** Warnings accumulated during the current parseValue() call. */
+  private _pendingWarnings: ParseWarning[] = [];
+
   constructor(
     private readonly t: Tokenizer,
-    userExtensions?: CborExtension[],
-    unresolvedExtension?: 'cpa999' | 'error',
-    private readonly allowInvalidUtf8?: boolean,
-    private readonly allowTrailing?: boolean
+    private readonly _options: FromCDNOptions
   ) {
     this.extByPrefix = new Map();
     this.extByTag = new Map();
-    this.unresolvedExtension = unresolvedExtension ?? 'cpa999';
-    for (const ext of [...BUILTIN_EXTENSIONS, ...(userExtensions ?? [])]) {
+    this.unresolvedExtension = _options.unresolvedExtension ?? 'cpa999';
+    for (const ext of [...BUILTIN_EXTENSIONS, ...(_options.extensions ?? [])]) {
       for (const prefix of ext.appStringPrefixes ?? [])
         this.extByPrefix.set(prefix, ext);
       for (const tag of ext.tagNumbers ?? []) this.extByTag.set(tag, ext);
     }
+    this.t.onEscapeWarning = (msg, offset, line, col) => {
+      const w: ParseWarning = { message: msg, offset, line, column: col };
+      this._pendingWarnings.push(w);
+      if (this._options.onWarning) this._options.onWarning(w);
+      else if (!this._options.silent)
+        console.warn(
+          `CDN strict violation at line ${line}, column ${col}: ${msg}`
+        );
+      if (this._options.strict !== false)
+        throw new SyntaxError(
+          `EDN parse error at line ${line}, column ${col}: ${msg}`
+        );
+    };
   }
 
   parse(): CborItem {
     const value = this.parseValue();
-    if (this.allowTrailing) return value;
+    if (this._options.allowTrailing) return value;
     const next = this.t.peek();
     if (next.type !== 'EOF') {
       this._fail(
@@ -328,6 +386,11 @@ class CDNParser {
   parseValue(): CborItem {
     const start = this.t.peek().offset;
     const node = this._parseValueNode();
+    if (this._pendingWarnings.length > 0) {
+      node.warnings ??= [];
+      for (const w of this._pendingWarnings) node.warnings.push(w);
+      this._pendingWarnings = [];
+    }
     node.start = start;
     node.end = this.t.lastEndOffset;
     return node;
@@ -345,9 +408,7 @@ class CDNParser {
         return this.parseString();
       case 'BYTES_HEX':
       case 'SQSTR':
-      case 'BYTES_B64':
-      case 'BYTES_B32':
-      case 'BYTES_H32': {
+      case 'BYTES_B64': {
         this.t.consume();
         return this._parseBytesConcat(
           this._decodeBytesToken(tok),
@@ -396,7 +457,38 @@ class CDNParser {
             tok
           );
         }
-        return ext.parseAppString(tok.appPrefix!, tok.value);
+        {
+          const warnsBefore = this._pendingWarnings.length;
+          try {
+            const result = ext.parseAppString(
+              tok.appPrefix!,
+              tok.value,
+              this._extOnError(tok)
+            );
+            // Propagate ednSource so preserveByteString / appStrings round-trips correctly.
+            // instanceof narrows the type; getPrototypeOf excludes subclasses like CborIpExt.
+            if (
+              result instanceof CborByteString &&
+              Object.getPrototypeOf(result) === CborByteString.prototype &&
+              result.ednSource === undefined
+            )
+              return new CborByteString(result.value, {
+                ednEncoding: result.ednEncoding,
+                encodingWidth: result.encodingWidth,
+                ednSource: tok.raw,
+              });
+            if (result instanceof CborFloat && result.ednSource === undefined)
+              result.ednSource = tok.raw;
+            return result;
+          } catch (e) {
+            if (this._options.strict !== false) throw e;
+            if (this._pendingWarnings.length === warnsBefore)
+              this._warn(e instanceof Error ? e.message : String(e), tok);
+            return new CborUnresolvedAppExt(tok.appPrefix!, [
+              new CborTextString(tok.value),
+            ]);
+          }
+        }
       }
       case 'APP_SEQUENCE': {
         this.t.consume();
@@ -425,7 +517,31 @@ class CDNParser {
             `app-string extension ${JSON.stringify(tok.appPrefix)} does not support <<...>> form`,
             tok
           );
-        return seqExt.parseAppSequence(tok.appPrefix!, items);
+        {
+          const warnsBefore = this._pendingWarnings.length;
+          try {
+            const result = seqExt.parseAppSequence(
+              tok.appPrefix!,
+              items,
+              this._extOnError(tok)
+            );
+            const rawSource = this.t.source.slice(
+              tok.offset,
+              this.t.lastEndOffset
+            );
+            if (result instanceof CborFloat) {
+              if (result.ednSource === undefined) result.ednSource = rawSource;
+            } else if (seqExt.preserveAppSeqSource) {
+              return new CborAppSeqResult(result, rawSource);
+            }
+            return result;
+          } catch (e) {
+            if (this._options.strict !== false) throw e;
+            if (this._pendingWarnings.length === warnsBefore)
+              this._warn(e instanceof Error ? e.message : String(e), tok);
+            return new CborUnresolvedAppExt(tok.appPrefix!, items);
+          }
+        }
       }
       case 'ELLIPSIS': {
         this.t.consume();
@@ -448,11 +564,13 @@ class CDNParser {
 
   private parseIntegerOrTag(): CborItem {
     const tok = this.t.consume(); // INTEGER
-    const { numStr, encodingWidth: embeddedEW } = parseIntegerRaw(tok.value);
+    const { numStr, rawSuffix } = parseIntegerRaw(tok.value);
     // Hex/octal/binary literals return before the suffix check in the tokenizer,
     // so their encoding indicator arrives as a separate ENCODING_INDICATOR token.
-    const encodingWidth =
-      embeddedEW !== undefined ? embeddedEW : this.consumeEncodingIndicator();
+    let encodingWidth =
+      rawSuffix !== undefined
+        ? this._resolveEncodingWidth(rawSuffix, tok)
+        : this.consumeEncodingIndicator();
     const n = parseBigInt(numStr);
 
     // Out-of-range integers become bignum tags per RFC 8949 §3.4.3.
@@ -464,6 +582,17 @@ class CDNParser {
     }
     if (n < -(0xffff_ffff_ffff_ffffn + 1n)) {
       return new CborBigNint(n);
+    }
+
+    // Validate that the value fits in the requested encoding width.
+    // For nint, the CBOR argument is abs(n)−1 (e.g. -1 → 0, -24 → 23).
+    if (encodingWidth !== undefined) {
+      const storedValue = n >= 0n ? n : -(n + 1n);
+      encodingWidth = this._validateEncodingFit(
+        storedValue,
+        encodingWidth,
+        tok
+      );
     }
 
     const intNode =
@@ -482,26 +611,55 @@ class CDNParser {
       if (!(intNode instanceof CborUint))
         this._fail('tag number must be non-negative', tok);
       this.t.consume(); // (
+      // Rescue setup warnings before content's parseValue() drains them into the content node.
+      const setupWarnings = this._pendingWarnings.splice(0);
       const content = this.parseValue();
       this.expect('RPAREN');
       const tagNum = intNode.value;
       const ext = this.extByTag.get(tagNum);
       if (ext?.parseTag) {
         const result = ext.parseTag(tagNum, content);
-        if (result !== undefined) return result;
+        if (result !== undefined) {
+          if (setupWarnings.length > 0) {
+            result.warnings ??= [];
+            result.warnings.push(...setupWarnings);
+          }
+          return result;
+        }
       }
-      return new CborTag(
+      const tagResult = new CborTag(
         tagNum,
         content,
         encodingWidth !== undefined ? { encodingWidth } : undefined
       );
+      if (setupWarnings.length > 0) {
+        tagResult.warnings ??= [];
+        tagResult.warnings.push(...setupWarnings);
+      }
+      return tagResult;
     }
     return intNode;
   }
 
   private parseFloat(): CborItem {
     const tok = this.t.consume(); // FLOAT
-    const { value, precision } = parseFloatToken(tok.value);
+    const onRecoverableError = (msg: string) => {
+      this._warn(msg, tok);
+      if (this._options.strict !== false) this._fail(msg, tok);
+    };
+    const { value, precision } = parseFloatToken(tok.value, onRecoverableError);
+    if (precision === 'half' || precision === 'single') {
+      const roundTripped =
+        precision === 'half'
+          ? float16BitsToFloat64(float64ToFloat16Bits(value))
+          : Math.fround(value);
+      const lossless =
+        Object.is(value, roundTripped) || (isNaN(value) && isNaN(roundTripped));
+      if (!lossless)
+        onRecoverableError(
+          `${value} cannot be exactly represented as ${precision === 'half' ? 'f16 (_1)' : 'f32 (_2)'}; use _3 or remove the indicator`
+        );
+    }
     return new CborFloat(
       value,
       precision !== undefined ? { precision } : undefined
@@ -513,7 +671,8 @@ class CDNParser {
 
     // Fast path: no concatenation
     if (this.t.peek().type !== 'PLUS') {
-      const ew = this.consumeEncodingIndicator();
+      const byteLen = BigInt(new TextEncoder().encode(tok.value).length);
+      const ew = this.consumeEncodingIndicator(byteLen);
       return new CborTextString(
         tok.value,
         ew !== undefined ? { encodingWidth: ew } : undefined
@@ -551,9 +710,11 @@ class CDNParser {
 
     if (!hasEllipsis) {
       // No ellipsis — join all text fragments into a single CborTextString
-      const ew = this.consumeEncodingIndicator();
+      const joined = parts.map((p) => ('text' in p ? p.text : '')).join('');
+      const byteLen = BigInt(new TextEncoder().encode(joined).length);
+      const ew = this.consumeEncodingIndicator(byteLen);
       return new CborTextString(
-        parts.map((p) => ('text' in p ? p.text : '')).join(''),
+        joined,
         ew !== undefined ? { encodingWidth: ew } : undefined
       );
     }
@@ -578,54 +739,40 @@ class CDNParser {
   }
 
   private _isBytesToken(type: string): boolean {
-    return (
-      type === 'BYTES_HEX' ||
-      type === 'SQSTR' ||
-      type === 'BYTES_B64' ||
-      type === 'BYTES_B32' ||
-      type === 'BYTES_H32'
-    );
+    return type === 'BYTES_HEX' || type === 'SQSTR' || type === 'BYTES_B64';
   }
 
   private _decodeBytesToken(tok: Token): Uint8Array {
+    const onRecoverableError = (msg: string) => {
+      this._warn(msg, tok);
+      if (this._options.strict !== false) this._fail(msg, tok);
+    };
     switch (tok.type) {
       case 'BYTES_HEX':
       case 'SQSTR':
         return hexToBytes(tok.value);
       case 'BYTES_B64':
-        return base64ToBytes(tok.value);
-      case 'BYTES_B32':
-        return base32Decode(tok.value, B32_ALPHA);
-      case 'BYTES_H32':
-        return base32Decode(tok.value, H32_ALPHA);
+        return base64ToBytes(tok.value, onRecoverableError);
       default:
         this._fail(`expected byte string token`, tok);
     }
   }
 
   private _decodeUtf8(bytes: Uint8Array, tok: Token): string {
-    if (this.allowInvalidUtf8)
+    if (this._options.allowInvalidUtf8)
       return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
     try {
       return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     } catch {
-      this._fail('byte string in text concatenation is not valid UTF-8', tok);
+      const msg = 'byte string in text concatenation is not valid UTF-8';
+      this._warn(msg, tok);
+      if (this._options.strict !== false) this._fail(msg, tok);
+      return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
     }
   }
 
-  private _tokenTypeToCdnEncoding(
-    type: string
-  ): 'hex' | 'base64' | 'base32' | 'base32hex' {
-    switch (type) {
-      case 'BYTES_B64':
-        return 'base64';
-      case 'BYTES_B32':
-        return 'base32';
-      case 'BYTES_H32':
-        return 'base32hex';
-      default:
-        return 'hex';
-    }
+  private _tokenTypeToCdnEncoding(type: string): 'hex' | 'base64' {
+    return type === 'BYTES_B64' ? 'base64' : 'hex';
   }
 
   private _parseBytesConcat(
@@ -634,7 +781,7 @@ class CDNParser {
     firstSource: string
   ): CborByteString | CborEllipsis {
     if (this.t.peek().type !== 'PLUS') {
-      const ew = this.consumeEncodingIndicator();
+      const ew = this.consumeEncodingIndicator(BigInt(first.length));
       const ednEncoding = this._tokenTypeToCdnEncoding(firstType);
       return new CborByteString(first, {
         ednEncoding,
@@ -671,9 +818,16 @@ class CDNParser {
         this.t.consume();
         parts.push({ bytes: this._decodeBytesToken(next) });
       } else if (next.type === 'TSTR' || next.type === 'RAWSTRING') {
-        // Text strings in a byte-leading concat are UTF-8 encoded (same as
-        // single-quoted strings and text chunks in indefinite byte strings).
+        // §5.1: when a byte string leads, the right-hand side must also be a
+        // byte string.  Text strings are only allowed on the right of a
+        // text-leading concatenation.  In non-strict mode we UTF-8 encode
+        // the text and continue; in strict mode this is a hard error.
         this.t.consume();
+        const mixMsg =
+          'text string in a byte-string concatenation is not allowed; ' +
+          "use a byte string literal (h'...', b64'...', or '...') instead";
+        this._warn(mixMsg, next);
+        if (this._options.strict !== false) this._fail(mixMsg, next);
         parts.push({ bytes: new TextEncoder().encode(next.value) });
       } else {
         this._fail(
@@ -684,12 +838,13 @@ class CDNParser {
     }
 
     if (!hasEllipsis) {
-      const ew = this.consumeEncodingIndicator();
       const allBytes = parts.map((p) =>
         'bytes' in p ? p.bytes : new Uint8Array(0)
       );
+      const concat = this._concatBytes(allBytes);
+      const ew = this.consumeEncodingIndicator(BigInt(concat.length));
       return new CborByteString(
-        this._concatBytes(allBytes),
+        concat,
         ew !== undefined ? { encodingWidth: ew } : undefined
       );
     }
@@ -829,13 +984,25 @@ class CDNParser {
     this.t.consume(); // [
     let indefiniteLength = false;
     let encodingWidth: EncodingWidth | undefined;
+    let eiTok: Token | undefined;
     if (this.t.peek().type === 'UNDERSCORE') {
       this.t.consume();
       indefiniteLength = true;
     } else if (this.t.peek().type === 'ENCODING_INDICATOR') {
-      const v = this.t.consume().value;
-      encodingWidth = v === 'i' ? 'i' : (Number(v) as EncodingWidth);
+      eiTok = this.t.consume();
+      if (eiTok.value === '7') {
+        indefiniteLength = true;
+        const msg =
+          'encoding indicator _7 is non-standard; use _ to indicate indefinite length';
+        this._warn(msg, eiTok);
+        if (this._options.strict !== false) this._fail(msg, eiTok);
+        eiTok = undefined;
+      } else {
+        encodingWidth = this._resolveEncodingWidth(eiTok.value, eiTok);
+      }
     }
+    // Rescue setup warnings before inner parseValue() calls drain them into child nodes.
+    const setupWarnings = this._pendingWarnings.splice(0);
     const items: CborItem[] = [];
     while (this.t.peek().type !== 'RBRACKET') {
       if (items.length > 0 && this.t.peek().type === 'COMMA') {
@@ -845,20 +1012,48 @@ class CDNParser {
       items.push(this.parseValue());
     }
     this.expect('RBRACKET');
-    return new CborArray(items, { indefiniteLength, encodingWidth });
+    if (encodingWidth !== undefined && eiTok !== undefined) {
+      encodingWidth = this._validateEncodingFit(
+        BigInt(items.length),
+        encodingWidth,
+        eiTok
+      );
+      // _validateEncodingFit may add to _pendingWarnings; outer parseValue() flushes those.
+    }
+    const arrayResult = new CborArray(items, {
+      indefiniteLength,
+      encodingWidth,
+    });
+    if (setupWarnings.length > 0) {
+      arrayResult.warnings ??= [];
+      arrayResult.warnings.push(...setupWarnings);
+    }
+    return arrayResult;
   }
 
   private parseMap(): CborMap {
     this.t.consume(); // {
     let indefiniteLength = false;
     let encodingWidth: EncodingWidth | undefined;
+    let eiTok: Token | undefined;
     if (this.t.peek().type === 'UNDERSCORE') {
       this.t.consume();
       indefiniteLength = true;
     } else if (this.t.peek().type === 'ENCODING_INDICATOR') {
-      const v = this.t.consume().value;
-      encodingWidth = v === 'i' ? 'i' : (Number(v) as EncodingWidth);
+      eiTok = this.t.consume();
+      if (eiTok.value === '7') {
+        indefiniteLength = true;
+        const msg =
+          'encoding indicator _7 is non-standard; use _ to indicate indefinite length';
+        this._warn(msg, eiTok);
+        if (this._options.strict !== false) this._fail(msg, eiTok);
+        eiTok = undefined;
+      } else {
+        encodingWidth = this._resolveEncodingWidth(eiTok.value, eiTok);
+      }
     }
+    // Rescue setup warnings before inner parseValue() calls drain them into child nodes.
+    const setupWarnings = this._pendingWarnings.splice(0);
     const entries: [CborItem, CborItem][] = [];
     while (this.t.peek().type !== 'RBRACE') {
       if (entries.length > 0 && this.t.peek().type === 'COMMA') {
@@ -871,7 +1066,19 @@ class CDNParser {
       entries.push([key, val]);
     }
     this.expect('RBRACE');
-    return new CborMap(entries, { indefiniteLength, encodingWidth });
+    if (encodingWidth !== undefined && eiTok !== undefined) {
+      encodingWidth = this._validateEncodingFit(
+        BigInt(entries.length),
+        encodingWidth,
+        eiTok
+      );
+    }
+    const mapResult = new CborMap(entries, { indefiniteLength, encodingWidth });
+    if (setupWarnings.length > 0) {
+      mapResult.warnings ??= [];
+      mapResult.warnings.push(...setupWarnings);
+    }
+    return mapResult;
   }
 
   /** Parses `(_ chunk, chunk, ...)` — indefinite byte or text string. */
@@ -879,10 +1086,33 @@ class CDNParser {
     | CborIndefiniteByteString
     | CborIndefiniteTextString {
     this.t.consume(); // (
-    const us = this.t.peek();
-    if (us.type !== 'UNDERSCORE')
-      this._fail(`expected _ after (, got ${JSON.stringify(us.value)}`, us);
-    this.t.consume(); // _
+    const next = this.t.peek();
+    if (next.type === 'UNDERSCORE') {
+      this.t.consume(); // _
+    } else if (next.type === 'ENCODING_INDICATOR' && next.value === '7') {
+      this.t.consume(); // _7 — alias for _, but non-standard
+      const msg7 =
+        'encoding indicator _7 is non-standard; use _ to indicate indefinite length';
+      this._warn(msg7, next);
+      if (this._options.strict !== false) this._fail(msg7, next);
+    } else if (next.type === 'ENCODING_INDICATOR') {
+      // _0–_6: not meaningful here; warn and drop, then parse chunks
+      const tok = this.t.consume();
+      const msg = `encoding indicator _${tok.value} is not valid in an indefinite string group; use _`;
+      this._warn(msg, tok);
+      if (this._options.strict !== false) this._fail(msg, tok);
+    } else if (next.type !== 'RPAREN') {
+      // No indicator at all — warn that _ is expected, then parse chunks
+      const msg =
+        'indefinite string group is missing _ after (; interpreting as (_ ...)';
+      this._warn(msg, next);
+      if (this._options.strict !== false) this._fail(msg, next);
+      // Do not consume — the next token is the first chunk
+    }
+
+    // Rescue any warnings emitted above from _pendingWarnings before inner
+    // parseValue() calls for each chunk drain them into the wrong node.
+    const setupWarnings = this._pendingWarnings.splice(0);
 
     const chunks: CborItem[] = [];
     while (this.t.peek().type !== 'RPAREN') {
@@ -909,7 +1139,9 @@ class CDNParser {
           `indefinite byte string chunk ${i} must be a byte string, not a text string`
         );
       });
-      return new CborIndefiniteByteString(byteChunks);
+      const result = new CborIndefiniteByteString(byteChunks);
+      if (setupWarnings.length > 0) result.warnings = setupWarnings;
+      return result;
     }
     if (first instanceof CborTextString) {
       const textChunks = chunks.map((c, i) => {
@@ -918,18 +1150,30 @@ class CDNParser {
           `indefinite text string chunk ${i} must be a text string, not a byte string`
         );
       });
-      return new CborIndefiniteTextString(textChunks);
+      const result = new CborIndefiniteTextString(textChunks);
+      if (setupWarnings.length > 0) result.warnings = setupWarnings;
+      return result;
     }
     this._fail('indefinite group chunks must be byte strings or text strings');
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────
 
-  /** Consume an ENCODING_INDICATOR token if present, returning the width. */
-  private consumeEncodingIndicator(): EncodingWidth | undefined {
+  /**
+   * Consume an ENCODING_INDICATOR token if present.
+   * Validates the indicator type (reserved/indefinite), and when `storedValue`
+   * is supplied also checks that the value fits in the requested encoding width.
+   */
+  private consumeEncodingIndicator(
+    storedValue?: bigint
+  ): EncodingWidth | undefined {
     if (this.t.peek().type === 'ENCODING_INDICATOR') {
-      const v = this.t.consume().value;
-      return v === 'i' ? 'i' : (Number(v) as EncodingWidth);
+      const tok = this.t.consume();
+      let ew = this._resolveEncodingWidth(tok.value, tok);
+      if (ew !== undefined && storedValue !== undefined) {
+        ew = this._validateEncodingFit(storedValue, ew, tok);
+      }
+      return ew;
     }
     return undefined;
   }
@@ -942,6 +1186,79 @@ class CDNParser {
         tok
       );
     return tok;
+  }
+
+  /**
+   * Validate that `storedValue` fits in the given encoding width.
+   * Returns `ew` if valid; warns and returns `undefined` if not (throws in strict mode).
+   * `storedValue` is the CBOR argument: the integer itself for uint/tag, `abs(n)−1` for nint,
+   * the byte-length for strings, or the item count for arrays/maps.
+   */
+  private _validateEncodingFit(
+    storedValue: bigint,
+    ew: EncodingWidth,
+    tok: Token
+  ): EncodingWidth | undefined {
+    const maxForWidth: Record<EncodingWidth, bigint> = {
+      i: 23n,
+      0: 0xffn,
+      1: 0xffffn,
+      2: 0xffff_ffffn,
+      3: 0xffff_ffff_ffff_ffffn,
+    };
+    if (storedValue <= maxForWidth[ew]) return ew;
+    const label =
+      ew === 'i' ? '_i (max 23)' : `_${ew} (max ${maxForWidth[ew]})`;
+    const msg = `value ${storedValue} does not fit in encoding indicator ${label}`;
+    this._warn(msg, tok);
+    if (this._options.strict !== false) this._fail(msg, tok);
+    return undefined;
+  }
+
+  private _resolveEncodingWidth(
+    raw: string,
+    tok: Token
+  ): EncodingWidth | undefined {
+    if (raw === '4' || raw === '5' || raw === '6') {
+      const ai = Number(raw) + 24; // 28, 29, or 30 — reserved in RFC 8949
+      const msg = `encoding indicator _${raw} (AI ${ai}) is reserved and not valid`;
+      this._warn(msg, tok);
+      if (this._options.strict !== false) this._fail(msg, tok);
+      return undefined;
+    }
+    if (raw === '7') {
+      const msg =
+        'indefinite-length encoding (_7) is not valid here; use [_ ...] or {_ ...} for indefinite collections';
+      this._warn(msg, tok);
+      if (this._options.strict !== false) this._fail(msg, tok);
+      return undefined;
+    }
+    if (raw === 'i') return 'i';
+    return Number(raw) as EncodingWidth; // '0'–'3' → 0–3
+  }
+
+  /** Builds the onError callback passed to extension parseAppString/parseAppSequence. */
+  private _extOnError(tok: Token): (msg: string) => void {
+    return (msg: string) => {
+      this._warn(msg, tok);
+      if (this._options.strict !== false) this._fail(msg, tok);
+    };
+  }
+
+  private _warn(msg: string, tok?: Token): void {
+    const warning: ParseWarning = { message: msg };
+    if (tok !== undefined) {
+      warning.offset = tok.offset;
+      warning.line = tok.line;
+      warning.column = tok.col;
+    }
+    this._pendingWarnings.push(warning);
+    if (this._options.onWarning) {
+      this._options.onWarning(warning);
+    } else if (!this._options.silent) {
+      const loc = tok ? ` at line ${tok.line}, column ${tok.col}` : '';
+      console.warn(`CDN strict violation${loc}: ${msg}`);
+    }
   }
 
   private _fail(msg: string, tok?: Token): never {
