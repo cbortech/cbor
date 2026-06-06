@@ -1,5 +1,6 @@
 import { describe, test, expect, vi } from 'vitest';
 import { CBOR } from './cbor';
+import { b32, h32 } from './extensions/b32';
 import { CborUint } from './ast/CborUint';
 import { CborNint } from './ast/CborNint';
 import { CborTextString } from './ast/CborTextString';
@@ -557,11 +558,13 @@ describe('CBOR.format()', () => {
     expect(
       CBOR.format("b32' NBUQ # b32\n '", {
         preserveByteString: true,
+        extensions: [b32],
       })
     ).toBe("b32' NBUQ # b32\n '");
     expect(
       CBOR.format("h32' D1KG # h32\n '", {
         preserveByteString: true,
+        extensions: [h32],
       })
     ).toBe("h32' D1KG # h32\n '");
     expect(CBOR.format("'hi'", { preserveByteString: true })).toBe("'hi'");

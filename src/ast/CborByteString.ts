@@ -40,7 +40,8 @@ export class CborByteString extends CborItem {
       this.encodingWidth !== undefined ? `_${this.encodingWidth}` : '';
     if (options?.preserveByteString && this.ednSource !== undefined)
       return this.ednSource + suffix;
-    const encoding = options?.bstrEncoding ?? this.ednEncoding;
+    let encoding = options?.bstrEncoding ?? this.ednEncoding;
+    if (options?.appStrings === false && encoding !== 'hex') encoding = 'hex';
     return serializeBytes(this.value, encoding, options?.sqstr) + suffix;
   }
 
