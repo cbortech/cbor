@@ -74,6 +74,17 @@ export interface CborExtension {
   ): CborItem;
 
   /**
+   * When `true`, the CDN parser wraps the result of `parseAppSequence` in a
+   * `CborAppSeqResult` so that `toCDN()` round-trips the original
+   * `prefix<<...>>` notation when `appStrings !== false`.
+   *
+   * Extensions whose result is already a subclass that handles source
+   * preservation itself (e.g. `CborFloat` via its `ednSource` property) should
+   * leave this unset.
+   */
+  readonly preserveAppSeqSource?: boolean;
+
+  /**
    * Called when a `CborTag` is encountered during CBOR decode (`fromCBOR`)
    * or EDN integer-tag parsing (`fromCDN`).
    * Return `undefined` to fall back to the default `CborTag` representation.

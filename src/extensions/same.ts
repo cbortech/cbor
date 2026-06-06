@@ -10,6 +10,11 @@
  *
  * `same<<x>>` (single item) is a no-op assertion that always passes.
  *
+ * The parsed result is wrapped in `CborAppSeqResult` so that `toCDN()` round-trips
+ * the original `same<<...>>` notation.  `toCBOR()` and `toJS()` delegate
+ * transparently to the inner item; `appStrings: false` produces the resolved value.
+ * The result is not directly `instanceof` the inner item's class.
+ *
  * This extension is a testing/validation construct from the cabo/edn-abnf
  * corpus and is NOT part of draft-ietf-cbor-edn-literals.  It is not included
  * in the default extension set.  Add it explicitly:
@@ -34,6 +39,7 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
  */
 export const same: CborExtension = {
   appStringPrefixes: ['same'],
+  preserveAppSeqSource: true,
 
   parseAppSequence(
     _prefix: string,

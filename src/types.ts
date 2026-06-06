@@ -417,16 +417,13 @@ export interface ToCDNOptions {
   commas?: 'comma' | 'none' | 'trailing';
 
   /**
-  /**
    * Fallback binary encoding for byte string literals when sqstr is not applicable.
    * - `'hex'`: `h'...'`
    * - `'base64'`: `b64'...'`
    * - `'base64url'`: `b64'...'` (base64url alphabet)
-   * - `'base32'`: `b32'...'`
-   * - `'base32hex'`: `h32'...'`
    * @default 'hex'
    */
-  bstrEncoding?: 'hex' | 'base64' | 'base64url' | 'base32' | 'base32hex';
+  bstrEncoding?: 'hex' | 'base64' | 'base64url';
 
   /**
    * Whether to prefer single-quoted string form (`sqstr`) for byte strings.

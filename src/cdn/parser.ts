@@ -28,6 +28,7 @@ import { parseHexFloat } from '../utils/hexfloat';
 import { float64ToFloat16Bits, float16BitsToFloat64 } from '../utils/float16';
 import { BUILTIN_EXTENSIONS } from '../extensions/builtins';
 import { CborUnresolvedAppExt } from '../ast/CborUnresolvedAppExt';
+import { CborAppSeqResult } from '../ast/CborAppSeqResult';
 import { CborEllipsis } from '../ast/CborEllipsis';
 import { CborBigUint, CborBigNint } from '../ast/CborBignum';
 
@@ -464,7 +465,7 @@ class CDNParser {
               tok.value,
               this._extOnError(tok)
             );
-            // Propagate ednSource so preserveByteString round-trips correctly.
+            // Propagate ednSource so preserveByteString / appStrings round-trips correctly.
             // instanceof narrows the type; getPrototypeOf excludes subclasses like CborIpExt.
             if (
               result instanceof CborByteString &&
@@ -476,6 +477,8 @@ class CDNParser {
                 encodingWidth: result.encodingWidth,
                 ednSource: tok.raw,
               });
+            if (result instanceof CborFloat && result.ednSource === undefined)
+              result.ednSource = tok.raw;
             return result;
           } catch (e) {
             if (this._options.strict !== false) throw e;
@@ -517,11 +520,21 @@ class CDNParser {
         {
           const warnsBefore = this._pendingWarnings.length;
           try {
-            return seqExt.parseAppSequence(
+            const result = seqExt.parseAppSequence(
               tok.appPrefix!,
               items,
               this._extOnError(tok)
             );
+            const rawSource = this.t.source.slice(
+              tok.offset,
+              this.t.lastEndOffset
+            );
+            if (result instanceof CborFloat) {
+              if (result.ednSource === undefined) result.ednSource = rawSource;
+            } else if (seqExt.preserveAppSeqSource) {
+              return new CborAppSeqResult(result, rawSource);
+            }
+            return result;
           } catch (e) {
             if (this._options.strict !== false) throw e;
             if (this._pendingWarnings.length === warnsBefore)

@@ -326,37 +326,117 @@ console.log(text);
 
 ## オプション extension
 
+このパッケージには、デフォルト有効ではないものの本体に同梱されている
+extension があります。必要なものを `import` し、
+`extensions` オプションに渡して使います。
+
+### b32 / h32
+
+[RFC 4648](https://www.rfc-editor.org/rfc/rfc4648) の Base32 エンコードによるバイト列リテラルです。
+[RFC 8949](https://www.rfc-editor.org/rfc/rfc8949) §8 に記載があり、[draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/) でも触れられています。
+
+- `b32` — §6 Base32（`A–Z 2–7` アルファベット）
+- `h32` — §7 Base32Hex（`0–9 A–V` アルファベット）
+
+```ts
+import { CBOR, b32, h32 } from '@cbortech/cbor';
+
+const v1 = CBOR.fromCDN("b32'AEBAGBA'", { extensions: [b32] });
+console.log(v1.toCDN({ appStrings: false }));
+// h'01020304'
+
+const v2 = CBOR.fromCDN("h32'00P00'", { extensions: [h32] });
+console.log(v2.toCDN({ appStrings: false }));
+// h'003200'
+```
+
+### float
+
+16 進数のビットパターンを IEEE 754 浮動小数点値として解釈します。
+[draft-bormann-cbor-edn-app-ext](https://datatracker.ietf.org/doc/draft-bormann-cbor-edn-app-ext/)
+に記載があり、[cbor-test-vectors](https://github.com/cbor-wg/cbor-test-vectors) でも使われています。
+
+```ts
+import { CBOR, float } from '@cbortech/cbor';
+
+const v = CBOR.fromCDN("float'7e00'", { extensions: [float] });
+console.log(v.toCDN({ appStrings: false }));
+// NaN
+
+// バイト列から解釈する場合
+const v2 = CBOR.fromCDN("float<<h'3f800000'>>", { extensions: [float] });
+console.log(v2.toCDN({ appStrings: false }));
+// 1.0_2
+```
+
+### same
+
+`same<<expr, expr, ...>>` は、シーケンス内のすべての要素が同一の CBOR
+バイト列になることを検証し、最初の要素を返す extension です。
+[draft-bormann-cbor-edn-app-ext](https://datatracker.ietf.org/doc/draft-bormann-cbor-edn-app-ext/)
+に記載があります。
+
+```ts
+import { CBOR, same } from '@cbortech/cbor';
+
+// すべての要素が同じバイト列かを検証し、最初の要素を返す
+const v = CBOR.fromCDN("same<<h'0102', h'0102'>>", { extensions: [same] });
+console.log(v.toCDN({ appStrings: false }));
+// h'0102'
+
+// 要素が 1 つでも有効（常にパスする）
+const v2 = CBOR.fromCDN('same<<42>>', { extensions: [same] });
+console.log(v2.toCDN({ appStrings: false }));
+// 42
+```
+
+---
+
 追加の application extension は別パッケージとして公開されています。必要なものを
 インストールし、`extensions` オプションに渡して使います。
 
-`hash` は CDN の仕様に含まれる application extension ですが、利用には
-外部パッケージが必要です。そのため、このパッケージ本体には含めず、
-`@cbortech/hash-extension` として提供しています。
+### hash
 
-`uuid` は CDN の仕様には定められていない、このライブラリ独自の
-application extension です。仕様上の標準機能と区別するため、
-`@cbortech/uuid-extension` として別パッケージで提供しています。
+`hash` は [draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/) §3.3 で定義された標準の application extension です。
+ハッシュアルゴリズムと値を `hash'algorithm:value'` の形式で表現します。
+実装には外部の暗号ライブラリが必要なため、[@cbortech/hash-extension](https://www.npmjs.com/package/@cbortech/hash-extension) として
+別パッケージで提供しています。
 
 ```bash
-npm install @cbortech/hash-extension @cbortech/uuid-extension
+npm install @cbortech/hash-extension
 ```
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
-import hashExtension from '@cbortech/hash-extension';
-import uuidExtension from '@cbortech/uuid-extension';
+import { hash } from '@cbortech/hash-extension';
 
-const cbor = new CBOR({
-  extensions: [hashExtension, uuidExtension],
-});
+const cbor = new CBOR({ extensions: [hash] });
 
-const digest = cbor.fromCDN("hash'foo'");
-console.log(digest.toCDN());
-// hash'foo'
+const digest = cbor.parse(
+  "hash'sha-256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='"
+);
+// Uint8Array(32) [227, 176, 196, 66, 152, 252, 28, 20, 154, 251, 244, 200,
+//                 153, 111, 185, 36, 39, 174, 65, 228, 100, 155, 147, 76,
+//                 164, 149, 153, 27, 120, 82, 184, 85]
+```
 
-const id = cbor.fromCDN("uuid'550e8400-e29b-41d4-a716-446655440000'");
-console.log(id.toCDN());
-// uuid'550e8400-e29b-41d4-a716-446655440000'
+### uuid
+
+`uuid` はこのライブラリ独自の application extension です。
+[@cbortech/uuid-extension](https://www.npmjs.com/package/@cbortech/uuid-extension) として別パッケージで提供しています。
+
+```bash
+npm install @cbortech/uuid-extension
+```
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+import { uuid } from '@cbortech/uuid-extension';
+
+const cbor = new CBOR({ extensions: [uuid] });
+
+const id = cbor.parse("uuid'550e8400-e29b-41d4-a716-446655440000'");
+// Uint8Array(16) [85, 14, 132, 0, 226, 155, 65, 212, 167, 22, 68, 102, 85, 68, 0, 0]
 ```
 
 ## タグ

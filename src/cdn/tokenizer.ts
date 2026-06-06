@@ -139,6 +139,11 @@ export class Tokenizer {
     return this._lastConsumedEndOffset;
   }
 
+  /** The full source text supplied to this tokenizer. */
+  get source(): string {
+    return this.input;
+  }
+
   // ── Internal helpers ─────────────────────────────────────────────────────
 
   private _ch(): string {

@@ -31,6 +31,8 @@ import { CborByteString } from '../ast/CborByteString';
 import { CborSimple } from '../ast/CborSimple';
 import { CborUnresolvedAppExt } from '../ast/CborUnresolvedAppExt';
 import type { CborItem } from '../ast/CborItem';
+import type { CborExtension } from '../extensions/types';
+import { float } from '../extensions/float';
 
 const VECTORS_DIR = resolve(import.meta.dirname, '../cbor/test-vectors');
 
@@ -47,9 +49,9 @@ function isCborSimple(v: CborItem | undefined, simpleValue: number): boolean {
   return v instanceof CborSimple && v.value === simpleValue;
 }
 
-function runVectors(relPath: string): void {
+function runVectors(relPath: string, extensions?: CborExtension[]): void {
   const text = readFileSync(resolve(VECTORS_DIR, relPath), 'utf-8');
-  const top = parseCDN(text) as CborMap;
+  const top = parseCDN(text, { extensions }) as CborMap;
   const title = (mapGet(top, 'title') as CborTextString).value;
   const tests = (mapGet(top, 'tests') as CborArray).items;
 
@@ -66,8 +68,7 @@ function runVectors(relPath: string): void {
         continue;
       }
 
-      // Unresolved app-extension (e.g. float'7d1f') can't roundtrip without
-      // the matching extension registered; only verify the parse succeeded.
+      // Unresolved app-extension can't roundtrip without a registered plugin.
       const canRoundtrip =
         shouldRoundtrip && !(decodedItem instanceof CborUnresolvedAppExt);
 
@@ -103,6 +104,6 @@ describe('CDN test vectors (cbor-wg/cbor-test-vectors)', () => {
   // RFC 8949 comprehensive good/bad
   runVectors('rfc8949/good.edn');
   runVectors('rfc8949/bad.edn');
-  // Spike — extended map key/value tests
-  runVectors('spike/spike.edn');
+  // Spike — extended map key/value tests; uses float'...' for NaN payloads
+  runVectors('spike/spike.edn', [float]);
 });

@@ -2020,16 +2020,6 @@ describe('parseCDN — base32 / base32hex byte strings', () => {
       parseCDN('b32`AE /unterminated`', { extensions: [b32] })
     ).toThrow(SyntaxError);
   });
-
-  // bstrEncoding option
-  test('serializeBytes base32', () => {
-    const bs = new CborByteString(new Uint8Array([0x01, 0x02, 0x03]));
-    expect(bs.toCDN({ bstrEncoding: 'base32' })).toBe("b32'AEBAG'");
-  });
-  test('serializeBytes base32hex', () => {
-    const bs = new CborByteString(new Uint8Array([0x01, 0x02, 0x03]));
-    expect(bs.toCDN({ bstrEncoding: 'base32hex' })).toBe("h32'04106'");
-  });
 });
 
 // ─── app-rstring: prefix + backtick raw string (§2.5.3 / app-rstring) ──────────
