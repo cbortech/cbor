@@ -1931,6 +1931,12 @@ describe('parseCDN — base32 / base32hex byte strings', () => {
     }) as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x31]));
   });
+  test('b32 strips long optional padding without regex backtracking', () => {
+    const n = parseCDN(`b32'GE${'='.repeat(4096)}'`, {
+      extensions: [b32],
+    }) as CborByteString;
+    expect(n.value).toEqual(new Uint8Array([0x31]));
+  });
   test('b32 accepts lowercase', () => {
     const n = parseCDN("b32'aebagba'", { extensions: [b32] }) as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02, 0x03, 0x04]));

@@ -5,13 +5,19 @@ import { stripComments } from '../utils/strip-comments';
 const B32_ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 const H32_ALPHA = '0123456789ABCDEFGHIJKLMNOPQRSTUV';
 
+function stripBase32Padding(str: string): string {
+  let end = str.length;
+  while (end > 0 && str.charCodeAt(end - 1) === 0x3d) end--;
+  return str.slice(0, end);
+}
+
 function base32Decode(
   str: string,
   alpha: string,
   onError?: (msg: string) => void
 ): Uint8Array {
   // Padding is optional; strip it before decoding.
-  const s = str.replace(/=+$/, '').toUpperCase();
+  const s = stripBase32Padding(str).toUpperCase();
   // RFC 4648 §6: valid unpadded lengths mod 8 are 0, 2, 4, 5, 7.
   // Lengths 1, 3, 6 can never result from any valid byte sequence.
   const rem = s.length % 8;
