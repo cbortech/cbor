@@ -18,12 +18,12 @@ import { describe } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { registerTests } from './test-vectors/runner';
-import { floatBits } from '../extensions/float';
+import { float } from '../extensions/float';
 import { same } from '../extensions/same';
 
 const VECTORS_DIR = resolve(import.meta.dirname, 'test-vectors/edn-abnf');
 
-const FLOAT_EXTENSIONS = [floatBits, same];
+const FLOAT_EXTENSIONS = [float, same];
 
 // ─── Known differences ────────────────────────────────────────────────────────
 

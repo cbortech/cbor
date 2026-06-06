@@ -1,5 +1,6 @@
 import type { CborExtension } from './types';
 import { CborByteString } from '../ast/CborByteString';
+import { stripComments } from '../utils/strip-comments';
 
 const B32_ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 const H32_ALPHA = '0123456789ABCDEFGHIJKLMNOPQRSTUV';
@@ -41,61 +42,6 @@ function base32Decode(
     const msg = 'non-zero trailing bits in base32 input';
     if (onError) onError(msg);
     else throw new SyntaxError(msg);
-  }
-  return out;
-}
-
-/**
- * Strip whitespace and EDN comments (§2.2) from raw b32/h32 content.
- *
- * The tokenizer hands the extension the raw string content, which may contain
- * embedded comments and whitespace the same way h'...' and b64'...' do:
- *   SP / LF / CR       — skipped (lblank)
- *   # ... LF           — line comment
- *   // ... LF          — line comment
- *   /* ... *\/         — block comment
- *   / ... /            — block comment
- */
-function stripComments(str: string): string {
-  let out = '';
-  let i = 0;
-  while (i < str.length) {
-    const ch = str[i];
-    if (ch === ' ' || ch === '\n' || ch === '\r') {
-      i++;
-      continue;
-    }
-    if (ch === '#') {
-      while (i < str.length && str[i] !== '\n') i++;
-      continue;
-    }
-    if (ch === '/') {
-      const next = str[i + 1] ?? '';
-      if (next === '/') {
-        while (i < str.length && str[i] !== '\n') i++;
-        continue;
-      }
-      if (next === '*') {
-        i += 2;
-        while (
-          i < str.length &&
-          !(str[i] === '*' && (str[i + 1] ?? '') === '/')
-        )
-          i++;
-        if (i >= str.length)
-          throw new SyntaxError('unterminated block comment');
-        i += 2; // consume */
-        continue;
-      }
-      // / ... / block comment
-      i++;
-      while (i < str.length && str[i] !== '/') i++;
-      if (i >= str.length) throw new SyntaxError('unterminated block comment');
-      i++; // consume closing /
-      continue;
-    }
-    out += ch;
-    i++;
   }
   return out;
 }

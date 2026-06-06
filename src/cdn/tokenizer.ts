@@ -1507,18 +1507,6 @@ export class Tokenizer {
                 line,
                 col,
               };
-            case 'float': {
-              // float'...' uses the same hex+comment syntax as h'...'
-              // (block comments /.../ and # line comments are stripped).
-              const { value: hexVal } = this._readHexByteContentElisionAware(q);
-              return {
-                type: 'APP_STRING',
-                appPrefix: ident,
-                value: hexVal,
-                line,
-                col,
-              };
-            }
             default:
               return {
                 type: 'APP_STRING',

@@ -8,8 +8,7 @@
  *
  * The string form `float'...'` supports the same comment syntax as `h'...'`:
  * slash-delimited block comments, C-style block comments, line comments (`//`
- * and `#`).  Comment stripping is handled by the tokenizer before the
- * extension receives the content, so `content` contains only hex digits.
+ * and `#`).  The extension strips comments from the raw content itself.
  *
  * The sequence form `float<<byteStr>>` accepts a single byte-string expression
  * (e.g. `float<<h'7ef0'>>`) and interprets its bytes as float bits.
@@ -18,8 +17,8 @@
  * included in the default extension set.  Add it explicitly:
  *
  * @example
- * import { floatBits } from '@cbortech/cbor';
- * parseCDN("float'7ef0'", { extensions: [floatBits] }); // NaN as float16
+ * import { float } from '@cbortech/cbor';
+ * parseCDN("float'7ef0'", { extensions: [float] }); // NaN as float16
  */
 
 import type { CborExtension } from './types';
@@ -27,6 +26,7 @@ import type { CborItem } from '../ast/CborItem';
 import { CborFloat } from '../ast/CborFloat';
 import { CborByteString } from '../ast/CborByteString';
 import { float16BitsToFloat64 } from '../utils/float16';
+import { stripComments } from '../utils/strip-comments';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const _fromHex =
@@ -102,19 +102,20 @@ function floatFromBytes(bytes: Uint8Array): CborFloat {
 
 /**
  * Extension object for `float'...'` / `float<<...>>`.
- * Pass to `parseCDN(..., { extensions: [floatBits] })`.
+ * Pass to `parseCDN(..., { extensions: [float] })`.
  */
-export const floatBits: CborExtension = {
+export const float: CborExtension = {
   appStringPrefixes: ['float'],
 
   parseAppString(_prefix: string, content: string): CborItem {
-    if (!/^[0-9a-fA-F]*$/.test(content))
+    const hex = stripComments(content);
+    if (!/^[0-9a-fA-F]*$/.test(hex))
       throw new SyntaxError(`float'...' contains non-hex characters`);
-    if (content.length % 2 !== 0)
+    if (hex.length % 2 !== 0)
       throw new SyntaxError(
-        `float'...' hex content has odd length (${content.length} digits)`
+        `float'...' hex content has odd length (${hex.length} digits)`
       );
-    return floatFromBytes(_fromHex(content));
+    return floatFromBytes(_fromHex(hex));
   },
 
   parseAppSequence(
@@ -137,4 +138,4 @@ export const floatBits: CborExtension = {
   },
 };
 
-export default floatBits;
+export default float;
