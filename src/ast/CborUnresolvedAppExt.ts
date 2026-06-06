@@ -49,6 +49,8 @@ export class CborUnresolvedAppExt extends CborTag {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
+    if (options?.appStrings === false) return super._toCDN(options, depth);
+
     const arr = this.content as CborArray;
     const prefix = (arr.items[0] as CborTextString).value;
     const contentItem = arr.items[1];

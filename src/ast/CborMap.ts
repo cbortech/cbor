@@ -15,6 +15,7 @@ import {
   resolveIndent,
   indentOf,
   resolveSeparators,
+  convertCommentText,
   formatDanglingComments,
   formatLeadingComments,
   hasContainerLayoutComments,
@@ -60,6 +61,8 @@ export class CborMap extends CborItem {
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     let indentStr = resolveIndent(options);
     const preserveComments = options?.preserveComments;
+    const commentStyle =
+      typeof preserveComments === 'string' ? preserveComments : undefined;
     const hasComments =
       preserveComments &&
       (hasContainerLayoutComments(this) ||
@@ -99,22 +102,25 @@ export class CborMap extends CborItem {
     for (let i = 0; i < this.entries.length; i++) {
       const [k, v] = this.entries[i];
       if (preserveComments) {
-        lines.push(...formatLeadingComments(k, childIndent));
+        lines.push(...formatLeadingComments(k, childIndent, commentStyle));
       }
       const sep = i < this.entries.length - 1 ? multilineSep : trailSep;
       const entryComments = preserveComments
-        ? formatMapEntryTrailingComments([
-            ...(k.comments?.trailing ?? []),
-            ...(v.comments?.leading ?? []),
-            ...(v.comments?.trailing ?? []),
-          ])
+        ? formatMapEntryTrailingComments(
+            [
+              ...(k.comments?.trailing ?? []),
+              ...(v.comments?.leading ?? []),
+              ...(v.comments?.trailing ?? []),
+            ],
+            commentStyle
+          )
         : '';
       lines.push(
         `${childIndent}${k._toCDN(options, depth + 1)}${colSep}${v._toCDN(options, depth + 1)}${sep}${entryComments}`
       );
     }
     if (preserveComments)
-      lines.push(...formatDanglingComments(this, childIndent));
+      lines.push(...formatDanglingComments(this, childIndent, commentStyle));
     const body = lines.join('\n');
     return `${open}\n${body}\n${closeIndent}}`;
   }
@@ -240,7 +246,15 @@ export class CborMap extends CborItem {
   }
 }
 
-function formatMapEntryTrailingComments(comments: CborComment[]): string {
+function formatMapEntryTrailingComments(
+  comments: CborComment[],
+  style?: 'c-style' | 'cdn-style'
+): string {
   if (comments.length === 0) return '';
-  return ' ' + comments.map((comment) => comment.text.trimEnd()).join(' ');
+  return (
+    ' ' +
+    comments
+      .map((comment) => convertCommentText(comment, style).trimEnd())
+      .join(' ')
+  );
 }

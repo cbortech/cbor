@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'vitest';
 import { toCDN } from './serializer';
+import { parseCDN } from './parser';
 import { CborUint } from '../ast/CborUint';
 import { CborNint } from '../ast/CborNint';
 import { CborByteString } from '../ast/CborByteString';
@@ -581,4 +582,99 @@ describe('toCDN() delegates to node.toCDN()', () => {
     const node = new CborUint(42n);
     expect(toCDN(node)).toBe(node.toCDN());
   });
+});
+
+// ─── preserveComments with comment conversion ─────────────────────────────────
+
+/** Parse CDN with comments collected, then re-serialize with the given options. */
+function fmt(
+  src: string,
+  preserveComments: boolean | 'c-style' | 'cdn-style' = true,
+  indent = 2
+): string {
+  return parseCDN(src, { preserveComments: true }).toCDN({
+    preserveComments,
+    indent,
+  });
+}
+
+describe("preserveComments: 'c-style'", () => {
+  test('# line → //', () =>
+    expect(fmt('[\n  # comment\n  1\n]', 'c-style')).toBe(
+      '[\n  // comment\n  1\n]'
+    ));
+
+  test('// line stays //', () =>
+    expect(fmt('[\n  // comment\n  1\n]', 'c-style')).toBe(
+      '[\n  // comment\n  1\n]'
+    ));
+
+  test('/ block / → /* block */', () =>
+    expect(fmt('[\n  1 / note /\n]', 'c-style')).toBe('[\n  1 /* note */\n]'));
+
+  test('/* block */ stays /* block */', () =>
+    expect(fmt('[\n  1 /* note */\n]', 'c-style')).toBe(
+      '[\n  1 /* note */\n]'
+    ));
+
+  test('root trailing comment', () =>
+    expect(fmt('42 # end', 'c-style')).toBe('42 // end'));
+
+  test('root leading comment', () =>
+    expect(fmt('# start\n42', 'c-style')).toBe('// start\n42'));
+});
+
+describe("preserveComments: 'cdn-style'", () => {
+  test('// line → #', () =>
+    expect(fmt('[\n  // comment\n  1\n]', 'cdn-style')).toBe(
+      '[\n  # comment\n  1\n]'
+    ));
+
+  test('# line stays #', () =>
+    expect(fmt('[\n  # comment\n  1\n]', 'cdn-style')).toBe(
+      '[\n  # comment\n  1\n]'
+    ));
+
+  test('/* block */ → / block /', () =>
+    expect(fmt('[\n  1 /* note */\n]', 'cdn-style')).toBe(
+      '[\n  1 / note /\n]'
+    ));
+
+  test('/ block / stays / block /', () =>
+    expect(fmt('[\n  1 / note /\n]', 'cdn-style')).toBe('[\n  1 / note /\n]'));
+
+  test('/** double-star */ → / *double-star / (space inserted)', () =>
+    expect(fmt('[\n  1 /**double-star*/\n]', 'cdn-style')).toBe(
+      '[\n  1 / *double-star/\n]'
+    ));
+
+  test('/* content with / */ kept as /* */ (cannot represent in / /)', () =>
+    expect(fmt('[\n  1 /* 2026/6/7 */\n]', 'cdn-style')).toBe(
+      '[\n  1 /* 2026/6/7 */\n]'
+    ));
+
+  test('root trailing comment', () =>
+    expect(fmt('42 // end', 'cdn-style')).toBe('42 # end'));
+
+  test('root leading comment', () =>
+    expect(fmt('// start\n42', 'cdn-style')).toBe('# start\n42'));
+});
+
+describe('preserveComments: true (preserve markers as-is)', () => {
+  test('mixed markers are kept unchanged', () => {
+    const src = '[\n  # hash\n  1,\n  2 // line\n]';
+    expect(fmt(src, true)).toBe(src);
+  });
+});
+
+describe('preserveComments — map comments', () => {
+  test("'c-style': map key leading and entry trailing", () =>
+    expect(
+      fmt('{\n  # key-leading\n  "a": 1 / val-trailing /\n}', 'c-style')
+    ).toBe('{\n  // key-leading\n  "a": 1 /* val-trailing */\n}'));
+
+  test("'cdn-style': map key leading and entry trailing", () =>
+    expect(
+      fmt('{\n  /* key-leading */\n  "a": 1 // val-trailing\n}', 'cdn-style')
+    ).toBe('{\n  / key-leading /\n  "a": 1 # val-trailing\n}'));
 });

@@ -14,8 +14,6 @@ export type TokenType =
   | 'BYTES_HEX'
   | 'BYTES_HEX_ELIDED'
   | 'BYTES_B64'
-  | 'BYTES_B32'
-  | 'BYTES_H32'
   | 'APP_STRING'
   | 'APP_SEQUENCE'
   | 'EMPTY_INDEF_BYTES'
@@ -97,6 +95,17 @@ export class Tokenizer {
   private _lastConsumedEndOffset: number;
   /** Comments encountered while scanning, appended in source order. */
   readonly comments: EdnComment[] = [];
+  /**
+   * When set, non-standard-but-JS-valid escape sequences are accepted instead
+   * of throwing.  The callback receives a message and the position of the `\`
+   * (offset, line, column) so the parser can forward it as a ParseWarning.
+   */
+  onEscapeWarning?: (
+    msg: string,
+    offset: number,
+    line: number,
+    col: number
+  ) => void;
   constructor(
     private readonly input: string,
     options?: TokenizerOptions
@@ -128,6 +137,11 @@ export class Tokenizer {
   /** Character offset just past the last character of the most recently consumed token. */
   get lastEndOffset(): number {
     return this._lastConsumedEndOffset;
+  }
+
+  /** The full source text supplied to this tokenizer. */
+  get source(): string {
+    return this.input;
   }
 
   // ── Internal helpers ─────────────────────────────────────────────────────
@@ -246,7 +260,7 @@ export class Tokenizer {
   }
 
   /**
-   * Skip a comment in a quoted byte string literal (h'', b32'', h32'').
+   * Skip a comment in a quoted byte string literal (h'', b64'').
    * Returns true if a comment was consumed, false if the current char is not a
    * comment start. `quote` is the closing delimiter character.
    *
@@ -283,8 +297,10 @@ export class Tokenizer {
     if (ch === '#') {
       while (!this._eof() && this._ch() !== '\n') {
         if (this._ch() === '\\') {
-          this._advance();
-          if (!this._eof() && this._ch() !== '\n') this._advance();
+          this._advance(); // consume '\'
+          if (this._eof() || this._ch() === '\n') continue;
+          const escaped = this._advance();
+          if (escaped === 'u') this._validateHexCommentUnicodeEscape();
           continue;
         }
         if (this._ch() === quote) break;
@@ -296,7 +312,81 @@ export class Tokenizer {
   }
 
   /**
-   * Skip a comment in a raw byte string (h``, b32``, h32``).
+   * Validate a `\uXXXX` or `\u{N}` escape inside a hex-string comment.
+   *
+   * Called immediately after the `u` character has been consumed.  Rejects
+   * lone surrogates and invalid surrogate pairs; tolerates truncated/
+   * non-hex sequences (comments are informational, but surrogates are
+   * always illegal).
+   */
+  private _validateHexCommentUnicodeEscape(): void {
+    const line = this.line,
+      col = this.col;
+
+    // Extended form \u{XXXXXX}
+    if (!this._eof() && this._ch() === '{') {
+      this._advance(); // {
+      let hex = '';
+      while (!this._eof() && this._ch() !== '}' && this._ch() !== '\n')
+        hex += this._advance();
+      if (!this._eof() && this._ch() === '}') this._advance(); // }
+      const cp = parseInt(hex || '0', 16);
+      if (cp >= 0xd800 && cp <= 0xdfff)
+        this._fail(
+          `\\u{${hex}} is a surrogate code point, not allowed in hex string comments`,
+          line,
+          col
+        );
+      return;
+    }
+
+    // Standard \uXXXX — read up to 4 hex digits
+    let hex = '';
+    for (let i = 0; i < 4; i++) {
+      if (this._eof() || this._ch() === '\n') break;
+      if (!/[0-9a-fA-F]/.test(this._ch())) break;
+      hex += this._advance();
+    }
+    if (hex.length < 4) return; // truncated / non-hex — not our problem
+
+    const cp = parseInt(hex, 16);
+
+    // High surrogate: must be followed immediately by a low-surrogate escape
+    if (cp >= 0xd800 && cp <= 0xdbff) {
+      if (this._ch() !== '\\' || (this.input[this.pos + 1] ?? '') !== 'u')
+        this._fail(
+          `lone high surrogate \\u${hex} in hex string comment`,
+          line,
+          col
+        );
+      this._advance(); // \
+      this._advance(); // u
+      let hex2 = '';
+      for (let i = 0; i < 4; i++) {
+        if (this._eof() || this._ch() === '\n') break;
+        if (!/[0-9a-fA-F]/.test(this._ch())) break;
+        hex2 += this._advance();
+      }
+      const cp2 = parseInt(hex2 || '0', 16);
+      if (cp2 < 0xdc00 || cp2 > 0xdfff)
+        this._fail(
+          `\\u${hex} (high surrogate) not followed by valid low surrogate in hex string comment`,
+          line,
+          col
+        );
+      return;
+    }
+
+    if (cp >= 0xdc00 && cp <= 0xdfff)
+      this._fail(
+        `lone low surrogate \\u${hex} in hex string comment`,
+        line,
+        col
+      );
+  }
+
+  /**
+   * Skip a comment in a raw byte string (h``, b64``).
    * Called with `i` pointing at the comment-start character.
    * Returns the index after the comment, or -1 if no comment was found.
    *
@@ -380,13 +470,13 @@ export class Tokenizer {
    * - Literal LF (U+000A) is allowed; all other C0 controls and U+007F are rejected.
    * - Literal CR (U+000D) is silently stripped (source-level CRLF normalisation).
    * - Only spec-defined escape sequences are accepted; `\q` etc. throw SyntaxError.
-   * - `\/` is valid in both single- and double-quoted strings.
-   * - `\\` (backslash) is always a valid escape.
+   * - `\/` is valid only in double-quoted strings (not in escapable-s, §5.1).
+   * - `\\` (backslash) is valid in both single- and double-quoted strings.
    * - `\uXXXX` for a high surrogate must be immediately followed by `\uXXXX` for
    *   the corresponding low surrogate; lone surrogates are rejected.
    * - `\u{N}` … `\u{10FFFF}` extended syntax is supported; surrogates are rejected.
    * - In single-quoted strings, `\u` escapes to printable ASCII (U+0020–U+007E)
-   *   are forbidden (hexchar-s restriction, draft §2.5.2 / §5.1).
+   *   are forbidden (hexchar-s restriction, draft-25 §5.1).
    */
   private _readStringContent(quote: string): string {
     this._advance(); // opening quote
@@ -408,9 +498,11 @@ export class Tokenizer {
         );
 
       if (ch === '\\') {
-        this._advance();
-        const eLine = this.line,
+        // Capture position of the backslash itself before consuming it.
+        const eOffset = this.pos,
+          eLine = this.line,
           eCol = this.col;
+        this._advance();
         const e = this._advance();
         switch (e) {
           case 'n':
@@ -432,7 +524,7 @@ export class Tokenizer {
             out += '\\';
             break;
           case 'u':
-            out += this._readUnicodeEscape(quote);
+            out += this._readUnicodeEscape(quote, eOffset, eLine, eCol);
             break;
           default:
             // Escaped delimiter char (e.g. \' inside '...' or \" inside "...")
@@ -441,7 +533,90 @@ export class Tokenizer {
               break;
             }
             if (e === '/') {
+              if (quote === "'")
+                this._fail(
+                  `\\/ is not a valid escape in single-quoted byte strings (§5.1)`,
+                  eLine,
+                  eCol
+                );
               out += '/';
+              break;
+            }
+            // Non-standard JS escape sequences — accepted when onEscapeWarning is set.
+            if (this.onEscapeWarning) {
+              if (e === '0') {
+                this.onEscapeWarning(
+                  '\\0 is a non-standard escape sequence; use \\u0000 instead',
+                  eOffset,
+                  eLine,
+                  eCol
+                );
+                out += '\0';
+                break;
+              }
+              if (e === 'v') {
+                this.onEscapeWarning(
+                  '\\v is a non-standard escape sequence; use \\u000b instead',
+                  eOffset,
+                  eLine,
+                  eCol
+                );
+                out += '\v';
+                break;
+              }
+              if (e === 'x') {
+                // \xHH — two hex digits
+                const h1 = this._ch();
+                const h2 = this.input[this.pos + 1] ?? '';
+                if (!/[0-9a-fA-F]/.test(h1) || !/[0-9a-fA-F]/.test(h2)) {
+                  this._fail(
+                    '\\x escape requires exactly two hex digits',
+                    eLine,
+                    eCol
+                  );
+                }
+                this._advance();
+                this._advance();
+                const codePoint = parseInt(h1 + h2, 16);
+                this.onEscapeWarning(
+                  `\\x${h1}${h2} is a non-standard escape sequence; use \\u00${h1}${h2} instead`,
+                  eOffset,
+                  eLine,
+                  eCol
+                );
+                out += String.fromCharCode(codePoint);
+                break;
+              }
+              // Cross-quote delimiter (e.g. \" inside '...' or \' inside "...")
+              if (e === '"' || e === "'") {
+                this.onEscapeWarning(
+                  `\\${e} inside ${quote === '"' ? 'double' : 'single'}-quoted string is non-standard`,
+                  eOffset,
+                  eLine,
+                  eCol
+                );
+                out += e;
+                break;
+              }
+              // JS line continuation: \ + LF / CR / CRLF → nothing added
+              if (e === '\n' || e === '\r') {
+                if (e === '\r' && this._ch() === '\n') this._advance(); // consume CRLF
+                this.onEscapeWarning(
+                  'line continuation (\\<newline>) is non-standard; the newline is ignored',
+                  eOffset,
+                  eLine,
+                  eCol
+                );
+                break;
+              }
+              // Identity escape: \X → X (JS accepts any \X as just X)
+              this.onEscapeWarning(
+                `\\${e} is an unknown escape sequence; interpreted as '${e}'`,
+                eOffset,
+                eLine,
+                eCol
+              );
+              out += e;
               break;
             }
             this._fail(
@@ -471,31 +646,37 @@ export class Tokenizer {
    *   which is then decoded into the corresponding non-BMP code point.
    *
    * In single-quoted strings (`quote === "'"`), `\u` escapes that resolve to
-   * printable ASCII (U+0020–U+007E) are rejected per draft §2.5.2 / §5.1
-   * hexchar-s, except for backslash (U+005C) and single-quote (U+0027), which
-   * require escaping and cannot be written literally.
+   * printable ASCII (U+0020–U+007E) are rejected per draft-25 §5.1 hexchar-s.
+   * Use `\\` for backslash (U+005C) and `\'` for the single-quote delimiter.
    */
-  private _readUnicodeEscape(quote: string): string {
+  private _readUnicodeEscape(
+    quote: string,
+    bsOffset?: number,
+    bsLine?: number,
+    bsCol?: number
+  ): string {
     const line = this.line,
       col = this.col;
 
-    /** Throw if this is a single-quoted string and the code point is printable ASCII that can be written literally. */
+    /** Warn or throw when this is a single-quoted string and the code point is printable ASCII. */
     const checkSingleQuotedPrintable = (cp: number): void => {
-      // Backslash (0x5C) and the quote delimiter (0x27) require escaping even in single-quoted
-      // strings, so \u{} is a valid alternative to \\ and \'. All other printable ASCII chars
-      // must be written literally per hexchar-s.
-      if (
-        quote === "'" &&
-        cp >= 0x20 &&
-        cp <= 0x7e &&
-        cp !== 0x5c &&
-        cp !== 0x27
-      )
-        this._fail(
-          `\\u escape for printable ASCII U+${cp.toString(16).padStart(4, '0')} is not allowed in single-quoted strings; write the character literally`,
-          line,
-          col
-        );
+      // Per draft-25 §5.1 hexchar-s, \u escapes for printable ASCII (U+0020–U+007E)
+      // are not valid in single-quoted strings.  Use \\ for backslash and \' for
+      // the single-quote delimiter.  In lenient mode (onEscapeWarning set) we emit
+      // a warning and accept the value rather than hard-failing.
+      if (quote === "'" && cp >= 0x20 && cp <= 0x7e) {
+        const msg = `\\u escape for printable ASCII U+${cp.toString(16).padStart(4, '0').toUpperCase()} is not allowed in single-quoted strings (§5.1 hexchar-s)`;
+        if (this.onEscapeWarning) {
+          this.onEscapeWarning(
+            msg,
+            bsOffset ?? this.pos,
+            bsLine ?? line,
+            bsCol ?? col
+          );
+          return;
+        }
+        this._fail(msg, line, col);
+      }
     };
 
     // Extended form \u{NNN}
@@ -776,50 +957,6 @@ export class Tokenizer {
   }
 
   /**
-   * Post-process raw base32/base32hex content from `b32``…``\` / `h32``…``\` raw strings.
-   *
-   * Supports all comment forms (§2.2): `/ ... /`, `/*...*\/`, `//`, `#`.
-   * HT is still forbidden (rawchars excludes %x09).
-   */
-  private _processRawB32Content(
-    raw: string,
-    tokenLine: number,
-    tokenCol: number
-  ): string {
-    let out = '';
-    let i = 0;
-    while (i < raw.length) {
-      const ch = raw[i];
-      // lblank / CR — skip
-      if (ch === '\n' || ch === ' ' || ch === '\r') {
-        i++;
-        continue;
-      }
-      // HT forbidden
-      if (ch === '\t') {
-        throw new SyntaxError(
-          `EDN parse error at line ${tokenLine}, column ${tokenCol}: horizontal tab (HT) is not allowed inside b32\`\`/h32\`\` raw byte string literals (§5.2)`
-        );
-      }
-      // Comments (§2.2)
-      const afterComment = this._skipRawComment(
-        raw,
-        i,
-        'b32``/h32`` raw byte string',
-        tokenLine,
-        tokenCol
-      );
-      if (afterComment !== -1) {
-        i = afterComment;
-        continue;
-      }
-      out += ch;
-      i++;
-    }
-    return out;
-  }
-
-  /**
    * Read raw byte-string content between `quote` chars (b64 / b64url).
    *
    * Strips whitespace and skips `# ...` line comments per §2.5.5.
@@ -863,36 +1000,6 @@ export class Tokenizer {
         }
         continue;
       }
-      raw += this._advance();
-    }
-    if (this._eof()) this._fail('unterminated byte string literal');
-    this._advance(); // closing quote
-    return raw;
-  }
-
-  /**
-   * Read base32 / base32hex byte-string content (`b32'...'` / `h32'...'`).
-   *
-   * Supports all comment forms (§2.2): `/ ... /`, `/*...*\/`, `//`, `#`.
-   */
-  private _readB32Content(quote: string): string {
-    this._advance(); // opening quote
-    let raw = '';
-    while (!this._eof() && this._ch() !== quote) {
-      const ch = this._ch();
-      // lblank = %x0A / %x20 only; HT is forbidden per §5.2 Figure 3
-      if (ch === '\n' || ch === ' ' || ch === '\r') {
-        this._advance();
-        continue;
-      }
-      if (ch === '\t') {
-        this._fail(
-          'horizontal tab (HT) is not allowed inside byte string literals (§5.2)',
-          this.line,
-          this.col
-        );
-      }
-      if (this._skipByteStringComment(quote)) continue;
       raw += this._advance();
     }
     if (this._eof()) this._fail('unterminated byte string literal');
@@ -1087,7 +1194,7 @@ export class Tokenizer {
         const after = rest[8] ?? '';
         const hasSuffix =
           after === '_' &&
-          /[0-3i]/.test(rest[9] ?? '') &&
+          /[0-7i]/.test(rest[9] ?? '') &&
           !/[a-zA-Z0-9_]/.test(rest[10] ?? '');
         if (!/[a-zA-Z0-9_]/.test(after) || hasSuffix) {
           this._advance(); // -
@@ -1106,7 +1213,7 @@ export class Tokenizer {
         const after = rest[8] ?? '';
         const hasSuffix =
           after === '_' &&
-          /[0-3i]/.test(rest[9] ?? '') &&
+          /[0-7i]/.test(rest[9] ?? '') &&
           !/[a-zA-Z0-9_]/.test(rest[10] ?? '');
         if (!/[a-zA-Z0-9_]/.test(after) || hasSuffix) {
           this._advance(); // +
@@ -1190,12 +1297,20 @@ export class Tokenizer {
           this._fail(`hex float missing 'p' exponent: ${raw}`, line, col);
         }
         if (isHexFloat) {
-          // Encoding-indicator suffix _0/_1/_2/_3/_i for hex floats
+          // Encoding-indicator suffix _0/_1/_2/_3/_4/_5/_6/_7/_i for hex floats
           if (this._ch() === '_') {
             const d = this.input[this.pos + 1] ?? '';
             const after = this.input[this.pos + 2] ?? '';
             if (
-              (d === '0' || d === '1' || d === '2' || d === '3' || d === 'i') &&
+              (d === '0' ||
+                d === '1' ||
+                d === '2' ||
+                d === '3' ||
+                d === '4' ||
+                d === '5' ||
+                d === '6' ||
+                d === '7' ||
+                d === 'i') &&
               !/[0-9a-zA-Z_]/.test(after)
             ) {
               raw += this._advance() + this._advance();
@@ -1246,12 +1361,20 @@ export class Tokenizer {
         );
     }
 
-    // Encoding-indicator suffix _0 / _1 / _2 / _3 (no whitespace, not followed by more ident chars)
+    // Encoding-indicator suffix _0–_7 / _i (no whitespace, not followed by more ident chars)
     if (this._ch() === '_') {
       const d = this.input[this.pos + 1] ?? '';
       const after = this.input[this.pos + 2] ?? '';
       if (
-        (d === '0' || d === '1' || d === '2' || d === '3' || d === 'i') &&
+        (d === '0' ||
+          d === '1' ||
+          d === '2' ||
+          d === '3' ||
+          d === '4' ||
+          d === '5' ||
+          d === '6' ||
+          d === '7' ||
+          d === 'i') &&
         !/[0-9a-zA-Z_]/.test(after)
       ) {
         // Include the suffix in the raw value.
@@ -1287,12 +1410,20 @@ export class Tokenizer {
       case 'NaN_1':
       case 'NaN_2':
       case 'NaN_3':
+      case 'NaN_4':
+      case 'NaN_5':
+      case 'NaN_6':
+      case 'NaN_7':
       case 'NaN_i':
       case 'Infinity':
       case 'Infinity_0':
       case 'Infinity_1':
       case 'Infinity_2':
       case 'Infinity_3':
+      case 'Infinity_4':
+      case 'Infinity_5':
+      case 'Infinity_6':
+      case 'Infinity_7':
       case 'Infinity_i':
         return { type: 'FLOAT', value: ident, line, col };
       case 'simple':
@@ -1308,6 +1439,16 @@ export class Tokenizer {
         return { type: 'ENCODING_INDICATOR', value: '2', line, col };
       case '_3':
         return { type: 'ENCODING_INDICATOR', value: '3', line, col };
+      case '_4':
+        return { type: 'ENCODING_INDICATOR', value: '4', line, col };
+      case '_5':
+        return { type: 'ENCODING_INDICATOR', value: '5', line, col };
+      case '_6':
+        return { type: 'ENCODING_INDICATOR', value: '6', line, col };
+      case '_7':
+        // _7 = AI 31 = indefinite-length; kept as ENCODING_INDICATOR so that
+        // bare `_` (UNDERSCORE) and explicit `_7` stay distinguishable.
+        return { type: 'ENCODING_INDICATOR', value: '7', line, col };
       case '_i':
         return { type: 'ENCODING_INDICATOR', value: 'i', line, col };
     }
@@ -1371,20 +1512,6 @@ export class Tokenizer {
                 line,
                 col,
               };
-            case 'b32':
-              return {
-                type: 'BYTES_B32',
-                value: this._readB32Content(q),
-                line,
-                col,
-              };
-            case 'h32':
-              return {
-                type: 'BYTES_H32',
-                value: this._readB32Content(q),
-                line,
-                col,
-              };
             default:
               return {
                 type: 'APP_STRING',
@@ -1419,20 +1546,6 @@ export class Tokenizer {
               return {
                 type: 'BYTES_B64',
                 value: this._processRawB64Content(raw, line, col),
-                line,
-                col,
-              };
-            case 'b32':
-              return {
-                type: 'BYTES_B32',
-                value: this._processRawB32Content(raw, line, col),
-                line,
-                col,
-              };
-            case 'h32':
-              return {
-                type: 'BYTES_H32',
-                value: this._processRawB32Content(raw, line, col),
                 line,
                 col,
               };

@@ -25,6 +25,12 @@ export class CborFloat extends CborItem {
    * - `undefined`: encoder auto-selects the smallest lossless size.
    */
   readonly precision: FloatPrecision | undefined;
+  /**
+   * Original app-string source (e.g. `float'7e00'`), set by the parser when
+   * this float is the result of a `float'...'` app-string.  Used by toCDN()
+   * to round-trip the literal when `appStrings` is not false.
+   */
+  ednSource?: string;
 
   constructor(value: number, options?: { precision?: FloatPrecision }) {
     super();
@@ -56,6 +62,8 @@ export class CborFloat extends CborItem {
   }
 
   _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
+    if (options?.appStrings !== false && this.ednSource !== undefined)
+      return this.ednSource;
     const autoSelected = autoSelectFloatPrecision(this.value);
     const numStr =
       options?.floatFormat === 'hex'

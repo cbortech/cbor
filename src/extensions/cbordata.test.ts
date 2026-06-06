@@ -40,9 +40,16 @@ describe('tag 24: embedded CBOR (RFC 8949 §3.4.5.1)', () => {
     expect(r.toCDN()).toBe('24(<<{"key":"value"}>>)');
   });
 
-  test('invalid inner CBOR falls back to CborByteString', () => {
-    // Tag 24 wrapping h'ff' — 0xff is a break code, not a valid CBOR item start
-    const r = decodeCBOR(hex('d81841ff')) as CborTag;
+  test('strict mode (default): invalid inner CBOR throws', () => {
+    // Tag 24 wrapping h'ff' — 0xff is a break code, not a valid CBOR item start.
+    // In strict mode the extension re-throws so the outer decode also throws.
+    expect(() => decodeCBOR(hex('d81841ff'))).toThrow();
+  });
+
+  test('strict: false: invalid inner CBOR falls back to CborByteString', () => {
+    // In non-strict mode the extension catches the inner error and returns
+    // a plain CborTag wrapping the raw bytes.
+    const r = decodeCBOR(hex('d81841ff'), { strict: false }) as CborTag;
     expect(r.tag).toBe(24n);
     expect(r.content).toBeInstanceOf(CborByteString);
   });

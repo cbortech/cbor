@@ -3,7 +3,7 @@
  * No AST imports — safe to import from any AST class.
  */
 
-import type { CborComments, ToCDNOptions } from '../types';
+import type { CborComment, CborComments, ToCDNOptions } from '../types';
 
 // ─── Indent helpers ───────────────────────────────────────────────────────────
 
@@ -41,25 +41,74 @@ export function hasContainerLayoutComments(item: Commented): boolean {
   );
 }
 
-export function formatLeadingComments(
-  item: Commented,
-  indent: string
-): string[] {
-  return (item.comments?.leading ?? []).map((comment) => indent + comment.text);
+/**
+ * Convert a single comment's text to the requested marker style.
+ *
+ * Conversion table:
+ *   c-style  : `#` → `//`, `/ … /` → `/* … *\/`
+ *   cdn-style: `//` → `#`, `/* … *\/` → `/ … /`
+ *
+ * Special case for cdn-style: when the inner content of `/* … *\/` starts
+ * with `*` or `/` the result would look like `/*…` or `//…` — a different
+ * comment form.  A single space is inserted after the opening `/` to prevent
+ * this (e.g. `/**…*\/` → `/ *…/`).
+ */
+export function convertCommentText(
+  comment: CborComment,
+  style: 'c-style' | 'cdn-style' | undefined
+): string {
+  if (!style) return comment.text;
+  const { marker, text } = comment;
+
+  if (style === 'c-style') {
+    if (marker === '#') return '//' + text.slice(1);
+    if (marker === '/') return '/*' + text.slice(1, -1) + '*/';
+    return text; // already // or /*...*/
+  }
+
+  // cdn-style
+  if (marker === '//') return '#' + text.slice(2);
+  if (marker === '/*') {
+    const inner = text.slice(2, -2);
+    // / … / comments have no escape mechanism for '/', so if the content
+    // contains one we must keep the /* … */ form to avoid corrupting output.
+    if (inner.includes('/')) return text;
+    const safeInner =
+      inner.startsWith('*') || inner.startsWith('/') ? ' ' + inner : inner;
+    return '/' + safeInner + '/';
+  }
+  return text; // already # or /.../
 }
 
-export function formatTrailingComments(item: Commented): string {
+export function formatLeadingComments(
+  item: Commented,
+  indent: string,
+  style?: 'c-style' | 'cdn-style' | undefined
+): string[] {
+  return (item.comments?.leading ?? []).map(
+    (comment) => indent + convertCommentText(comment, style)
+  );
+}
+
+export function formatTrailingComments(
+  item: Commented,
+  style?: 'c-style' | 'cdn-style' | undefined
+): string {
   const comments = item.comments?.trailing ?? [];
   if (comments.length === 0) return '';
-  return ' ' + comments.map((comment) => comment.text).join(' ');
+  return (
+    ' ' +
+    comments.map((comment) => convertCommentText(comment, style)).join(' ')
+  );
 }
 
 export function formatDanglingComments(
   item: Commented,
-  indent: string
+  indent: string,
+  style?: 'c-style' | 'cdn-style' | undefined
 ): string[] {
   return (item.comments?.dangling ?? []).map(
-    (comment) => indent + comment.text
+    (comment) => indent + convertCommentText(comment, style)
   );
 }
 
