@@ -593,14 +593,56 @@ describe('parseCDN — byte strings', () => {
     const n = parseCDN("b64'AQIDBA=='") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([1, 2, 3, 4]));
   });
-  test("b64'AQIDBA' (no padding)", () => {
+  test("b64'AQIDBA' (missing ==) is accepted — draft-25 allows omitting padding", () => {
     const n = parseCDN("b64'AQIDBA'") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([1, 2, 3, 4]));
   });
-  test("b64'3q2-7w' (base64url alphabet)", () => {
-    // 0xDE 0xAD 0xBE 0xEF in base64url is '3q2-7w'
+  test("b64'3q2-7w==' (base64url, padded) is accepted", () => {
+    // 0xDE 0xAD 0xBE 0xEF in base64url
+    const n = parseCDN("b64'3q2-7w=='") as CborByteString;
+    expect(n.value).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
+  });
+  test("b64'3q2-7w' (base64url, missing ==) is accepted", () => {
     const n = parseCDN("b64'3q2-7w'") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
+  });
+  test('base64 mixed classic and URL-safe chars in one literal (b64dig, draft-25 §5.2.2)', () => {
+    // 3q2+7w== = 0xDE 0xAD 0xBE 0xEF in classic base64 (+ instead of -)
+    // draft-25 b64dig allows +, /, -, _ in any combination
+    const n = parseCDN("b64'3q2+7w=='") as CborByteString;
+    expect(n.value).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
+  });
+  test("b64'AQID====' (excess padding) always throws", () => {
+    // AQID is 4 chars (rem=0), no padding expected
+    expect(() => parseCDN("b64'AQID===='")).toThrow(SyntaxError);
+    expect(() => parseCDN("b64'AQID===='", { strict: false })).toThrow(
+      SyntaxError
+    );
+  });
+  test('base64 with rem=1 always throws (no valid byte sequence yields 1 mod 4)', () => {
+    // 'A' alone = 1 char, rem=1 — never a valid base64 sequence
+    expect(() => parseCDN("b64'A'")).toThrow(SyntaxError);
+    expect(() => parseCDN("b64'A'", { strict: false })).toThrow(SyntaxError);
+  });
+  test("b64'AE==' (non-zero trailing bits) throws in strict mode (RFC 4648 §3.5)", () => {
+    // A=0, E=4=000100; 2-char quantum, mask=0x0f; 000100 & 0x0f = 4 ≠ 0
+    expect(() => parseCDN("b64'AE=='")).toThrow(SyntaxError);
+  });
+  test("b64'AE==' (non-zero trailing bits) warns and decodes in lenient mode", () => {
+    // A=0, E=4=000100; bottom 4 bits = 0100 ≠ 0
+    const warnings: string[] = [];
+    const n = parseCDN("b64'AE=='", {
+      strict: false,
+      onWarning: (w) => warnings.push(w.message),
+    }) as CborByteString;
+    // The actual byte decoded: 000000 000100 → top 8 bits = 00000000 = 0x00
+    expect(n.value).toEqual(new Uint8Array([0x00]));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/trailing bits|RFC 4648.*3\.5/i);
+  });
+  test('base64 with invalid character always throws', () => {
+    expect(() => parseCDN("b64'AQ!D'")).toThrow(SyntaxError);
+    expect(() => parseCDN("b64'AQ!D'", { strict: false })).toThrow(SyntaxError);
   });
   test("hex with spaces h'01 02 03'", () => {
     const n = parseCDN("h'01 02 03'") as CborByteString;

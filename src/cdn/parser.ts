@@ -183,24 +183,78 @@ function base32Decode(
   return out;
 }
 
-function base64ToBytes(b64: string): Uint8Array {
-  // Padding is optional but accepted per §5.2.2 ABNF
-  // ("accommodates, but does not require base64 padding").
+function base64ToBytes(
+  b64: string,
+  onRecoverableError?: (msg: string) => void
+): Uint8Array {
+  // Separate data characters from trailing '=' padding.
+  const eqIdx = b64.indexOf('=');
+  const data = eqIdx >= 0 ? b64.slice(0, eqIdx) : b64;
+  const pad = eqIdx >= 0 ? b64.slice(eqIdx) : '';
+
+  // draft-25 b64dig = ALPHA / DIGIT / "-" / "_" / "+" / "/"
+  // Classic (+/) and URL-safe (-_) position-62/63 chars are both valid in the
+  // same literal. Reject anything outside this set as a hard error.
+  if (/[^A-Za-z0-9+/\-_]/.test(data)) {
+    const bad = [...data].find((c) => !/[A-Za-z0-9+/\-_]/.test(c)) ?? '';
+    throw new SyntaxError(
+      `invalid character ${JSON.stringify(bad)} in base64 data`
+    );
+  }
+  if (pad && !/^=+$/.test(pad))
+    throw new SyntaxError(`invalid character after base64 '=' padding`);
+
+  const rem = data.length % 4;
+
+  // rem === 1 cannot arise from any valid byte sequence (always invalid).
+  if (rem === 1)
+    throw new SyntaxError(
+      `invalid base64 length: ${data.length} data characters (length mod 4 = 1 is never valid)`
+    );
+
+  // Expected number of '=' characters for this data length.
+  const expectedPad = rem === 0 ? 0 : 4 - rem;
+
+  if (pad.length > expectedPad)
+    throw new SyntaxError(
+      `base64 has ${pad.length} '=' characters but the data length (${data.length}) requires at most ${expectedPad}`
+    );
+
+  // Missing '=' padding: draft-25 explicitly accommodates omitting padding —
+  // the serializer also omits it, so this is always accepted without a warning.
+
+  // Non-zero trailing bits in the last data character (RFC 4648 §3.5).
+  // Normalize URL-safe chars first so the lookup is against the classic table.
+  // rem=2 (1-byte quantum): bottom 4 bits of the final char must be zero.
+  // rem=3 (2-byte quantum): bottom 2 bits of the final char must be zero.
+  if (rem !== 0 && data.length > 0) {
+    const ALPHA =
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const lastChar = data[data.length - 1]!.replace('-', '+').replace('_', '/');
+    const lastVal = ALPHA.indexOf(lastChar);
+    if (lastVal >= 0) {
+      const mask = rem === 2 ? 0x0f : 0x03;
+      if ((lastVal & mask) !== 0) {
+        const msg = `base64 has non-zero trailing bits in the final quantum (RFC 4648 §3.5)`;
+        if (onRecoverableError) onRecoverableError(msg);
+        else throw new SyntaxError(msg);
+      }
+    }
+  }
+
+  // Normalize URL-safe chars to classic and add any missing padding so the
+  // underlying decoder accepts the input regardless of what was originally used.
+  const normalized =
+    data.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat(expectedPad);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (typeof (Uint8Array as any).fromBase64 === 'function') {
-    // Detect alphabet from content: base64url uses - or _
-    const alphabet = /[-_]/.test(b64) ? 'base64url' : 'base64';
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (Uint8Array as any).fromBase64(b64, {
-      alphabet,
+    return (Uint8Array as any).fromBase64(normalized, {
+      alphabet: 'base64',
       lastChunkHandling: 'loose',
     });
   }
-  // Accept both base64 (+/) and base64url (-_) alphabets.
-  // Add padding internally as needed for atob().
-  const normalized = b64.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
-  const binary = atob(padded);
+  const binary = atob(normalized);
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
   return out;
@@ -698,7 +752,7 @@ class CDNParser {
       case 'SQSTR':
         return hexToBytes(tok.value);
       case 'BYTES_B64':
-        return base64ToBytes(tok.value);
+        return base64ToBytes(tok.value, onRecoverableError);
       case 'BYTES_B32':
         return base32Decode(tok.value, B32_ALPHA, onRecoverableError);
       case 'BYTES_H32':
