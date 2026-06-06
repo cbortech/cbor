@@ -8,11 +8,12 @@ The CSV files are not committed to this repository because the upstream
 licensing/citation terms are not yet explicit. Only this README and the test
 driver are tracked.
 
-| File                | Source        | Content                                                         |
-| ------------------- | ------------- | --------------------------------------------------------------- |
-| `basic.csv`         | cabo/edn-abnf | Core values, escapes, surrogates, hex/b64 comments              |
-| `level-shifter.csv` | cabo/edn-abnf | app-string content validation (dt/h/ip + Unicode)               |
-| `float.csv`         | cabo/edn-abnf | `float'...'` / `float<<...>>`, `same<<...>>`, b64 padding rules |
+| File                | Source        | Content                                                             |
+| ------------------- | ------------- | ------------------------------------------------------------------- |
+| `basic.csv`         | cabo/edn-abnf | Core values, escapes, surrogates, hex/b64 comments                  |
+| `level-shifter.csv` | cabo/edn-abnf | app-string content validation (dt/h/ip + Unicode)                   |
+| `float.csv`         | cabo/edn-abnf | `float'...'` / `float<<...>>`, `same<<...>>`, b64 padding rules     |
+| `rawstrings.csv`    | cabo/edn-abnf | Multi-level backtick raw strings (N=1,2,3+), h/b64/dt/ip extensions |
 
 ## CSV format
 
@@ -36,6 +37,7 @@ git clone https://github.com/cabo/edn-abnf.git /tmp/edn-abnf
 cp /tmp/edn-abnf/tests/basic.csv \
    /tmp/edn-abnf/tests/level-shifter.csv \
    /tmp/edn-abnf/tests/float.csv \
+   /tmp/edn-abnf/tests/rawstrings.csv \
    src/cdn/test-vectors/edn-abnf/
 ```
 
