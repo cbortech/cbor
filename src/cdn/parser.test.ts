@@ -16,6 +16,7 @@ import { CborSimple } from '../ast/CborSimple';
 import { CborEmbeddedCBOR } from '../ast/CborEmbeddedCBOR';
 import { CborUnresolvedAppExt } from '../ast/CborUnresolvedAppExt';
 import { CborEllipsis } from '../ast/CborEllipsis';
+import { b32, h32 } from '../extensions/b32';
 
 /** Convert Uint8Array to lowercase hex string. */
 function toHex(bytes: Uint8Array): string {
@@ -1844,11 +1845,15 @@ describe('parseCDN — comments (§2.2)', () => {
 
   // Comments inside b32'...' byte string literals (AAAAAAAA = 5 zero bytes)
   test("b32'...' with // comment", () => {
-    const b = parseCDN("b32'AA // skip\nAAAAAA'") as CborByteString;
+    const b = parseCDN("b32'AA // skip\nAAAAAA'", {
+      extensions: [b32],
+    }) as CborByteString;
     expect(b.value).toEqual(new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00]));
   });
   test("b32'...' with /* */ comment", () => {
-    const b = parseCDN("b32'AAAA /* skip */ AAAA'") as CborByteString;
+    const b = parseCDN("b32'AAAA /* skip */ AAAA'", {
+      extensions: [b32],
+    }) as CborByteString;
     expect(b.value).toEqual(new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00]));
   });
 });
@@ -1910,70 +1915,110 @@ describe('parseCDN — base32 / base32hex byte strings', () => {
   // b32'...' — RFC 4648 §6 alphabet: A-Z 2-7
   test("b32'AEBAGBA' decodes correctly", () => {
     // AEBAGBA = [0x01, 0x02, 0x03, 0x04]
-    const n = parseCDN("b32'AEBAGBA'") as CborByteString;
+    const n = parseCDN("b32'AEBAGBA'", { extensions: [b32] }) as CborByteString;
     expect(n).toBeInstanceOf(CborByteString);
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02, 0x03, 0x04]));
     expect(n.ednEncoding).toBe('base32');
   });
   test('b32 round-trips via toCDN', () => {
-    const n = parseCDN("b32'AEBAGBA'");
+    const n = parseCDN("b32'AEBAGBA'", { extensions: [b32] });
     expect(n.toCDN()).toBe("b32'AEBAGBA'");
   });
   test("b32'GE======' (padded) is accepted", () => {
     // GE====== = [0x31]
-    const n = parseCDN("b32'GE======'") as CborByteString;
+    const n = parseCDN("b32'GE======'", {
+      extensions: [b32],
+    }) as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x31]));
   });
   test('b32 accepts lowercase', () => {
-    const n = parseCDN("b32'aebagba'") as CborByteString;
+    const n = parseCDN("b32'aebagba'", { extensions: [b32] }) as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02, 0x03, 0x04]));
   });
   test('b32 accepts whitespace and # comment', () => {
-    const n = parseCDN("b32'AEBA # first two bytes\nGBA'") as CborByteString;
+    const n = parseCDN("b32'AEBA # first two bytes\nGBA'", {
+      extensions: [b32],
+    }) as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02, 0x03, 0x04]));
   });
   test('b32 accepts /.../ block comment', () => {
-    const n = parseCDN("b32'AEBA /mid/ GBA'") as CborByteString;
+    const n = parseCDN("b32'AEBA /mid/ GBA'", {
+      extensions: [b32],
+    }) as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02, 0x03, 0x04]));
   });
   test('b32 invalid character throws SyntaxError', () => {
-    expect(() => parseCDN("b32'1!'")).toThrow(SyntaxError);
+    expect(() => parseCDN("b32'1!'", { extensions: [b32] })).toThrow(
+      SyntaxError
+    );
   });
   // RFC 4648: invalid unpadded lengths (mod 8 ∈ {1, 3, 6})
   test("b32'A' (length 1 mod 8) throws SyntaxError", () => {
-    expect(() => parseCDN("b32'A'")).toThrow(SyntaxError);
+    expect(() => parseCDN("b32'A'", { extensions: [b32] })).toThrow(
+      SyntaxError
+    );
   });
   test("b32'AAA' (length 3 mod 8) throws SyntaxError", () => {
-    expect(() => parseCDN("b32'AAA'")).toThrow(SyntaxError);
+    expect(() => parseCDN("b32'AAA'", { extensions: [b32] })).toThrow(
+      SyntaxError
+    );
   });
   test("b32'AAAAAA' (length 6 mod 8) throws SyntaxError", () => {
-    expect(() => parseCDN("b32'AAAAAA'")).toThrow(SyntaxError);
+    expect(() => parseCDN("b32'AAAAAA'", { extensions: [b32] })).toThrow(
+      SyntaxError
+    );
   });
   // RFC 4648 §3.5: non-zero trailing bits must be rejected
   test("b32'AB' non-zero trailing bits throws SyntaxError", () => {
     // A=0, B=1 → 00000 00001 → 1 byte (8 bits) + 2 trailing bits = 01 (non-zero)
-    expect(() => parseCDN("b32'AB'")).toThrow(SyntaxError);
+    expect(() => parseCDN("b32'AB'", { extensions: [b32] })).toThrow(
+      SyntaxError
+    );
   });
   test("b32'AA' zero trailing bits is valid (0x00)", () => {
     // A=0, A=0 → 00000 00000 → 1 byte = 0x00, trailing 2 bits = 00 (zero)
-    const n = parseCDN("b32'AA'") as CborByteString;
+    const n = parseCDN("b32'AA'", { extensions: [b32] }) as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x00]));
   });
 
   // h32'...' — RFC 4648 §7 alphabet: 0-9 A-V
   test("h32'04106' decodes correctly", () => {
     // 04106 in base32hex = [0x01, 0x02, 0x03]
-    const n = parseCDN("h32'04106'") as CborByteString;
+    const n = parseCDN("h32'04106'", { extensions: [h32] }) as CborByteString;
     expect(n).toBeInstanceOf(CborByteString);
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02, 0x03]));
     expect(n.ednEncoding).toBe('base32hex');
   });
   test('h32 round-trips via toCDN', () => {
-    const n = parseCDN("h32'04106'");
+    const n = parseCDN("h32'04106'", { extensions: [h32] });
     expect(n.toCDN()).toBe("h32'04106'");
   });
   test('h32 invalid character throws SyntaxError', () => {
-    expect(() => parseCDN("h32'ZZ'")).toThrow(SyntaxError);
+    expect(() => parseCDN("h32'ZZ'", { extensions: [h32] })).toThrow(
+      SyntaxError
+    );
+  });
+
+  // Unterminated block comments must throw (regression guard: previously caught by tokenizer)
+  test("b32'AE /* unterminated' throws SyntaxError", () => {
+    expect(() =>
+      parseCDN("b32'AE /* unterminated'", { extensions: [b32] })
+    ).toThrow(SyntaxError);
+  });
+  test("b32'AE /unterminated' throws SyntaxError", () => {
+    expect(() =>
+      parseCDN("b32'AE /unterminated'", { extensions: [b32] })
+    ).toThrow(SyntaxError);
+  });
+  test('b32` AE /* unterminated` throws SyntaxError', () => {
+    expect(() =>
+      parseCDN('b32`AE /* unterminated`', { extensions: [b32] })
+    ).toThrow(SyntaxError);
+  });
+  test('b32` AE /unterminated` throws SyntaxError', () => {
+    expect(() =>
+      parseCDN('b32`AE /unterminated`', { extensions: [b32] })
+    ).toThrow(SyntaxError);
   });
 
   // bstrEncoding option
@@ -2083,20 +2128,28 @@ describe('parseCDN — app-rstring (prefix + backtick)', () => {
 
   test("b32`` with / block comment / (same as b32'')", () => {
     // AEBA = [0x01, 0x02] in base32
-    const quoted = parseCDN("b32'AEBA'") as CborByteString;
-    const raw = parseCDN('b32`AEBA`') as CborByteString;
+    const quoted = parseCDN("b32'AEBA'", {
+      extensions: [b32],
+    }) as CborByteString;
+    const raw = parseCDN('b32`AEBA`', { extensions: [b32] }) as CborByteString;
     expect(raw.value).toEqual(quoted.value);
   });
 
   test('b32`` with / block comment / does not regress', () => {
-    const n = parseCDN('b32`AE /skip/ BA`') as CborByteString;
-    const expected = parseCDN("b32'AEBA'") as CborByteString;
+    const n = parseCDN('b32`AE /skip/ BA`', {
+      extensions: [b32],
+    }) as CborByteString;
+    const expected = parseCDN("b32'AEBA'", {
+      extensions: [b32],
+    }) as CborByteString;
     expect(n.value).toEqual(expected.value);
   });
 
   test('h32`` with # line comment', () => {
     // "00" in base32hex encodes a single zero byte
-    const n = parseCDN('h32`00 # comment\n`') as CborByteString;
+    const n = parseCDN('h32`00 # comment\n`', {
+      extensions: [h32],
+    }) as CborByteString;
     expect(n).toBeInstanceOf(CborByteString);
     expect(n.value).toEqual(new Uint8Array([0x00]));
   });
@@ -2320,13 +2373,16 @@ describe('strict mode', () => {
   describe('base32 non-zero trailing bits', () => {
     // b32'AB' → 10 bits (0b0000000001), first byte 0x00, trailing bit = 1 (non-zero).
     test('strict: true (default) throws', () => {
-      expect(() => parseCDN("b32'AB'")).toThrow(SyntaxError);
+      expect(() => parseCDN("b32'AB'", { extensions: [b32] })).toThrow(
+        SyntaxError
+      );
     });
 
     test('strict: false warns and returns bytes', () => {
       const warnings: ParseWarning[] = [];
       const result = parseCDN("b32'AB'", {
         strict: false,
+        extensions: [b32],
         onWarning: (w) => warnings.push(w),
       });
       expect(result).toBeInstanceOf(CborByteString);
@@ -2379,7 +2435,11 @@ describe('strict mode', () => {
     });
 
     test('base32 trailing bits: warning attached to CborByteString node', () => {
-      const result = parseCDN("b32'AB'", { strict: false, silent: true });
+      const result = parseCDN("b32'AB'", {
+        strict: false,
+        silent: true,
+        extensions: [b32],
+      });
       expect(result.warnings).toHaveLength(1);
       expect(result.warnings![0].message).toBe(
         'non-zero trailing bits in base32 input'

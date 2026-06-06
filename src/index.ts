@@ -29,9 +29,10 @@ export { Simple } from './simple';
 export { MapEntries } from './mapEntries';
 
 // Extensions
-export { dt_as_Date } from './extensions/dt';
+export { b32, h32 } from './extensions/b32';
 export { floatBits } from './extensions/float';
 export { same } from './extensions/same';
+export { dt_as_Date } from './extensions/dt';
 
 // Main CBOR class
 export { CBOR } from './cbor';

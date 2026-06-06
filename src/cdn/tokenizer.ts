@@ -14,8 +14,6 @@ export type TokenType =
   | 'BYTES_HEX'
   | 'BYTES_HEX_ELIDED'
   | 'BYTES_B64'
-  | 'BYTES_B32'
-  | 'BYTES_H32'
   | 'APP_STRING'
   | 'APP_SEQUENCE'
   | 'EMPTY_INDEF_BYTES'
@@ -257,7 +255,7 @@ export class Tokenizer {
   }
 
   /**
-   * Skip a comment in a quoted byte string literal (h'', b32'', h32'').
+   * Skip a comment in a quoted byte string literal (h'', b64'').
    * Returns true if a comment was consumed, false if the current char is not a
    * comment start. `quote` is the closing delimiter character.
    *
@@ -383,7 +381,7 @@ export class Tokenizer {
   }
 
   /**
-   * Skip a comment in a raw byte string (h``, b32``, h32``).
+   * Skip a comment in a raw byte string (h``, b64``).
    * Called with `i` pointing at the comment-start character.
    * Returns the index after the comment, or -1 if no comment was found.
    *
@@ -954,50 +952,6 @@ export class Tokenizer {
   }
 
   /**
-   * Post-process raw base32/base32hex content from `b32``…``\` / `h32``…``\` raw strings.
-   *
-   * Supports all comment forms (§2.2): `/ ... /`, `/*...*\/`, `//`, `#`.
-   * HT is still forbidden (rawchars excludes %x09).
-   */
-  private _processRawB32Content(
-    raw: string,
-    tokenLine: number,
-    tokenCol: number
-  ): string {
-    let out = '';
-    let i = 0;
-    while (i < raw.length) {
-      const ch = raw[i];
-      // lblank / CR — skip
-      if (ch === '\n' || ch === ' ' || ch === '\r') {
-        i++;
-        continue;
-      }
-      // HT forbidden
-      if (ch === '\t') {
-        throw new SyntaxError(
-          `EDN parse error at line ${tokenLine}, column ${tokenCol}: horizontal tab (HT) is not allowed inside b32\`\`/h32\`\` raw byte string literals (§5.2)`
-        );
-      }
-      // Comments (§2.2)
-      const afterComment = this._skipRawComment(
-        raw,
-        i,
-        'b32``/h32`` raw byte string',
-        tokenLine,
-        tokenCol
-      );
-      if (afterComment !== -1) {
-        i = afterComment;
-        continue;
-      }
-      out += ch;
-      i++;
-    }
-    return out;
-  }
-
-  /**
    * Read raw byte-string content between `quote` chars (b64 / b64url).
    *
    * Strips whitespace and skips `# ...` line comments per §2.5.5.
@@ -1041,36 +995,6 @@ export class Tokenizer {
         }
         continue;
       }
-      raw += this._advance();
-    }
-    if (this._eof()) this._fail('unterminated byte string literal');
-    this._advance(); // closing quote
-    return raw;
-  }
-
-  /**
-   * Read base32 / base32hex byte-string content (`b32'...'` / `h32'...'`).
-   *
-   * Supports all comment forms (§2.2): `/ ... /`, `/*...*\/`, `//`, `#`.
-   */
-  private _readB32Content(quote: string): string {
-    this._advance(); // opening quote
-    let raw = '';
-    while (!this._eof() && this._ch() !== quote) {
-      const ch = this._ch();
-      // lblank = %x0A / %x20 only; HT is forbidden per §5.2 Figure 3
-      if (ch === '\n' || ch === ' ' || ch === '\r') {
-        this._advance();
-        continue;
-      }
-      if (ch === '\t') {
-        this._fail(
-          'horizontal tab (HT) is not allowed inside byte string literals (§5.2)',
-          this.line,
-          this.col
-        );
-      }
-      if (this._skipByteStringComment(quote)) continue;
       raw += this._advance();
     }
     if (this._eof()) this._fail('unterminated byte string literal');
@@ -1583,20 +1507,6 @@ export class Tokenizer {
                 line,
                 col,
               };
-            case 'b32':
-              return {
-                type: 'BYTES_B32',
-                value: this._readB32Content(q),
-                line,
-                col,
-              };
-            case 'h32':
-              return {
-                type: 'BYTES_H32',
-                value: this._readB32Content(q),
-                line,
-                col,
-              };
             case 'float': {
               // float'...' uses the same hex+comment syntax as h'...'
               // (block comments /.../ and # line comments are stripped).
@@ -1643,20 +1553,6 @@ export class Tokenizer {
               return {
                 type: 'BYTES_B64',
                 value: this._processRawB64Content(raw, line, col),
-                line,
-                col,
-              };
-            case 'b32':
-              return {
-                type: 'BYTES_B32',
-                value: this._processRawB32Content(raw, line, col),
-                line,
-                col,
-              };
-            case 'h32':
-              return {
-                type: 'BYTES_H32',
-                value: this._processRawB32Content(raw, line, col),
                 line,
                 col,
               };

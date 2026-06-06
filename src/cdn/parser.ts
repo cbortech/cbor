@@ -136,53 +136,6 @@ function hexToBytes(hex: string): Uint8Array {
   return out;
 }
 
-const B32_ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-const H32_ALPHA = '0123456789ABCDEFGHIJKLMNOPQRSTUV';
-
-function base32Decode(
-  str: string,
-  alpha: string,
-  onRecoverableError?: (msg: string) => void
-): Uint8Array {
-  // Padding is optional per the ABNF (§5.2.2 analogue for base32); strip it.
-  const s = str.replace(/=+$/, '').toUpperCase();
-  // RFC 4648 §6: valid unpadded lengths mod 8 are 0, 2, 4, 5, 7.
-  // Lengths 1, 3, 6 mod 8 cannot arise from any valid byte sequence.
-  const rem = s.length % 8;
-  if (rem === 1 || rem === 3 || rem === 6)
-    throw new SyntaxError(`invalid base32 length: ${s.length} characters`);
-  const lookup = new Uint8Array(128).fill(0xff);
-  for (let i = 0; i < alpha.length; i++) lookup[alpha.charCodeAt(i)] = i;
-  const out = new Uint8Array(Math.floor((s.length * 5) / 8));
-  let buf = 0,
-    bufBits = 0,
-    outIdx = 0;
-  for (const ch of s) {
-    const code = ch.charCodeAt(0);
-    const val = code < 128 ? lookup[code] : 0xff;
-    if (val === 0xff)
-      throw new SyntaxError(
-        `invalid character in byte string: ${JSON.stringify(ch)}`
-      );
-    buf = (buf << 5) | val;
-    bufBits += 5;
-    if (bufBits >= 8) {
-      bufBits -= 8;
-      out[outIdx++] = (buf >> bufBits) & 0xff;
-    }
-  }
-  // RFC 4648 §3.5: trailing bits in the last quantum must be zero.
-  if (bufBits > 0 && (buf & ((1 << bufBits) - 1)) !== 0) {
-    const msg = 'non-zero trailing bits in base32 input';
-    if (onRecoverableError) {
-      onRecoverableError(msg); // warn and ignore the trailing bits
-    } else {
-      throw new SyntaxError(msg);
-    }
-  }
-  return out;
-}
-
 function base64ToBytes(
   b64: string,
   onRecoverableError?: (msg: string) => void
@@ -454,9 +407,7 @@ class CDNParser {
         return this.parseString();
       case 'BYTES_HEX':
       case 'SQSTR':
-      case 'BYTES_B64':
-      case 'BYTES_B32':
-      case 'BYTES_H32': {
+      case 'BYTES_B64': {
         this.t.consume();
         return this._parseBytesConcat(
           this._decodeBytesToken(tok),
@@ -508,11 +459,24 @@ class CDNParser {
         {
           const warnsBefore = this._pendingWarnings.length;
           try {
-            return ext.parseAppString(
+            const result = ext.parseAppString(
               tok.appPrefix!,
               tok.value,
               this._extOnError(tok)
             );
+            // Propagate ednSource so preserveByteString round-trips correctly.
+            // instanceof narrows the type; getPrototypeOf excludes subclasses like CborIpExt.
+            if (
+              result instanceof CborByteString &&
+              Object.getPrototypeOf(result) === CborByteString.prototype &&
+              result.ednSource === undefined
+            )
+              return new CborByteString(result.value, {
+                ednEncoding: result.ednEncoding,
+                encodingWidth: result.encodingWidth,
+                ednSource: tok.raw,
+              });
+            return result;
           } catch (e) {
             if (this._options.strict !== false) throw e;
             if (this._pendingWarnings.length === warnsBefore)
@@ -762,13 +726,7 @@ class CDNParser {
   }
 
   private _isBytesToken(type: string): boolean {
-    return (
-      type === 'BYTES_HEX' ||
-      type === 'SQSTR' ||
-      type === 'BYTES_B64' ||
-      type === 'BYTES_B32' ||
-      type === 'BYTES_H32'
-    );
+    return type === 'BYTES_HEX' || type === 'SQSTR' || type === 'BYTES_B64';
   }
 
   private _decodeBytesToken(tok: Token): Uint8Array {
@@ -782,10 +740,6 @@ class CDNParser {
         return hexToBytes(tok.value);
       case 'BYTES_B64':
         return base64ToBytes(tok.value, onRecoverableError);
-      case 'BYTES_B32':
-        return base32Decode(tok.value, B32_ALPHA, onRecoverableError);
-      case 'BYTES_H32':
-        return base32Decode(tok.value, H32_ALPHA, onRecoverableError);
       default:
         this._fail(`expected byte string token`, tok);
     }
@@ -804,19 +758,8 @@ class CDNParser {
     }
   }
 
-  private _tokenTypeToCdnEncoding(
-    type: string
-  ): 'hex' | 'base64' | 'base32' | 'base32hex' {
-    switch (type) {
-      case 'BYTES_B64':
-        return 'base64';
-      case 'BYTES_B32':
-        return 'base32';
-      case 'BYTES_H32':
-        return 'base32hex';
-      default:
-        return 'hex';
-    }
+  private _tokenTypeToCdnEncoding(type: string): 'hex' | 'base64' {
+    return type === 'BYTES_B64' ? 'base64' : 'hex';
   }
 
   private _parseBytesConcat(
