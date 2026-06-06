@@ -8,10 +8,11 @@ The CSV files are not committed to this repository because the upstream
 licensing/citation terms are not yet explicit. Only this README and the test
 driver are tracked.
 
-| File                | Source        | Content                                            |
-| ------------------- | ------------- | -------------------------------------------------- |
-| `basic.csv`         | cabo/edn-abnf | Core values, escapes, surrogates, hex/b64 comments |
-| `level-shifter.csv` | cabo/edn-abnf | app-string content validation (dt/h/ip + Unicode)  |
+| File                | Source        | Content                                                         |
+| ------------------- | ------------- | --------------------------------------------------------------- |
+| `basic.csv`         | cabo/edn-abnf | Core values, escapes, surrogates, hex/b64 comments              |
+| `level-shifter.csv` | cabo/edn-abnf | app-string content validation (dt/h/ip + Unicode)               |
+| `float.csv`         | cabo/edn-abnf | `float'...'` / `float<<...>>`, `same<<...>>`, b64 padding rules |
 
 ## CSV format
 
@@ -32,7 +33,9 @@ Clone the upstream repository and copy the CSV files into this directory:
 
 ```sh
 git clone https://github.com/cabo/edn-abnf.git /tmp/edn-abnf
-cp /tmp/edn-abnf/tests/basic.csv /tmp/edn-abnf/tests/level-shifter.csv \
+cp /tmp/edn-abnf/tests/basic.csv \
+   /tmp/edn-abnf/tests/level-shifter.csv \
+   /tmp/edn-abnf/tests/float.csv \
    src/cdn/test-vectors/edn-abnf/
 ```
 

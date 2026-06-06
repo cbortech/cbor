@@ -18,8 +18,12 @@ import { describe } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { registerTests } from './test-vectors/runner';
+import { floatBits } from '../extensions/float';
+import { same } from '../extensions/same';
 
 const VECTORS_DIR = resolve(import.meta.dirname, 'test-vectors/edn-abnf');
+
+const FLOAT_EXTENSIONS = [floatBits, same];
 
 // ─── Known differences ────────────────────────────────────────────────────────
 
@@ -55,4 +59,8 @@ function runVectors(filename: string, knownSkip: Map<string, string>): void {
 describe('EDN test vectors (cabo/edn-abnf)', () => {
   runVectors('level-shifter.csv', new Map());
   runVectors('basic.csv', BASIC_SKIP);
+  describe('float', () => {
+    const text = readFileSync(resolve(VECTORS_DIR, 'float.csv'), 'utf-8');
+    registerTests(text, new Map(), true, FLOAT_EXTENSIONS);
+  });
 });

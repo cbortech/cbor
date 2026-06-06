@@ -30,6 +30,8 @@ export { MapEntries } from './mapEntries';
 
 // Extensions
 export { dt_as_Date } from './extensions/dt';
+export { floatBits } from './extensions/float';
+export { same } from './extensions/same';
 
 // Main CBOR class
 export { CBOR } from './cbor';

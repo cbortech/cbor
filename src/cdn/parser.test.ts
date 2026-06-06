@@ -612,12 +612,45 @@ describe('parseCDN — byte strings', () => {
     const n = parseCDN("b64'3q2+7w=='") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
   });
-  test("b64'AQID====' (excess padding) always throws", () => {
-    // AQID is 4 chars (rem=0), no padding expected
+  test("b64'AA=' (partial padding: 1 of 2) throws in strict mode", () => {
+    // AA needs == (rem=2, expectedPad=2), but only 1 '=' given
+    expect(() => parseCDN("b64'AA='")).toThrow(SyntaxError);
+  });
+  test("b64'AA=' (partial padding) warns and decodes in lenient mode", () => {
+    const warnings: string[] = [];
+    const n = parseCDN("b64'AA='", {
+      strict: false,
+      onWarning: (w) => warnings.push(w.message),
+    }) as CborByteString;
+    expect(n.value).toEqual(new Uint8Array([0x00]));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/needs exactly 2/i);
+  });
+  test("b64'AA===' (excess padding: 3 of max 2) throws in strict mode", () => {
+    expect(() => parseCDN("b64'AA==='")).toThrow(SyntaxError);
+  });
+  test("b64'AA===' (excess padding) warns and decodes in lenient mode", () => {
+    const warnings: string[] = [];
+    const n = parseCDN("b64'AA==='", {
+      strict: false,
+      onWarning: (w) => warnings.push(w.message),
+    }) as CborByteString;
+    expect(n.value).toEqual(new Uint8Array([0x00]));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/requires at most 2/i);
+  });
+  test("b64'AQID====' (excess padding: 4 of max 0) throws in strict mode", () => {
     expect(() => parseCDN("b64'AQID===='")).toThrow(SyntaxError);
-    expect(() => parseCDN("b64'AQID===='", { strict: false })).toThrow(
-      SyntaxError
-    );
+  });
+  test("b64'AQID====' (excess padding) warns and decodes in lenient mode", () => {
+    const warnings: string[] = [];
+    const n = parseCDN("b64'AQID===='", {
+      strict: false,
+      onWarning: (w) => warnings.push(w.message),
+    }) as CborByteString;
+    expect(n.value).toEqual(new Uint8Array([1, 2, 3]));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/requires at most 0/i);
   });
   test('base64 with rem=1 always throws (no valid byte sequence yields 1 mod 4)', () => {
     // 'A' alone = 1 char, rem=1 — never a valid base64 sequence

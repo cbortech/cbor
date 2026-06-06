@@ -5,6 +5,7 @@
 
 import { test, expect } from 'vitest';
 import { parseCDN } from '../parser';
+import type { CborExtension } from '../../extensions/types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -98,8 +99,11 @@ export function parseCSV(text: string): [string, string, string][] {
 export function registerTests(
   text: string,
   knownSkip: Map<string, string> = new Map(),
-  strictNegative = true
+  strictNegative = true,
+  extensions: CborExtension[] = []
 ): void {
+  const parse = (s: string) =>
+    parseCDN(s, extensions.length ? { extensions } : undefined);
   const rows = parseCSV(text);
 
   for (const [op, rawInput, rawOutput] of rows) {
@@ -119,12 +123,12 @@ export function registerTests(
 
     if (op === 'x') {
       test(label, () => {
-        expect(parseCDN(input).toCBOR()).toEqual(hexToBytes(rawOutput));
+        expect(parse(input).toCBOR()).toEqual(hexToBytes(rawOutput));
       });
     } else if (op === '=') {
       test(label, () => {
-        expect(parseCDN(input).toCBOR()).toEqual(
-          parseCDN(decodeInput(rawOutput)).toCBOR()
+        expect(parse(input).toCBOR()).toEqual(
+          parse(decodeInput(rawOutput)).toCBOR()
         );
       });
     } else if (op === '-') {
@@ -136,13 +140,13 @@ export function registerTests(
         test(negLabel, () => {
           let actual: Uint8Array;
           try {
-            actual = parseCDN(input).toCBOR();
+            actual = parse(input).toCBOR();
           } catch {
             return; // input parse failure → trivially different
           }
           let notExpected: Uint8Array;
           try {
-            notExpected = parseCDN(decodeInput(rawOutput)).toCBOR();
+            notExpected = parse(decodeInput(rawOutput)).toCBOR();
           } catch (e) {
             if (!strictNegative) return; // corpus allows unparseable output
             throw e; // output should be parseable; propagate as test failure
@@ -151,7 +155,7 @@ export function registerTests(
         });
       } else {
         test(label, () => {
-          expect(() => parseCDN(input)).toThrow();
+          expect(() => parse(input)).toThrow();
         });
       }
     }

@@ -215,13 +215,20 @@ function base64ToBytes(
   // Expected number of '=' characters for this data length.
   const expectedPad = rem === 0 ? 0 : 4 - rem;
 
-  if (pad.length > expectedPad)
-    throw new SyntaxError(
-      `base64 has ${pad.length} '=' characters but the data length (${data.length}) requires at most ${expectedPad}`
-    );
+  if (pad.length > expectedPad) {
+    const msg = `base64 has ${pad.length} '=' character${pad.length > 1 ? 's' : ''} but the data length (${data.length}) requires at most ${expectedPad}`;
+    if (onRecoverableError) onRecoverableError(msg);
+    else throw new SyntaxError(msg);
+  }
 
-  // Missing '=' padding: draft-25 explicitly accommodates omitting padding —
-  // the serializer also omits it, so this is always accepted without a warning.
+  // Partial padding: some '=' present but fewer than the full required amount.
+  // draft-25 accommodates NO padding; any '=' present must be the full set.
+  if (pad.length > 0 && pad.length < expectedPad) {
+    const msg = `base64 has ${pad.length} '=' character${pad.length > 1 ? 's' : ''} but needs exactly ${expectedPad} — use full padding or no padding at all`;
+    if (onRecoverableError) onRecoverableError(msg);
+    else throw new SyntaxError(msg);
+  }
+  // Zero '=': draft-25 allows omitting padding entirely — always accepted.
 
   // Non-zero trailing bits in the last data character (RFC 4648 §3.5).
   // Normalize URL-safe chars first so the lookup is against the classic table.
