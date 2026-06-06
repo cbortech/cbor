@@ -50,6 +50,8 @@ export class CborArray extends CborItem {
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     let indentStr = resolveIndent(options);
     const preserveComments = options?.preserveComments;
+    const commentStyle =
+      typeof preserveComments === 'string' ? preserveComments : undefined;
     const hasComments =
       preserveComments &&
       (hasContainerLayoutComments(this) ||
@@ -83,14 +85,14 @@ export class CborArray extends CborItem {
     for (let i = 0; i < this.items.length; i++) {
       const item = this.items[i];
       if (preserveComments)
-        lines.push(...formatLeadingComments(item, childIndent));
+        lines.push(...formatLeadingComments(item, childIndent, commentStyle));
       const sep = i < this.items.length - 1 ? multilineSep : trailSep;
       lines.push(
-        `${childIndent}${item._toCDN(options, depth + 1)}${sep}${preserveComments ? formatTrailingComments(item) : ''}`
+        `${childIndent}${item._toCDN(options, depth + 1)}${sep}${preserveComments ? formatTrailingComments(item, commentStyle) : ''}`
       );
     }
     if (preserveComments)
-      lines.push(...formatDanglingComments(this, childIndent));
+      lines.push(...formatDanglingComments(this, childIndent, commentStyle));
     const body = lines.join('\n');
     return `${open}\n${body}\n${closeIndent}]`;
   }

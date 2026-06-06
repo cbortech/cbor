@@ -275,9 +275,12 @@ export interface FromCDNOptions {
    * JavaScript conversion. Use together with `ToCDNOptions.preserveComments`
    * to include them when formatting back to CDN.
    *
+   * The string values `'c-style'` and `'cdn-style'` are treated as `true`
+   * for parsing purposes; they become meaningful when passed to `toCDN()`.
+   *
    * @default false
    */
-  preserveComments?: boolean;
+  preserveComments?: boolean | 'c-style' | 'cdn-style';
 
   /**
    * Controls how CDN/EDN validity violations are handled.
@@ -384,12 +387,21 @@ export interface ToCDNOptions {
   /**
    * Emit comments previously captured by `FromCDNOptions.preserveComments`.
    *
+   * - `true`: emit comments with their original markers.
+   * - `'c-style'`: emit comments, normalising line comments to `//` and block
+   *   comments to `/* … *\/`.
+   * - `'cdn-style'`: emit comments, normalising line comments to `#` and block
+   *   comments to `/ … /`. When a `/* … *\/` comment's content contains `/`
+   *   (which cannot be represented inside `/ … /`), the `/* … *\/` form is
+   *   kept as-is.
+   * - `false` / omitted: strip all comments from the output.
+   *
    * When enabled for containers, comment-bearing arrays/maps are emitted in
    * multi-line form even if `indent` is omitted.
    *
    * @default false
    */
-  preserveComments?: boolean;
+  preserveComments?: boolean | 'c-style' | 'cdn-style';
 
   /**
    * Re-emit byte string literals parsed from CDN using their original source
