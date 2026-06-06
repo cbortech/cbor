@@ -2210,6 +2210,69 @@ describe('parseCDN — pluggable app-string extensions', () => {
   test("underscore prefix my_ext'...' is rejected as unknown identifier", () => {
     expect(() => parseCDN("my_ext'hello'")).toThrow(SyntaxError);
   });
+
+  describe('lenient mode: extension parse errors fall back to CborUnresolvedAppExt', () => {
+    test("strict: true — invalid dt'...' throws", () => {
+      expect(() => parseCDN("dt'not-a-date'")).toThrow(SyntaxError);
+    });
+
+    test("strict: false — invalid dt'...' returns CborUnresolvedAppExt + exactly one warning", () => {
+      const warnings: string[] = [];
+      const result = parseCDN("dt'not-a-date'", {
+        strict: false,
+        onWarning: (w) => warnings.push(w.message),
+      });
+      expect(result).toBeInstanceOf(CborUnresolvedAppExt);
+      // toCDN() round-trips back to the original app-string form
+      expect(result.toCDN()).toBe("dt'not-a-date'");
+      // dt.ts calls onError() then falls through to a direct throw — only one warning expected
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatch(/not-a-date/);
+    });
+
+    test('strict: false — extension that throws without calling onError falls back', () => {
+      const warnings: string[] = [];
+      const result = parseCDN("boom'hello'", {
+        strict: false,
+        onWarning: (w) => warnings.push(w.message),
+        extensions: [
+          {
+            appStringPrefixes: ['boom'],
+            parseAppString: () => {
+              throw new SyntaxError('boom extension failed');
+            },
+          },
+        ],
+      });
+      expect(result).toBeInstanceOf(CborUnresolvedAppExt);
+      expect(result.toCDN()).toBe("boom'hello'");
+      expect(warnings.some((w) => w.includes('boom extension failed'))).toBe(
+        true
+      );
+    });
+
+    test('strict: false — parseAppSequence failure falls back to CborUnresolvedAppExt', () => {
+      const warnings: string[] = [];
+      const result = parseCDN('boom<<1, 2>>', {
+        strict: false,
+        onWarning: (w) => warnings.push(w.message),
+        extensions: [
+          {
+            appStringPrefixes: ['boom'],
+            parseAppString: (_p, s) => new CborTextString(s),
+            parseAppSequence: () => {
+              throw new SyntaxError('boom sequence failed');
+            },
+          },
+        ],
+      });
+      expect(result).toBeInstanceOf(CborUnresolvedAppExt);
+      expect(result.toCDN()).toBe('boom<<1, 2>>');
+      expect(warnings.some((w) => w.includes('boom sequence failed'))).toBe(
+        true
+      );
+    });
+  });
 });
 
 describe('strict mode', () => {

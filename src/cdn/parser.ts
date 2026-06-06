@@ -505,11 +505,23 @@ class CDNParser {
             tok
           );
         }
-        return ext.parseAppString(
-          tok.appPrefix!,
-          tok.value,
-          this._extOnError(tok)
-        );
+        {
+          const warnsBefore = this._pendingWarnings.length;
+          try {
+            return ext.parseAppString(
+              tok.appPrefix!,
+              tok.value,
+              this._extOnError(tok)
+            );
+          } catch (e) {
+            if (this._options.strict !== false) throw e;
+            if (this._pendingWarnings.length === warnsBefore)
+              this._warn(e instanceof Error ? e.message : String(e), tok);
+            return new CborUnresolvedAppExt(tok.appPrefix!, [
+              new CborTextString(tok.value),
+            ]);
+          }
+        }
       }
       case 'APP_SEQUENCE': {
         this.t.consume();
@@ -538,11 +550,21 @@ class CDNParser {
             `app-string extension ${JSON.stringify(tok.appPrefix)} does not support <<...>> form`,
             tok
           );
-        return seqExt.parseAppSequence(
-          tok.appPrefix!,
-          items,
-          this._extOnError(tok)
-        );
+        {
+          const warnsBefore = this._pendingWarnings.length;
+          try {
+            return seqExt.parseAppSequence(
+              tok.appPrefix!,
+              items,
+              this._extOnError(tok)
+            );
+          } catch (e) {
+            if (this._options.strict !== false) throw e;
+            if (this._pendingWarnings.length === warnsBefore)
+              this._warn(e instanceof Error ? e.message : String(e), tok);
+            return new CborUnresolvedAppExt(tok.appPrefix!, items);
+          }
+        }
       }
       case 'ELLIPSIS': {
         this.t.consume();
