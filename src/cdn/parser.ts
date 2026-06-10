@@ -23,7 +23,7 @@ import { CborTag } from '../ast/CborTag';
 import { CborFloat, type FloatPrecision } from '../ast/CborFloat';
 import { CborSimple } from '../ast/CborSimple';
 import { CborEmbeddedCBOR } from '../ast/CborEmbeddedCBOR';
-import type { EncodingWidth } from '../cbor/encode';
+import { maxForEncodingWidth, type EncodingWidth } from '../cbor/encode';
 import { parseHexFloat } from '../utils/hexfloat';
 import { float64ToFloat16Bits, float16BitsToFloat64 } from '../utils/float16';
 import { BUILTIN_EXTENSIONS } from '../extensions/builtins';
@@ -649,10 +649,7 @@ class CDNParser {
 
   private parseFloat(): CborItem {
     const tok = this.t.consume(); // FLOAT
-    const onRecoverableError = (msg: string) => {
-      this._warn(msg, tok);
-      if (this._options.strict !== false) this._fail(msg, tok);
-    };
+    const onRecoverableError = (msg: string) => this._warnOrFail(msg, tok);
     const { value, precision } = parseFloatToken(tok.value, onRecoverableError);
     if (precision === 'half' || precision === 'single') {
       const roundTripped =
@@ -751,10 +748,7 @@ class CDNParser {
   }
 
   private _decodeBytesToken(tok: Token): Uint8Array {
-    const onRecoverableError = (msg: string) => {
-      this._warn(msg, tok);
-      if (this._options.strict !== false) this._fail(msg, tok);
-    };
+    const onRecoverableError = (msg: string) => this._warnOrFail(msg, tok);
     switch (tok.type) {
       case 'BYTES_HEX':
       case 'SQSTR':
@@ -772,8 +766,7 @@ class CDNParser {
       return utf8Strict.decode(bytes);
     } catch {
       const msg = 'byte string in text concatenation is not valid UTF-8';
-      this._warn(msg, tok);
-      if (this._options.strict !== false) this._fail(msg, tok);
+      this._warnOrFail(msg, tok);
       return utf8Lenient.decode(bytes);
     }
   }
@@ -833,8 +826,7 @@ class CDNParser {
         const mixMsg =
           'text string in a byte-string concatenation is not allowed; ' +
           "use a byte string literal (h'...', b64'...', or '...') instead";
-        this._warn(mixMsg, next);
-        if (this._options.strict !== false) this._fail(mixMsg, next);
+        this._warnOrFail(mixMsg, next);
         parts.push({ bytes: textEncoder.encode(next.value) });
       } else {
         this._fail(
@@ -1001,8 +993,7 @@ class CDNParser {
         indefiniteLength = true;
         const msg =
           'encoding indicator _7 is non-standard; use _ to indicate indefinite length';
-        this._warn(msg, eiTok);
-        if (this._options.strict !== false) this._fail(msg, eiTok);
+        this._warnOrFail(msg, eiTok);
         eiTok = undefined;
       } else {
         encodingWidth = this._resolveEncodingWidth(eiTok.value, eiTok);
@@ -1052,8 +1043,7 @@ class CDNParser {
         indefiniteLength = true;
         const msg =
           'encoding indicator _7 is non-standard; use _ to indicate indefinite length';
-        this._warn(msg, eiTok);
-        if (this._options.strict !== false) this._fail(msg, eiTok);
+        this._warnOrFail(msg, eiTok);
         eiTok = undefined;
       } else {
         encodingWidth = this._resolveEncodingWidth(eiTok.value, eiTok);
@@ -1100,20 +1090,17 @@ class CDNParser {
       this.t.consume(); // _7 — alias for _, but non-standard
       const msg7 =
         'encoding indicator _7 is non-standard; use _ to indicate indefinite length';
-      this._warn(msg7, next);
-      if (this._options.strict !== false) this._fail(msg7, next);
+      this._warnOrFail(msg7, next);
     } else if (next.type === 'ENCODING_INDICATOR') {
       // _0–_6: not meaningful here; warn and drop, then parse chunks
       const tok = this.t.consume();
       const msg = `encoding indicator _${tok.value} is not valid in an indefinite string group; use _`;
-      this._warn(msg, tok);
-      if (this._options.strict !== false) this._fail(msg, tok);
+      this._warnOrFail(msg, tok);
     } else if (next.type !== 'RPAREN') {
       // No indicator at all — warn that _ is expected, then parse chunks
       const msg =
         'indefinite string group is missing _ after (; interpreting as (_ ...)';
-      this._warn(msg, next);
-      if (this._options.strict !== false) this._fail(msg, next);
+      this._warnOrFail(msg, next);
       // Do not consume — the next token is the first chunk
     }
 
@@ -1209,19 +1196,11 @@ class CDNParser {
     ew: EncodingWidth,
     tok: Token
   ): EncodingWidth | undefined {
-    const maxForWidth: Record<EncodingWidth, bigint> = {
-      i: 23n,
-      0: 0xffn,
-      1: 0xffffn,
-      2: 0xffff_ffffn,
-      3: 0xffff_ffff_ffff_ffffn,
-    };
-    if (storedValue <= maxForWidth[ew]) return ew;
-    const label =
-      ew === 'i' ? '_i (max 23)' : `_${ew} (max ${maxForWidth[ew]})`;
+    const max = maxForEncodingWidth(ew);
+    if (storedValue <= max) return ew;
+    const label = ew === 'i' ? '_i (max 23)' : `_${ew} (max ${max})`;
     const msg = `value ${storedValue} does not fit in encoding indicator ${label}`;
-    this._warn(msg, tok);
-    if (this._options.strict !== false) this._fail(msg, tok);
+    this._warnOrFail(msg, tok);
     return undefined;
   }
 
@@ -1232,15 +1211,13 @@ class CDNParser {
     if (raw === '4' || raw === '5' || raw === '6') {
       const ai = Number(raw) + 24; // 28, 29, or 30 — reserved in RFC 8949
       const msg = `encoding indicator _${raw} (AI ${ai}) is reserved and not valid`;
-      this._warn(msg, tok);
-      if (this._options.strict !== false) this._fail(msg, tok);
+      this._warnOrFail(msg, tok);
       return undefined;
     }
     if (raw === '7') {
       const msg =
         'indefinite-length encoding (_7) is not valid here; use [_ ...] or {_ ...} for indefinite collections';
-      this._warn(msg, tok);
-      if (this._options.strict !== false) this._fail(msg, tok);
+      this._warnOrFail(msg, tok);
       return undefined;
     }
     if (raw === 'i') return 'i';
@@ -1249,10 +1226,16 @@ class CDNParser {
 
   /** Builds the onError callback passed to extension parseAppString/parseAppSequence. */
   private _extOnError(tok: Token): (msg: string) => void {
-    return (msg: string) => {
-      this._warn(msg, tok);
-      if (this._options.strict !== false) this._fail(msg, tok);
-    };
+    return (msg: string) => this._warnOrFail(msg, tok);
+  }
+
+  /**
+   * Record a strict violation: always emits a ParseWarning, and in strict
+   * mode (the default) also throws a SyntaxError at the token's location.
+   */
+  private _warnOrFail(msg: string, tok?: Token): void {
+    this._warn(msg, tok);
+    if (this._options.strict !== false) this._fail(msg, tok);
   }
 
   private _warn(msg: string, tok?: Token): void {

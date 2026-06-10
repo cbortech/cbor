@@ -125,6 +125,11 @@ const MAX_FOR_WIDTH = [
   0xffff_ffff_ffff_ffffn,
 ] as const;
 
+/** Maximum CBOR argument value representable with the given encoding width. */
+export function maxForEncodingWidth(ew: EncodingWidth): bigint {
+  return ew === 'i' ? 23n : MAX_FOR_WIDTH[ew];
+}
+
 /**
  * Write a CBOR initial byte + argument into `w`.
  *
@@ -216,18 +221,6 @@ export function writeHead(
   const w = new CborWriter(9);
   writeHeadTo(w, mt, value, encodingWidth);
   return w.finish();
-}
-
-/** Concatenate multiple Uint8Arrays into one. */
-export function concat(parts: Uint8Array[]): Uint8Array {
-  const total = parts.reduce((n, p) => n + p.length, 0);
-  const out = new Uint8Array(total);
-  let off = 0;
-  for (const p of parts) {
-    out.set(p, off);
-    off += p.length;
-  }
-  return out;
 }
 
 // ─── Float precision helpers ──────────────────────────────────────────────────

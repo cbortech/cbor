@@ -217,6 +217,60 @@ function readArgument(
 
 type DecodeResult = { value: CborItem; nextOffset: number };
 
+/**
+ * Decode the chunks of an indefinite-length string (major type 2 or 3) up to
+ * and including the "break" code.  `what` is used in error messages and
+ * `isChunk` enforces that every chunk is a definite string of that type.
+ */
+function decodeIndefiniteChunks<T extends CborItem>(
+  view: DataView,
+  offset: number,
+  options: FromCBOROptions | undefined,
+  tagExts: readonly CborExtension[],
+  what: 'byte string' | 'text string',
+  isChunk: (item: CborItem) => item is T
+): { chunks: T[]; nextOffset: number } {
+  const chunks: T[] = [];
+  let pos = offset;
+  while (true) {
+    if (pos >= view.byteLength)
+      decodeError(`unexpected end of indefinite ${what}`);
+    if (view.getUint8(pos) === BREAK_CODE) {
+      pos++;
+      break;
+    }
+    const result = decodeItem(view, pos, options, tagExts);
+    if (!isChunk(result.value))
+      decodeError(`indefinite-length ${what} chunk must be a definite ${what}`);
+    chunks.push(result.value);
+    pos = result.nextOffset;
+  }
+  return { chunks, nextOffset: pos };
+}
+
+/**
+ * Record a duplicate-key strict violation if `key` was already seen.
+ * Mutates `seenKeys` and appends any non-strict-mode warning to `warnings`.
+ */
+function checkDuplicateKey(
+  key: CborItem,
+  seenKeys: Set<string>,
+  warnings: DecodeWarning[],
+  options: FromCBOROptions | undefined
+): void {
+  const fp = fingerprintKey(key);
+  if (seenKeys.has(fp)) {
+    warnings.push(
+      strictViolation(
+        `duplicate map key at offset ${key.start}`,
+        key.start!,
+        options
+      )
+    );
+  }
+  seenKeys.add(fp);
+}
+
 function decodeItem(
   view: DataView,
   offset: number,
@@ -259,25 +313,15 @@ function decodeItemInner(
     // ── Major Type 2: byte string ─────────────────────────────────────────────
     case MT_BYTES: {
       if (ai === AI_INDEFINITE) {
-        const chunks: CborByteString[] = [];
-        let pos = offset;
-        while (true) {
-          if (pos >= view.byteLength)
-            decodeError('unexpected end of indefinite byte string');
-          if (view.getUint8(pos) === BREAK_CODE) {
-            pos++;
-            break;
-          }
-          const result = decodeItem(view, pos, options, tagExts);
-          if (!(result.value instanceof CborByteString)) {
-            decodeError(
-              'indefinite-length byte string chunk must be a definite byte string'
-            );
-          }
-          chunks.push(result.value);
-          pos = result.nextOffset;
-        }
-        return { value: new CborIndefiniteByteString(chunks), nextOffset: pos };
+        const { chunks, nextOffset } = decodeIndefiniteChunks(
+          view,
+          offset,
+          options,
+          tagExts,
+          'byte string',
+          (item): item is CborByteString => item instanceof CborByteString
+        );
+        return { value: new CborIndefiniteByteString(chunks), nextOffset };
       }
       const { value: len, nextOffset: dataOffset } = readArgument(
         view,
@@ -301,25 +345,15 @@ function decodeItemInner(
     // ── Major Type 3: text string ─────────────────────────────────────────────
     case MT_TEXT: {
       if (ai === AI_INDEFINITE) {
-        const chunks: CborTextString[] = [];
-        let pos = offset;
-        while (true) {
-          if (pos >= view.byteLength)
-            decodeError('unexpected end of indefinite text string');
-          if (view.getUint8(pos) === BREAK_CODE) {
-            pos++;
-            break;
-          }
-          const result = decodeItem(view, pos, options, tagExts);
-          if (!(result.value instanceof CborTextString)) {
-            decodeError(
-              'indefinite-length text string chunk must be a definite text string'
-            );
-          }
-          chunks.push(result.value);
-          pos = result.nextOffset;
-        }
-        return { value: new CborIndefiniteTextString(chunks), nextOffset: pos };
+        const { chunks, nextOffset } = decodeIndefiniteChunks(
+          view,
+          offset,
+          options,
+          tagExts,
+          'text string',
+          (item): item is CborTextString => item instanceof CborTextString
+        );
+        return { value: new CborIndefiniteTextString(chunks), nextOffset };
       }
       const { value: len, nextOffset: dataOffset } = readArgument(
         view,
@@ -404,17 +438,12 @@ function decodeItemInner(
             break;
           }
           const keyResult = decodeItem(view, pos, options, tagExts);
-          const keyHex = fingerprintKey(keyResult.value);
-          if (seenKeysIndef.has(keyHex)) {
-            indefMapWarnings.push(
-              strictViolation(
-                `duplicate map key at offset ${keyResult.value.start}`,
-                keyResult.value.start!,
-                options
-              )
-            );
-          }
-          seenKeysIndef.add(keyHex);
+          checkDuplicateKey(
+            keyResult.value,
+            seenKeysIndef,
+            indefMapWarnings,
+            options
+          );
           pos = keyResult.nextOffset;
           const valResult = decodeItem(view, pos, options, tagExts);
           pos = valResult.nextOffset;
@@ -436,17 +465,7 @@ function decodeItemInner(
       let pos = entriesStart;
       for (let i = 0; i < length; i++) {
         const keyResult = decodeItem(view, pos, options, tagExts);
-        const keyHex = fingerprintKey(keyResult.value);
-        if (seenKeys.has(keyHex)) {
-          mapWarnings.push(
-            strictViolation(
-              `duplicate map key at offset ${keyResult.value.start}`,
-              keyResult.value.start!,
-              options
-            )
-          );
-        }
-        seenKeys.add(keyHex);
+        checkDuplicateKey(keyResult.value, seenKeys, mapWarnings, options);
         pos = keyResult.nextOffset;
         const valResult = decodeItem(view, pos, options, tagExts);
         pos = valResult.nextOffset;
