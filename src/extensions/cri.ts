@@ -83,9 +83,12 @@ function pctDecode(s: string): string {
   }
 }
 
+const textEncoder = new TextEncoder();
+const utf8Strict = new TextDecoder('utf-8', { fatal: true });
+
 function pctEncodeChar(c: string): string {
   return Array.from(
-    new TextEncoder().encode(c),
+    textEncoder.encode(c),
     (b) => `%${b.toString(16).toUpperCase().padStart(2, '0')}`
   ).join('');
 }
@@ -663,8 +666,7 @@ function stringFromAppSequence(items: CborItem[]): string {
     throw new SyntaxError('cri<<...>>: expected exactly one item');
   const item = items[0];
   if (item instanceof CborTextString) return item.value;
-  if (item instanceof CborByteString)
-    return new TextDecoder('utf-8', { fatal: true }).decode(item.value);
+  if (item instanceof CborByteString) return utf8Strict.decode(item.value);
   throw new SyntaxError('cri<<...>>: expected a text string or byte string');
 }
 

@@ -10,7 +10,12 @@ import { CborItem } from './CborItem';
 import type { AnnotatedLine } from './CborItem';
 import { CborTextString } from './CborTextString';
 import { MT_MAP, AI_INDEFINITE, BREAK_CODE } from '../cbor/constants';
-import { writeHead, concat, type EncodingWidth } from '../cbor/encode';
+import {
+  writeHead,
+  writeHeadTo,
+  type CborWriter,
+  type EncodingWidth,
+} from '../cbor/encode';
 import {
   resolveIndent,
   indentOf,
@@ -38,24 +43,21 @@ export class CborMap extends CborItem {
     this.encodingWidth = options?.encodingWidth;
   }
 
-  _toCBOR(options?: ToCBOROptions): Uint8Array {
+  override _encodeTo(writer: CborWriter, options?: ToCBOROptions): void {
     if (this.indefiniteLength) {
-      const parts: Uint8Array[] = [
-        new Uint8Array([(MT_MAP << 5) | AI_INDEFINITE]),
-      ];
+      writer.writeByte((MT_MAP << 5) | AI_INDEFINITE);
       for (const [k, v] of this.entries) {
-        parts.push(k._toCBOR(options), v._toCBOR(options));
+        k._encode(writer, options);
+        v._encode(writer, options);
       }
-      parts.push(new Uint8Array([BREAK_CODE]));
-      return concat(parts);
+      writer.writeByte(BREAK_CODE);
+      return;
     }
-    const parts = [
-      writeHead(MT_MAP, BigInt(this.entries.length), this.encodingWidth),
-    ];
+    writeHeadTo(writer, MT_MAP, this.entries.length, this.encodingWidth);
     for (const [k, v] of this.entries) {
-      parts.push(k._toCBOR(options), v._toCBOR(options));
+      k._encode(writer, options);
+      v._encode(writer, options);
     }
-    return concat(parts);
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {

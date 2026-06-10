@@ -239,10 +239,12 @@ export function serializeBytes(
   }
 }
 
+const _utf8Strict = new TextDecoder('utf-8', { fatal: true });
+
 /** Decode bytes as UTF-8; returns null if the bytes are not valid UTF-8. */
 function _tryDecodeUtf8(bytes: Uint8Array): string | null {
   try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return _utf8Strict.decode(bytes);
   } catch {
     return null;
   }
@@ -265,8 +267,34 @@ function _tryDecodeUtf8(bytes: Uint8Array): string | null {
  *   - U+2028 / U+2029 (JS line terminators)
  *   - U+200B–U+200D (zero-width characters), U+FEFF (BOM)
  */
+/**
+ * Returns true if `s` contains any character that {@link _escapeQuoted}
+ * would escape: the quote, backslash, C0 controls, DEL, U+2028/U+2029,
+ * U+200B–U+200D, or U+FEFF.  charCodeAt is safe here — every escaped
+ * character is a single UTF-16 unit, and surrogate halves never match.
+ */
+function _needsEscape(s: string, quoteCode: number): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const cc = s.charCodeAt(i);
+    if (cc === quoteCode || cc === 0x5c || cc < 0x20 || cc === 0x7f)
+      return true;
+    if (cc >= 0x2000) {
+      if (
+        cc === 0x2028 ||
+        cc === 0x2029 ||
+        (cc >= 0x200b && cc <= 0x200d) ||
+        cc === 0xfeff
+      )
+        return true;
+    }
+  }
+  return false;
+}
+
 function _escapeQuoted(s: string, quote: string): string {
   const quoteCP = quote.codePointAt(0)!;
+  // Fast path: nothing to escape (the common case) — a single concatenation.
+  if (!_needsEscape(s, quoteCP)) return quote + s + quote;
   let result = quote;
   for (const char of s) {
     const cp = char.codePointAt(0)!;

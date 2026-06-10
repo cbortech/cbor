@@ -3,7 +3,12 @@ import { CBOR_OMIT } from '../types';
 import { CborItem } from './CborItem';
 import type { AnnotatedLine } from './CborItem';
 import { MT_ARRAY, AI_INDEFINITE, BREAK_CODE } from '../cbor/constants';
-import { writeHead, concat, type EncodingWidth } from '../cbor/encode';
+import {
+  writeHead,
+  writeHeadTo,
+  type CborWriter,
+  type EncodingWidth,
+} from '../cbor/encode';
 import {
   resolveIndent,
   indentOf,
@@ -31,20 +36,15 @@ export class CborArray extends CborItem {
     this.encodingWidth = options?.encodingWidth;
   }
 
-  _toCBOR(options?: ToCBOROptions): Uint8Array {
+  override _encodeTo(writer: CborWriter, options?: ToCBOROptions): void {
     if (this.indefiniteLength) {
-      const parts: Uint8Array[] = [
-        new Uint8Array([(MT_ARRAY << 5) | AI_INDEFINITE]),
-      ];
-      for (const item of this.items) parts.push(item._toCBOR(options));
-      parts.push(new Uint8Array([BREAK_CODE]));
-      return concat(parts);
+      writer.writeByte((MT_ARRAY << 5) | AI_INDEFINITE);
+      for (const item of this.items) item._encode(writer, options);
+      writer.writeByte(BREAK_CODE);
+      return;
     }
-    const parts = [
-      writeHead(MT_ARRAY, BigInt(this.items.length), this.encodingWidth),
-    ];
-    for (const item of this.items) parts.push(item._toCBOR(options));
-    return concat(parts);
+    writeHeadTo(writer, MT_ARRAY, this.items.length, this.encodingWidth);
+    for (const item of this.items) item._encode(writer, options);
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {

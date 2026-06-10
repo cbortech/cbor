@@ -3,7 +3,7 @@ import { CborItem } from './CborItem';
 import type { AnnotatedLine } from './CborItem';
 import type { CborTextString } from './CborTextString';
 import { MT_TEXT, AI_INDEFINITE, BREAK_CODE } from '../cbor/constants';
-import { concat } from '../cbor/encode';
+import type { CborWriter } from '../cbor/encode';
 
 /** CBOR Major Type 3 — indefinite-length UTF-8 text string (chunked). */
 export class CborIndefiniteTextString extends CborItem {
@@ -15,13 +15,10 @@ export class CborIndefiniteTextString extends CborItem {
     this.chunks = chunks;
   }
 
-  _toCBOR(options?: ToCBOROptions): Uint8Array {
-    const parts: Uint8Array[] = [
-      new Uint8Array([(MT_TEXT << 5) | AI_INDEFINITE]),
-    ];
-    for (const chunk of this.chunks) parts.push(chunk._toCBOR(options));
-    parts.push(new Uint8Array([BREAK_CODE]));
-    return concat(parts);
+  override _encodeTo(writer: CborWriter, options?: ToCBOROptions): void {
+    writer.writeByte((MT_TEXT << 5) | AI_INDEFINITE);
+    for (const chunk of this.chunks) chunk._encode(writer, options);
+    writer.writeByte(BREAK_CODE);
   }
 
   _toCDN(options: ToCDNOptions | undefined, _depth: number): string {

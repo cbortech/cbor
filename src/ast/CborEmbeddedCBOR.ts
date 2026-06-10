@@ -2,7 +2,7 @@ import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import type { AnnotatedLine } from './CborItem';
 import { MT_BYTES } from '../cbor/constants';
-import { writeHead, concat } from '../cbor/encode';
+import { writeHead, writeHeadTo, CborWriter } from '../cbor/encode';
 import {
   resolveIndent,
   indentOf,
@@ -29,12 +29,17 @@ export class CborEmbeddedCBOR extends CborItem {
 
   /** The raw concatenated CBOR bytes of all contained items. */
   private _content(options?: ToCBOROptions): Uint8Array {
-    return concat(this.items.map((item) => item._toCBOR(options)));
+    const inner = new CborWriter();
+    for (const item of this.items) item._encode(inner, options);
+    return inner.finish();
   }
 
-  _toCBOR(options?: ToCBOROptions): Uint8Array {
+  override _encodeTo(writer: CborWriter, options?: ToCBOROptions): void {
+    // The head needs the content's byte length, so the items are encoded
+    // into a separate buffer first.
     const content = this._content(options);
-    return concat([writeHead(MT_BYTES, BigInt(content.length)), content]);
+    writeHeadTo(writer, MT_BYTES, content.length);
+    writer.writeBytes(content);
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
