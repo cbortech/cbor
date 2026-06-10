@@ -2331,6 +2331,111 @@ describe('parseCDN — pluggable app-string extensions', () => {
   });
 });
 
+describe('parseCDN — missing-extension hints', () => {
+  test.each([
+    ["hash'sha-256:0011'", 'hash', 'hash', '@cbortech/hash-extension'],
+    [
+      "uuid'550e8400-e29b-41d4-a716-446655440000'",
+      'uuid',
+      'uuid',
+      '@cbortech/uuid-extension',
+    ],
+    [
+      "UUID'550e8400-e29b-41d4-a716-446655440000'",
+      'UUID',
+      'uuid',
+      '@cbortech/uuid-extension',
+    ],
+    ["b32'AEBAGBA'", 'b32', 'b32', '@cbortech/cbor'],
+    ["h32'00P00'", 'h32', 'h32', '@cbortech/cbor'],
+    ["float'7e00'", 'float', 'float', '@cbortech/cbor'],
+    ['same<<42, 42>>', 'same', 'same', '@cbortech/cbor'],
+  ])('%s hints to enable the %s extension', (text, prefix, name, pkg) => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const result = parseCDN(text);
+      expect(result).toBeInstanceOf(CborUnresolvedAppExt);
+      expect(spy).toHaveBeenCalledTimes(1);
+      const msg = spy.mock.calls[0]![0] as string;
+      expect(msg).toContain(`'${prefix}'`);
+      expect(msg).toContain(pkg);
+      expect(msg).toContain(`extensions: [${name}]`);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('silent: true suppresses the hint', () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const result = parseCDN("hash'sha-256:0011'", { silent: true });
+      expect(result).toBeInstanceOf(CborUnresolvedAppExt);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('onWarning receives the hint instead of console.warn', () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const warnings: ParseWarning[] = [];
+      parseCDN("uuid'550e8400-e29b-41d4-a716-446655440000'", {
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(spy).not.toHaveBeenCalled();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]!.message).toContain('@cbortech/uuid-extension');
+      expect(warnings[0]!.line).toBe(1);
+      expect(warnings[0]!.column).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('no hint when the extension is registered', () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      parseCDN("b32'AEBAGBA'", { extensions: [b32] });
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('no hint for prefixes without a known extension', () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(parseCDN("unknown'hello'")).toBeInstanceOf(CborUnresolvedAppExt);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('hint is emitted once per prefix per parse', () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      parseCDN("[float'7e00', float'7e00', b32'AEBAGBA']");
+      expect(spy).toHaveBeenCalledTimes(2);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("hint precedes the error with unresolvedExtension: 'error'", () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(() =>
+        parseCDN("hash'sha-256:0011'", { unresolvedExtension: 'error' })
+      ).toThrow(SyntaxError);
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe('strict mode', () => {
   describe('float encoding indicator _0 / _i', () => {
     test('strict: true (default) throws on _0', () => {
