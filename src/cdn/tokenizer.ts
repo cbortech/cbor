@@ -87,6 +87,20 @@ function positionAt(
   return { line, col };
 }
 
+// ─── Scanning helpers (hot path) ─────────────────────────────────────────────
+//
+// Token content is consumed in bulk runs: a charCodeAt loop locates the next
+// character that needs individual handling, and everything before it is
+// appended with a single slice instead of per-character concatenation.
+
+function isHexDigitCode(c: number): boolean {
+  return (
+    (c >= 0x30 && c <= 0x39) || // 0-9
+    (c >= 0x61 && c <= 0x66) || // a-f
+    (c >= 0x41 && c <= 0x46) // A-F
+  );
+}
+
 export class Tokenizer {
   private pos: number;
   private line: number;
@@ -172,9 +186,23 @@ export class Tokenizer {
 
   private _skipWS(): void {
     for (;;) {
-      // Skip whitespace characters
-      while (!this._eof() && /\s/.test(this._ch())) this._advance();
-      if (this._eof()) return;
+      // Skip whitespace characters.  Common ASCII whitespace is matched with
+      // direct comparisons; printable ASCII can never match /\s/, so the
+      // regex only runs for the rare remaining characters (e.g. \f, NBSP).
+      for (;;) {
+        const ws = this.input[this.pos];
+        if (ws === undefined) return;
+        if (ws === ' ' || ws === '\n' || ws === '\t' || ws === '\r') {
+          this._advance();
+          continue;
+        }
+        if (ws > ' ' && ws <= '~') break; // printable ASCII — not whitespace
+        if (/\s/.test(ws)) {
+          this._advance();
+          continue;
+        }
+        break;
+      }
 
       const c = this._ch();
 
@@ -480,8 +508,39 @@ export class Tokenizer {
    */
   private _readStringContent(quote: string): string {
     this._advance(); // opening quote
+    const quoteCode = quote.charCodeAt(0);
+    const inputLen = this.input.length;
     let out = '';
     while (!this._eof() && this._ch() !== quote) {
+      // Fast path: bulk-consume a run of ordinary characters up to the next
+      // delimiter, backslash, CR, or control character.  LF is ordinary
+      // content; it is counted here so line/col stay correct.
+      let p = this.pos;
+      let newlines = 0;
+      let lastNewline = -1;
+      while (p < inputLen) {
+        const cc = this.input.charCodeAt(p);
+        if (cc === quoteCode || cc === 0x5c /* \ */ || cc === 0x7f /* DEL */)
+          break;
+        if (cc < 0x20) {
+          if (cc !== 0x0a) break; // CR / other C0 controls → slow path
+          newlines++;
+          lastNewline = p;
+        }
+        p++;
+      }
+      if (p > this.pos) {
+        out += this.input.slice(this.pos, p);
+        if (newlines > 0) {
+          this.line += newlines;
+          this.col = p - lastNewline;
+        } else {
+          this.col += p - this.pos;
+        }
+        this.pos = p;
+        continue;
+      }
+
       const ch = this._ch();
 
       // Strip literal CR (cross-platform source normalisation — spec §2.5.1)
@@ -792,8 +851,37 @@ export class Tokenizer {
     if (!this._eof() && this._ch() === '\r') this._advance(); // CR
     if (!this._eof() && this._ch() === '\n') this._advance(); // LF
 
+    const inputLen = this.input.length;
     let out = '';
     while (!this._eof()) {
+      // Fast path: bulk-consume a run of ordinary characters up to the next
+      // backtick, CR, or control character.  LF is ordinary content; it is
+      // counted here so line/col stay correct.
+      let p = this.pos;
+      let newlines = 0;
+      let lastNewline = -1;
+      while (p < inputLen) {
+        const cc = this.input.charCodeAt(p);
+        if (cc === 0x60 /* ` */ || cc === 0x7f /* DEL */) break;
+        if (cc < 0x20) {
+          if (cc !== 0x0a) break; // CR / other C0 controls → slow path
+          newlines++;
+          lastNewline = p;
+        }
+        p++;
+      }
+      if (p > this.pos) {
+        out += this.input.slice(this.pos, p);
+        if (newlines > 0) {
+          this.line += newlines;
+          this.col = p - lastNewline;
+        } else {
+          this.col += p - this.pos;
+        }
+        this.pos = p;
+        continue;
+      }
+
       const ch = this._ch();
 
       // Source-level CRLF normalisation: strip bare CR
@@ -901,10 +989,11 @@ export class Tokenizer {
         elided = true;
         continue;
       }
-      // Hex digit
-      if (/[0-9a-fA-F]/.test(ch)) {
-        hex += ch;
-        i++;
+      // Hex digits — consume the whole run at once
+      if (isHexDigitCode(raw.charCodeAt(i))) {
+        const runStart = i;
+        while (i < raw.length && isHexDigitCode(raw.charCodeAt(i))) i++;
+        hex += raw.slice(runStart, i);
         continue;
       }
       throw new SyntaxError(
@@ -950,8 +1039,15 @@ export class Tokenizer {
         while (i < raw.length && raw[i] !== '\n') i++;
         continue;
       }
-      out += ch;
-      i++;
+      // Run of data characters — consume in bulk up to the next terminator
+      const runStart = i;
+      while (i < raw.length) {
+        const d = raw[i];
+        if (d === '\n' || d === ' ' || d === '\r' || d === '\t' || d === '#')
+          break;
+        i++;
+      }
+      out += raw.slice(runStart, i);
     }
     return out;
   }
@@ -1000,7 +1096,27 @@ export class Tokenizer {
         }
         continue;
       }
-      raw += this._advance();
+      // Run of data characters — consume in bulk up to the next terminator.
+      // Newlines terminate the run, so a plain column update is safe.
+      const runStart = this.pos;
+      let p = this.pos;
+      const n = this.input.length;
+      while (p < n) {
+        const d = this.input[p];
+        if (
+          d === quote ||
+          d === '\n' ||
+          d === ' ' ||
+          d === '\r' ||
+          d === '\t' ||
+          d === '#'
+        )
+          break;
+        p++;
+      }
+      this.col += p - runStart;
+      this.pos = p;
+      raw += this.input.slice(runStart, p);
     }
     if (this._eof()) this._fail('unterminated byte string literal');
     this._advance(); // closing quote
@@ -1051,8 +1167,15 @@ export class Tokenizer {
         elided = true;
         continue;
       }
-      if (/[0-9a-fA-F]/.test(ch)) {
-        hex += this._advance();
+      if (isHexDigitCode(ch.charCodeAt(0))) {
+        // Run of hex digits — consume in bulk (digits contain no newlines)
+        const runStart = this.pos;
+        let p = this.pos;
+        const n = this.input.length;
+        while (p < n && isHexDigitCode(this.input.charCodeAt(p))) p++;
+        this.col += p - runStart;
+        this.pos = p;
+        hex += this.input.slice(runStart, p);
         continue;
       }
       this._fail(
@@ -1237,149 +1360,185 @@ export class Tokenizer {
     return { type: 'FLOAT', value, line, col };
   }
 
+  /** Advance past a run of hex digits.  Digits contain no newlines, so a
+   *  plain column update is safe. */
+  private _skipHexDigits(): void {
+    let p = this.pos;
+    const n = this.input.length;
+    while (p < n && isHexDigitCode(this.input.charCodeAt(p))) p++;
+    this.col += p - this.pos;
+    this.pos = p;
+  }
+
+  /** Advance past a run of decimal digits (same newline-free guarantee). */
+  private _skipDecimalDigits(): void {
+    let p = this.pos;
+    const n = this.input.length;
+    while (p < n) {
+      const c = this.input.charCodeAt(p);
+      if (c < 0x30 || c > 0x39) break;
+      p++;
+    }
+    this.col += p - this.pos;
+    this.pos = p;
+  }
+
+  /**
+   * Consume a trailing _0–_7/_i encoding-indicator suffix when present and
+   * not followed by another identifier character.
+   */
+  private _tryConsumeEncodingSuffix(): void {
+    if (this._ch() !== '_') return;
+    const d = this.input[this.pos + 1] ?? '';
+    const after = this.input[this.pos + 2] ?? '';
+    if (((d >= '0' && d <= '7') || d === 'i') && !/[0-9a-zA-Z_]/.test(after)) {
+      this._advance();
+      this._advance();
+    }
+  }
+
   private _readNumber(
     line: number,
     col: number
   ): Omit<Token, 'raw' | 'offset' | 'endOffset'> {
-    let raw = '';
-    if (this._ch() === '-') raw += this._advance();
+    // The token value is the raw consumed text; it is collected with a single
+    // slice at the end instead of per-character string concatenation.
+    const start = this.pos;
+    const consumed = () => this.input.slice(start, this.pos);
+    if (this._ch() === '-') this._advance();
 
     // Alternative bases: 0x 0o 0b
     if (this._ch() === '0') {
       const next = this.input[this.pos + 1] ?? '';
       if (next === 'x' || next === 'X') {
-        raw += this._advance() + this._advance(); // '0x'
-        const hexDigitsBefore = raw.length;
-        while (!this._eof() && /[0-9a-fA-F]/.test(this._ch()))
-          raw += this._advance();
-        const hasIntDigits = raw.length > hexDigitsBefore;
+        this._advance();
+        this._advance(); // '0x'
+        const intStart = this.pos;
+        this._skipHexDigits();
+        const hasIntDigits = this.pos > intStart;
         // Hex float: optional '.[hex]' fractional part followed by 'p'/'P' exponent
         let isHexFloat = false;
         let hasFracDigits = false;
         if (!this._eof() && this._ch() === '.') {
           isHexFloat = true;
-          raw += this._advance();
-          const fracStart = raw.length;
-          while (!this._eof() && /[0-9a-fA-F]/.test(this._ch()))
-            raw += this._advance();
-          hasFracDigits = raw.length > fracStart;
+          this._advance();
+          const fracStart = this.pos;
+          this._skipHexDigits();
+          hasFracDigits = this.pos > fracStart;
         }
         if (!this._eof() && (this._ch() === 'p' || this._ch() === 'P')) {
           isHexFloat = true;
           // Validate mantissa: need at least one hex digit before or after dot
           if (!hasIntDigits && !hasFracDigits)
-            this._fail(`hex float has no mantissa digits: ${raw}`, line, col);
-          raw += this._advance();
+            this._fail(
+              `hex float has no mantissa digits: ${consumed()}`,
+              line,
+              col
+            );
+          this._advance();
           if (!this._eof() && (this._ch() === '+' || this._ch() === '-'))
-            raw += this._advance();
-          const expStart = raw.length;
-          while (!this._eof() && this._ch() >= '0' && this._ch() <= '9')
-            raw += this._advance();
+            this._advance();
+          const expStart = this.pos;
+          this._skipDecimalDigits();
           // Validate exponent: at least one decimal digit required
-          if (raw.length === expStart)
-            this._fail(`hex float missing exponent digits: ${raw}`, line, col);
+          if (this.pos === expStart)
+            this._fail(
+              `hex float missing exponent digits: ${consumed()}`,
+              line,
+              col
+            );
         } else if (isHexFloat) {
           // Had a dot but no 'p' — missing exponent
-          this._fail(`hex float missing 'p' exponent: ${raw}`, line, col);
+          this._fail(
+            `hex float missing 'p' exponent: ${consumed()}`,
+            line,
+            col
+          );
         }
         if (isHexFloat) {
           // Encoding-indicator suffix _0/_1/_2/_3/_4/_5/_6/_7/_i for hex floats
-          if (this._ch() === '_') {
-            const d = this.input[this.pos + 1] ?? '';
-            const after = this.input[this.pos + 2] ?? '';
-            if (
-              (d === '0' ||
-                d === '1' ||
-                d === '2' ||
-                d === '3' ||
-                d === '4' ||
-                d === '5' ||
-                d === '6' ||
-                d === '7' ||
-                d === 'i') &&
-              !/[0-9a-zA-Z_]/.test(after)
-            ) {
-              raw += this._advance() + this._advance();
-            }
-          }
-          return { type: 'FLOAT', value: raw, line, col };
+          this._tryConsumeEncodingSuffix();
+          return { type: 'FLOAT', value: consumed(), line, col };
         }
-        return { type: 'INTEGER', value: raw, line, col };
+        return { type: 'INTEGER', value: consumed(), line, col };
       }
       if (next === 'o' || next === 'O') {
-        raw += this._advance() + this._advance();
+        this._advance();
+        this._advance();
         while (!this._eof() && this._ch() >= '0' && this._ch() <= '7')
-          raw += this._advance();
-        return { type: 'INTEGER', value: raw, line, col };
+          this._advance();
+        return { type: 'INTEGER', value: consumed(), line, col };
       }
       if (next === 'b' || next === 'B') {
-        raw += this._advance() + this._advance();
+        this._advance();
+        this._advance();
         while (!this._eof() && (this._ch() === '0' || this._ch() === '1'))
-          raw += this._advance();
-        return { type: 'INTEGER', value: raw, line, col };
+          this._advance();
+        return { type: 'INTEGER', value: consumed(), line, col };
       }
     }
 
     // Decimal digits
-    while (!this._eof() && this._ch() >= '0' && this._ch() <= '9')
-      raw += this._advance();
+    this._skipDecimalDigits();
 
     let isFloat = false;
     if (!this._eof() && this._ch() === '.') {
       isFloat = true;
-      raw += this._advance();
-      while (!this._eof() && this._ch() >= '0' && this._ch() <= '9')
-        raw += this._advance();
+      this._advance();
+      this._skipDecimalDigits();
     }
     if (!this._eof() && (this._ch() === 'e' || this._ch() === 'E')) {
       isFloat = true;
-      raw += this._advance();
+      this._advance();
       if (!this._eof() && (this._ch() === '+' || this._ch() === '-'))
-        raw += this._advance();
-      const expStart = raw.length;
-      while (!this._eof() && this._ch() >= '0' && this._ch() <= '9')
-        raw += this._advance();
-      if (raw.length === expStart)
+        this._advance();
+      const expStart = this.pos;
+      this._skipDecimalDigits();
+      if (this.pos === expStart)
         this._fail(
-          `float exponent has no digits: ${JSON.stringify(raw)}`,
+          `float exponent has no digits: ${JSON.stringify(consumed())}`,
           line,
           col
         );
     }
 
-    // Encoding-indicator suffix _0–_7 / _i (no whitespace, not followed by more ident chars)
-    if (this._ch() === '_') {
-      const d = this.input[this.pos + 1] ?? '';
-      const after = this.input[this.pos + 2] ?? '';
-      if (
-        (d === '0' ||
-          d === '1' ||
-          d === '2' ||
-          d === '3' ||
-          d === '4' ||
-          d === '5' ||
-          d === '6' ||
-          d === '7' ||
-          d === 'i') &&
-        !/[0-9a-zA-Z_]/.test(after)
-      ) {
-        // Include the suffix in the raw value.
-        // isFloat is NOT set here — a float is only a float when it contains
-        // '.' or 'e'/'E'.  The parser extracts encoding width from the suffix.
-        raw += this._advance() + this._advance();
-      }
-    }
+    // Encoding-indicator suffix _0–_7 / _i (no whitespace, not followed by
+    // more ident chars).  The suffix is included in the token value.
+    // isFloat is NOT set here — a float is only a float when it contains
+    // '.' or 'e'/'E'.  The parser extracts encoding width from the suffix.
+    this._tryConsumeEncodingSuffix();
 
-    return { type: isFloat ? 'FLOAT' : 'INTEGER', value: raw, line, col };
+    return {
+      type: isFloat ? 'FLOAT' : 'INTEGER',
+      value: consumed(),
+      line,
+      col,
+    };
   }
 
   private _readIdent(
     line: number,
     col: number
   ): Omit<Token, 'raw' | 'offset' | 'endOffset'> {
-    let ident = '';
-    while (!this._eof() && /[a-zA-Z0-9_]/.test(this._ch()))
-      ident += this._advance();
+    // Idents contain no newlines, so a plain column update is safe.
+    const identStart = this.pos;
+    {
+      let p = this.pos;
+      const n = this.input.length;
+      while (p < n) {
+        const cc = this.input.charCodeAt(p);
+        const isIdentChar =
+          (cc >= 0x61 && cc <= 0x7a) || // a-z
+          (cc >= 0x41 && cc <= 0x5a) || // A-Z
+          (cc >= 0x30 && cc <= 0x39) || // 0-9
+          cc === 0x5f; // _
+        if (!isIdentChar) break;
+        p++;
+      }
+      this.col += p - this.pos;
+      this.pos = p;
+    }
+    let ident = this.input.slice(identStart, this.pos);
 
     // Known keywords — checked first so they are never shadowed by app-strings.
     switch (ident) {
@@ -1459,6 +1618,7 @@ export class Tokenizer {
       if (restValid) {
         // Extend the prefix with any remaining lcldh / ucldh chars.
         // The main loop stops at '-', so we need to consume hyphen-segments here.
+        const extStart = this.pos;
         while (!this._eof()) {
           const ch = this._ch();
           const validCh = isLower
@@ -1467,7 +1627,11 @@ export class Tokenizer {
               (ch >= '0' && ch <= '9') ||
               ch === '-';
           if (!validCh) break;
-          ident += this._advance();
+          this.pos++;
+        }
+        if (this.pos > extStart) {
+          this.col += this.pos - extStart;
+          ident += this.input.slice(extStart, this.pos);
         }
 
         const q = this._ch();
