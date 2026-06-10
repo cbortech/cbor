@@ -208,6 +208,13 @@ describe('parseCDN — floats', () => {
   test('-Infinity_0 → SyntaxError (_0 is not valid for floats)', () => {
     expect(() => parseCDN('-Infinity_0')).toThrow(SyntaxError);
   });
+  test('+Infinity_0 → SyntaxError (_0 is not valid for floats)', () => {
+    expect(() => parseCDN('+Infinity_0')).toThrow(SyntaxError);
+  });
+  test('+Infinity_7 → SyntaxError mentioning indefinite-length (same as -Infinity_7)', () => {
+    expect(() => parseCDN('+Infinity_7')).toThrow(/indefinite/);
+    expect(() => parseCDN('-Infinity_7')).toThrow(/indefinite/);
+  });
 
   // ── hex float literals ────────────────────────────────────────────────────
 
@@ -2648,6 +2655,17 @@ describe('strict mode', () => {
     test('Infinity_7: warns and returns Infinity', () => {
       const warnings: ParseWarning[] = [];
       const result = parseCDN('Infinity_7', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborFloat);
+      expect((result as CborFloat).value).toBe(Infinity);
+      expect(warnings[0].message).toMatch(/indefinite/);
+    });
+
+    test('+Infinity_7: warns and returns Infinity (same as -Infinity_7)', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('+Infinity_7', {
         strict: false,
         onWarning: (w) => warnings.push(w),
       });

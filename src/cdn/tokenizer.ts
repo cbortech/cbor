@@ -1125,24 +1125,11 @@ export class Tokenizer {
         }
         this._fail(`unexpected character '>'`, line, col);
       case '+': {
-        const rest1 = this.input.slice(this.pos + 1);
         // +Infinity[_N]
-        if (rest1.startsWith('Infinity')) {
-          const after = rest1[8] ?? '';
-          const hasSuffix =
-            after === '_' &&
-            /[0-3i]/.test(rest1[9] ?? '') &&
-            !/[a-zA-Z0-9_]/.test(rest1[10] ?? '');
-          if (!/[a-zA-Z0-9_]/.test(after) || hasSuffix) {
-            this._advance(); // +
-            for (let i = 0; i < 8; i++) this._advance(); // Infinity
-            let value = 'Infinity';
-            if (hasSuffix) value += this._advance() + this._advance(); // _N
-            return { type: 'FLOAT', value, line, col };
-          }
-        }
+        const posInf = this._readSignedInfinity('+', line, col);
+        if (posInf !== null) return posInf;
         // Numeric literal with explicit positive sign
-        const afterPlus = rest1[0] ?? '';
+        const afterPlus = this.input[this.pos + 1] ?? '';
         if ((afterPlus >= '0' && afterPlus <= '9') || afterPlus === '.') {
           this._advance(); // consume '+'
           return this._readNumber(line, col);
@@ -1189,41 +1176,8 @@ export class Tokenizer {
 
     // -Infinity (check before generic '-' handling)
     if (c === '-') {
-      const rest = this.input.slice(this.pos + 1);
-      if (rest.startsWith('Infinity')) {
-        const after = rest[8] ?? '';
-        const hasSuffix =
-          after === '_' &&
-          /[0-7i]/.test(rest[9] ?? '') &&
-          !/[a-zA-Z0-9_]/.test(rest[10] ?? '');
-        if (!/[a-zA-Z0-9_]/.test(after) || hasSuffix) {
-          this._advance(); // -
-          for (let i = 0; i < 8; i++) this._advance(); // Infinity
-          let value = '-Infinity';
-          if (hasSuffix) value += this._advance() + this._advance(); // _N
-          return { type: 'FLOAT', value, line, col };
-        }
-      }
-      return this._readNumber(line, col);
-    }
-
-    if (c === '+') {
-      const rest = this.input.slice(this.pos + 1);
-      if (rest.startsWith('Infinity')) {
-        const after = rest[8] ?? '';
-        const hasSuffix =
-          after === '_' &&
-          /[0-7i]/.test(rest[9] ?? '') &&
-          !/[a-zA-Z0-9_]/.test(rest[10] ?? '');
-        if (!/[a-zA-Z0-9_]/.test(after) || hasSuffix) {
-          this._advance(); // +
-          for (let i = 0; i < 8; i++) this._advance(); // Infinity
-          let value = 'Infinity';
-          if (hasSuffix) value += this._advance() + this._advance(); // _N
-          return { type: 'FLOAT', value, line, col };
-        }
-      }
-      this._advance(); // consume '+' (positive sign is a no-op)
+      const negInf = this._readSignedInfinity('-', line, col);
+      if (negInf !== null) return negInf;
       return this._readNumber(line, col);
     }
 
@@ -1249,6 +1203,38 @@ export class Tokenizer {
     }
 
     this._fail(`unexpected character ${JSON.stringify(c)}`, line, col);
+  }
+
+  /**
+   * Try to read `Infinity[_N]` immediately after a `+`/`-` sign at this.pos.
+   *
+   * Returns null when the input is not an Infinity literal (e.g. an identifier
+   * like `Infinityx` that merely starts with "Infinity"); the caller then
+   * falls back to its sign handling.
+   *
+   * All encoding-indicator suffixes _0–_7/_i are tokenized here; the parser
+   * validates them and rejects/warns on the invalid ones (_0, _4–_7, _i).
+   *
+   * Uses startsWith with a position argument instead of slicing the remainder
+   * of the input, which would allocate a substring for every sign token.
+   */
+  private _readSignedInfinity(
+    sign: '+' | '-',
+    line: number,
+    col: number
+  ): Omit<Token, 'raw' | 'offset' | 'endOffset'> | null {
+    if (!this.input.startsWith('Infinity', this.pos + 1)) return null;
+    const after = this.input[this.pos + 9] ?? '';
+    const hasSuffix =
+      after === '_' &&
+      /[0-7i]/.test(this.input[this.pos + 10] ?? '') &&
+      !/[a-zA-Z0-9_]/.test(this.input[this.pos + 11] ?? '');
+    if (/[a-zA-Z0-9_]/.test(after) && !hasSuffix) return null;
+    this._advance(); // sign
+    for (let i = 0; i < 8; i++) this._advance(); // Infinity
+    let value = sign === '-' ? '-Infinity' : 'Infinity';
+    if (hasSuffix) value += this._advance() + this._advance(); // _N
+    return { type: 'FLOAT', value, line, col };
   }
 
   private _readNumber(
