@@ -101,6 +101,9 @@ function isHexDigitCode(c: number): boolean {
   );
 }
 
+/** Shared encoder — constructing TextEncoder per token is needlessly slow. */
+const textEncoder = new TextEncoder();
+
 export class Tokenizer {
   private pos: number;
   private line: number;
@@ -1289,7 +1292,7 @@ export class Tokenizer {
         }
         // 'text' → UTF-8 encoded byte string (major type 2)
         const strVal = this._readStringContent("'");
-        const utf8 = new TextEncoder().encode(strVal);
+        const utf8 = textEncoder.encode(strVal);
         const hex = Array.from(utf8, (b) =>
           b.toString(16).padStart(2, '0')
         ).join('');

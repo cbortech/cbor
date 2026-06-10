@@ -32,6 +32,12 @@ import { CborAppSeqResult } from '../ast/CborAppSeqResult';
 import { CborEllipsis } from '../ast/CborEllipsis';
 import { CborBigUint, CborBigNint } from '../ast/CborBignum';
 
+// Shared codec instances — constructing TextEncoder/TextDecoder per call is
+// measurably expensive in hot parsing paths.
+const textEncoder = new TextEncoder();
+const utf8Strict = new TextDecoder('utf-8', { fatal: true });
+const utf8Lenient = new TextDecoder('utf-8', { fatal: false });
+
 // ─── Public entry point ───────────────────────────────────────────────────────
 
 /**
@@ -671,8 +677,9 @@ class CDNParser {
 
     // Fast path: no concatenation
     if (this.t.peek().type !== 'PLUS') {
-      const byteLen = BigInt(new TextEncoder().encode(tok.value).length);
-      const ew = this.consumeEncodingIndicator(byteLen);
+      const ew = this.consumeEncodingIndicator(() =>
+        BigInt(textEncoder.encode(tok.value).length)
+      );
       return new CborTextString(
         tok.value,
         ew !== undefined ? { encodingWidth: ew } : undefined
@@ -711,8 +718,9 @@ class CDNParser {
     if (!hasEllipsis) {
       // No ellipsis — join all text fragments into a single CborTextString
       const joined = parts.map((p) => ('text' in p ? p.text : '')).join('');
-      const byteLen = BigInt(new TextEncoder().encode(joined).length);
-      const ew = this.consumeEncodingIndicator(byteLen);
+      const ew = this.consumeEncodingIndicator(() =>
+        BigInt(textEncoder.encode(joined).length)
+      );
       return new CborTextString(
         joined,
         ew !== undefined ? { encodingWidth: ew } : undefined
@@ -759,15 +767,14 @@ class CDNParser {
   }
 
   private _decodeUtf8(bytes: Uint8Array, tok: Token): string {
-    if (this._options.allowInvalidUtf8)
-      return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    if (this._options.allowInvalidUtf8) return utf8Lenient.decode(bytes);
     try {
-      return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      return utf8Strict.decode(bytes);
     } catch {
       const msg = 'byte string in text concatenation is not valid UTF-8';
       this._warn(msg, tok);
       if (this._options.strict !== false) this._fail(msg, tok);
-      return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+      return utf8Lenient.decode(bytes);
     }
   }
 
@@ -781,7 +788,7 @@ class CDNParser {
     firstSource: string
   ): CborByteString | CborEllipsis {
     if (this.t.peek().type !== 'PLUS') {
-      const ew = this.consumeEncodingIndicator(BigInt(first.length));
+      const ew = this.consumeEncodingIndicator(() => BigInt(first.length));
       const ednEncoding = this._tokenTypeToCdnEncoding(firstType);
       return new CborByteString(first, {
         ednEncoding,
@@ -828,7 +835,7 @@ class CDNParser {
           "use a byte string literal (h'...', b64'...', or '...') instead";
         this._warn(mixMsg, next);
         if (this._options.strict !== false) this._fail(mixMsg, next);
-        parts.push({ bytes: new TextEncoder().encode(next.value) });
+        parts.push({ bytes: textEncoder.encode(next.value) });
       } else {
         this._fail(
           `expected byte string after +, got ${JSON.stringify(next.value)}`,
@@ -842,7 +849,7 @@ class CDNParser {
         'bytes' in p ? p.bytes : new Uint8Array(0)
       );
       const concat = this._concatBytes(allBytes);
-      const ew = this.consumeEncodingIndicator(BigInt(concat.length));
+      const ew = this.consumeEncodingIndicator(() => BigInt(concat.length));
       return new CborByteString(
         concat,
         ew !== undefined ? { encodingWidth: ew } : undefined
@@ -1161,17 +1168,20 @@ class CDNParser {
 
   /**
    * Consume an ENCODING_INDICATOR token if present.
-   * Validates the indicator type (reserved/indefinite), and when `storedValue`
-   * is supplied also checks that the value fits in the requested encoding width.
+   * Validates the indicator type (reserved/indefinite), and when
+   * `getStoredValue` is supplied also checks that the value fits in the
+   * requested encoding width.  The stored value is computed lazily — only
+   * when an indicator is actually present — so callers can pass e.g. a
+   * UTF-8 byte-length computation without paying for it on every string.
    */
   private consumeEncodingIndicator(
-    storedValue?: bigint
+    getStoredValue?: () => bigint
   ): EncodingWidth | undefined {
     if (this.t.peek().type === 'ENCODING_INDICATOR') {
       const tok = this.t.consume();
       let ew = this._resolveEncodingWidth(tok.value, tok);
-      if (ew !== undefined && storedValue !== undefined) {
-        ew = this._validateEncodingFit(storedValue, ew, tok);
+      if (ew !== undefined && getStoredValue !== undefined) {
+        ew = this._validateEncodingFit(getStoredValue(), ew, tok);
       }
       return ew;
     }

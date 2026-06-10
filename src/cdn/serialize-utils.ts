@@ -239,10 +239,12 @@ export function serializeBytes(
   }
 }
 
+const _utf8Strict = new TextDecoder('utf-8', { fatal: true });
+
 /** Decode bytes as UTF-8; returns null if the bytes are not valid UTF-8. */
 function _tryDecodeUtf8(bytes: Uint8Array): string | null {
   try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return _utf8Strict.decode(bytes);
   } catch {
     return null;
   }
