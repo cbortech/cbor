@@ -330,6 +330,28 @@ function buildLineAt(source: string): (offset: number) => number {
   };
 }
 
+// ─── Missing-extension hints ──────────────────────────────────────────────────
+
+const bundledExtensionHint = (name: string): string =>
+  `import { ${name} } from '@cbortech/cbor' and pass it via the 'extensions' option (extensions: [${name}])`;
+const externalExtensionHint = (name: string, pkg: string): string =>
+  `install ${pkg}, import { ${name} } from '${pkg}', and pass it via the 'extensions' option (extensions: [${name}])`;
+
+/**
+ * App-string prefixes handled by known opt-in extensions, mapped to guidance
+ * on how to enable them. Used to emit a non-fatal hint when such a prefix is
+ * encountered without the corresponding extension registered.
+ */
+const MISSING_EXTENSION_HINTS: ReadonlyMap<string, string> = new Map([
+  ['b32', bundledExtensionHint('b32')],
+  ['h32', bundledExtensionHint('h32')],
+  ['float', bundledExtensionHint('float')],
+  ['same', bundledExtensionHint('same')],
+  ['hash', externalExtensionHint('hash', '@cbortech/hash-extension')],
+  ['uuid', externalExtensionHint('uuid', '@cbortech/uuid-extension')],
+  ['UUID', externalExtensionHint('uuid', '@cbortech/uuid-extension')],
+]);
+
 // ─── Parser ───────────────────────────────────────────────────────────────────
 
 class CDNParser {
@@ -342,6 +364,9 @@ class CDNParser {
 
   /** Warnings accumulated during the current parseValue() call. */
   private _pendingWarnings: ParseWarning[] = [];
+
+  /** Prefixes for which a missing-extension hint has already been emitted. */
+  private readonly _hintedPrefixes = new Set<string>();
 
   constructor(
     private readonly t: Tokenizer,
@@ -448,6 +473,7 @@ class CDNParser {
         this.t.consume();
         const ext = this.extByPrefix.get(tok.appPrefix!);
         if (!ext?.parseAppString) {
+          if (!ext) this._hintMissingExtension(tok.appPrefix!, tok);
           if (this.unresolvedExtension === 'cpa999')
             return new CborUnresolvedAppExt(tok.appPrefix!, [
               new CborTextString(tok.value),
@@ -505,6 +531,7 @@ class CDNParser {
         this.expect('GT_GT');
         const seqExt = this.extByPrefix.get(tok.appPrefix!);
         if (!seqExt) {
+          this._hintMissingExtension(tok.appPrefix!, tok);
           if (this.unresolvedExtension === 'cpa999')
             return new CborUnresolvedAppExt(tok.appPrefix!, items);
           this._fail(
@@ -1243,6 +1270,29 @@ class CDNParser {
       this._warn(msg, tok);
       if (this._options.strict !== false) this._fail(msg, tok);
     };
+  }
+
+  /**
+   * Emit a one-time, non-fatal hint when a known opt-in extension prefix
+   * (b32, h32, float, same, hash, uuid) is used without the corresponding
+   * extension registered. Never throws and does not attach node warnings;
+   * parsing continues with the usual unresolved-extension handling.
+   */
+  private _hintMissingExtension(prefix: string, tok: Token): void {
+    const hint = MISSING_EXTENSION_HINTS.get(prefix);
+    if (hint === undefined || this._hintedPrefixes.has(prefix)) return;
+    this._hintedPrefixes.add(prefix);
+    const message = `app-string prefix '${prefix}' requires an extension that is not enabled; ${hint}`;
+    if (this._options.onWarning) {
+      this._options.onWarning({
+        message,
+        offset: tok.offset,
+        line: tok.line,
+        column: tok.col,
+      });
+    } else if (!this._options.silent) {
+      console.warn(`CDN: ${message}`);
+    }
   }
 
   private _warn(msg: string, tok?: Token): void {
