@@ -1,8 +1,7 @@
 import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import { MT_SIMPLE, AI_2BYTE, AI_4BYTE, AI_8BYTE } from '../cbor/constants';
-import { autoSelectFloatPrecision } from '../cbor/encode';
-import { writeFloat16 } from '../utils/float16';
+import { autoSelectFloatPrecision, type CborWriter } from '../cbor/encode';
 import { floatValueToString, floatSuffix } from '../cdn/serialize-utils';
 import { floatToHexFloat } from '../utils/hexfloat';
 
@@ -38,27 +37,21 @@ export class CborFloat extends CborItem {
     this.precision = options?.precision;
   }
 
-  _toCBOR(_options?: ToCBOROptions): Uint8Array {
+  override _encodeTo(writer: CborWriter, _options?: ToCBOROptions): void {
     const precision = this.precision ?? autoSelectFloatPrecision(this.value);
     const initial = MT_SIMPLE << 5;
 
     if (precision === 'half') {
-      const buf = new Uint8Array(3);
-      buf[0] = initial | AI_2BYTE; // 0xf9
-      writeFloat16(new DataView(buf.buffer), 1, this.value, false);
-      return buf;
+      writer.writeByte(initial | AI_2BYTE); // 0xf9
+      writer.writeFloat16(this.value);
+    } else if (precision === 'single') {
+      writer.writeByte(initial | AI_4BYTE); // 0xfa
+      writer.writeFloat32(this.value);
+    } else {
+      // double
+      writer.writeByte(initial | AI_8BYTE); // 0xfb
+      writer.writeFloat64(this.value);
     }
-    if (precision === 'single') {
-      const buf = new Uint8Array(5);
-      buf[0] = initial | AI_4BYTE; // 0xfa
-      new DataView(buf.buffer).setFloat32(1, this.value, false);
-      return buf;
-    }
-    // double
-    const buf = new Uint8Array(9);
-    buf[0] = initial | AI_8BYTE; // 0xfb
-    new DataView(buf.buffer).setFloat64(1, this.value, false);
-    return buf;
   }
 
   _toCDN(options: ToCDNOptions | undefined, _depth: number): string {

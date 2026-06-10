@@ -10,6 +10,7 @@ import type {
 } from '../types';
 import { CBOR_OMIT } from '../types';
 import { convertCommentText } from '../cdn/serialize-utils';
+import { CborWriter } from '../cbor/encode';
 
 /** @internal One line of an annotated hex dump. */
 export interface AnnotatedLine {
@@ -65,7 +66,9 @@ export abstract class CborItem {
   /** Serialize this node to CBOR binary. */
   toCBOR(options?: ToCBOROptions): Uint8Array {
     const merged = this._defaults ? { ...this._defaults, ...options } : options;
-    return this._toCBOR(merged);
+    const writer = new CborWriter();
+    this._encode(writer, merged);
+    return writer.finish();
   }
 
   /** Serialize this node to a CDN text string. */
@@ -144,8 +147,52 @@ export abstract class CborItem {
 
   // ─── Internal abstract methods ───────────────────────────────────────────────
 
-  /** @internal Subclass CBOR encoding implementation. */
-  abstract _toCBOR(options?: ToCBOROptions): Uint8Array;
+  /**
+   * @internal
+   * Encode this node into `writer`, honoring `_toCBOR()` overrides.
+   *
+   * This is the entry point used by `toCBOR()` and by container nodes when
+   * recursing into children.  A subclass that overrides `_toCBOR()` (e.g. to
+   * emit a pre-computed bit pattern) is authoritative even when one of its
+   * built-in base classes implements `_encodeTo()`.
+   */
+  _encode(writer: CborWriter, options?: ToCBOROptions): void {
+    if (this._toCBOR !== CborItem.prototype._toCBOR) {
+      writer.writeBytes(this._toCBOR(options));
+      return;
+    }
+    this._encodeTo(writer, options);
+  }
+
+  /**
+   * @internal
+   * Write this node's CBOR encoding into `writer`.
+   *
+   * Built-in nodes override this so that an entire encode pass shares one
+   * growing buffer (no per-node Uint8Array allocations or re-copies).
+   * Container implementations must recurse via `child._encode()`, never
+   * `child._encodeTo()`, so that `_toCBOR()` overrides are honored.
+   */
+  _encodeTo(writer: CborWriter, options?: ToCBOROptions): void {
+    if (this._toCBOR === CborItem.prototype._toCBOR)
+      throw new TypeError(
+        'CborItem subclass must implement _encodeTo() or _toCBOR()'
+      );
+    writer.writeBytes(this._toCBOR(options));
+  }
+
+  /**
+   * @internal
+   * Subclass CBOR encoding implementation.
+   * The default builds the bytes via `_encodeTo()`; subclasses may instead
+   * override this method directly when producing a standalone byte array is
+   * more natural (e.g. emitting a pre-computed bit pattern).
+   */
+  _toCBOR(options?: ToCBOROptions): Uint8Array {
+    const writer = new CborWriter();
+    this._encodeTo(writer, options);
+    return writer.finish();
+  }
 
   /**
    * @internal
