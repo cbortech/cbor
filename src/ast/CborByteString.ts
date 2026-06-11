@@ -1,7 +1,11 @@
 import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import { MT_BYTES } from '../cbor/constants';
-import { writeHead, concat, type EncodingWidth } from '../cbor/encode';
+import {
+  writeHeadTo,
+  type CborWriter,
+  type EncodingWidth,
+} from '../cbor/encode';
 import { serializeBytes } from '../cdn/serialize-utils';
 
 /** CBOR Major Type 2 — definite-length byte string. */
@@ -28,11 +32,9 @@ export class CborByteString extends CborItem {
     this.ednSource = options?.ednSource;
   }
 
-  _toCBOR(_options?: ToCBOROptions): Uint8Array {
-    return concat([
-      writeHead(MT_BYTES, BigInt(this.value.length), this.encodingWidth),
-      this.value,
-    ]);
+  override _encodeTo(writer: CborWriter, _options?: ToCBOROptions): void {
+    writeHeadTo(writer, MT_BYTES, this.value.length, this.encodingWidth);
+    writer.writeBytes(this.value);
   }
 
   _toCDN(options: ToCDNOptions | undefined, _depth: number): string {

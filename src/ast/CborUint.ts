@@ -1,7 +1,11 @@
 import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import { MT_UINT } from '../cbor/constants';
-import { writeHead, type EncodingWidth } from '../cbor/encode';
+import {
+  writeHeadTo,
+  type CborWriter,
+  type EncodingWidth,
+} from '../cbor/encode';
 
 /** CBOR Major Type 0 — unsigned integer (0 … 2^64−1). */
 export class CborUint extends CborItem {
@@ -21,8 +25,8 @@ export class CborUint extends CborItem {
     this.encodingWidth = options?.encodingWidth;
   }
 
-  _toCBOR(_options?: ToCBOROptions): Uint8Array {
-    return writeHead(MT_UINT, this.value, this.encodingWidth);
+  override _encodeTo(writer: CborWriter, _options?: ToCBOROptions): void {
+    writeHeadTo(writer, MT_UINT, this.value, this.encodingWidth);
   }
 
   _toCDN(options: ToCDNOptions | undefined, _depth: number): string {

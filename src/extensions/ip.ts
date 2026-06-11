@@ -35,13 +35,14 @@ const PREFIX_IP_TAGGED = 'IP';
 const TAG_IPV4 = 52n;
 const TAG_IPV6 = 54n;
 
+const utf8Strict = new TextDecoder('utf-8', { fatal: true });
+
 function stringFromAppSequence(items: CborItem[]): string {
   if (items.length !== 1)
     throw new SyntaxError('ip<<...>>: expected exactly one item');
   const item = items[0];
   if (item instanceof CborTextString) return item.value;
-  if (item instanceof CborByteString)
-    return new TextDecoder('utf-8', { fatal: true }).decode(item.value);
+  if (item instanceof CborByteString) return utf8Strict.decode(item.value);
   throw new SyntaxError('ip<<...>>: expected a text string or byte string');
 }
 

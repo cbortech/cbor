@@ -70,13 +70,14 @@ export function epochToRfc3339(epochSeconds: number): string {
  * Extract a date-time string from a single-item app-sequence.
  * Accepts CborTextString (dt<<"...">> ) and CborByteString (dt<<'...'>> , UTF-8).
  */
+const utf8Strict = new TextDecoder('utf-8', { fatal: true });
+
 function stringFromAppSequence(items: CborItem[]): string {
   if (items.length !== 1)
     throw new SyntaxError('dt<<...>>: expected exactly one item');
   const item = items[0];
   if (item instanceof CborTextString) return item.value;
-  if (item instanceof CborByteString)
-    return new TextDecoder('utf-8', { fatal: true }).decode(item.value);
+  if (item instanceof CborByteString) return utf8Strict.decode(item.value);
   throw new SyntaxError('dt<<...>>: expected a text string or byte string');
 }
 

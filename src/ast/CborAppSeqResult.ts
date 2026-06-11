@@ -1,5 +1,6 @@
 import type { ToCDNOptions, ToCBOROptions, ToJSOptions } from '../types';
 import { CborItem } from './CborItem';
+import type { CborWriter } from '../cbor/encode';
 
 /**
  * Wraps a resolved app-sequence result and preserves the original EDN source
@@ -19,8 +20,8 @@ export class CborAppSeqResult extends CborItem {
     super();
   }
 
-  _toCBOR(options?: ToCBOROptions): Uint8Array {
-    return this.inner._toCBOR(options);
+  override _encodeTo(writer: CborWriter, options?: ToCBOROptions): void {
+    this.inner._encode(writer, options);
   }
 
   _toCDN(options: ToCDNOptions | undefined, depth: number): string {

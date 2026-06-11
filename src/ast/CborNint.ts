@@ -1,7 +1,11 @@
 import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import { MT_NINT } from '../cbor/constants';
-import { writeHead, type EncodingWidth } from '../cbor/encode';
+import {
+  writeHeadTo,
+  type CborWriter,
+  type EncodingWidth,
+} from '../cbor/encode';
 
 /**
  * CBOR Major Type 1 — negative integer (−2^64 … −1).
@@ -37,8 +41,8 @@ export class CborNint extends CborItem {
     return -1n - this.argument;
   }
 
-  _toCBOR(_options?: ToCBOROptions): Uint8Array {
-    return writeHead(MT_NINT, this.argument, this.encodingWidth);
+  override _encodeTo(writer: CborWriter, _options?: ToCBOROptions): void {
+    writeHeadTo(writer, MT_NINT, this.argument, this.encodingWidth);
   }
 
   _toCDN(options: ToCDNOptions | undefined, _depth: number): string {

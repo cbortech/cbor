@@ -1,4 +1,4 @@
-import type { FromCBOROptions, DecodeWarning } from '../types';
+import type { FromCBOROptions, DecodeWarning, CborExtension } from '../types';
 import type { CborItem } from '../ast/CborItem';
 import { BUILTIN_EXTENSIONS } from '../extensions/builtins';
 import { CborUint } from '../ast/CborUint';
@@ -91,21 +91,23 @@ function addWarning(node: CborItem, warning: DecodeWarning): void {
  * avoids the exponential character-escaping blowup that occurs when
  * pre-serialised JSON strings are embedded inside further JSON.stringify calls.
  */
+function bytesToHexFingerprint(bytes: Uint8Array): string {
+  let h = '';
+  for (const b of bytes) h += b.toString(16).padStart(2, '0');
+  return h;
+}
+
 function fingerprintKeyVal(key: CborItem): unknown {
   if (key instanceof CborUint) return ['u', String(key.value)];
   if (key instanceof CborNint) return ['n', String(key.value)];
   if (key instanceof CborTextString) return ['t', key.value];
   if (key instanceof CborIndefiniteTextString)
     return ['t', key.chunks.map((c) => c.value).join('')];
-  if (key instanceof CborByteString) {
-    let h = '';
-    for (const b of key.value) h += b.toString(16).padStart(2, '0');
-    return ['b', h];
-  }
+  if (key instanceof CborByteString)
+    return ['b', bytesToHexFingerprint(key.value)];
   if (key instanceof CborIndefiniteByteString) {
     let h = '';
-    for (const chunk of key.chunks)
-      for (const b of chunk.value) h += b.toString(16).padStart(2, '0');
+    for (const chunk of key.chunks) h += bytesToHexFingerprint(chunk.value);
     return ['b', h];
   }
   if (key instanceof CborFloat) {
@@ -118,18 +120,21 @@ function fingerprintKeyVal(key: CborItem): unknown {
   if (key instanceof CborSimple) return ['s', key.value];
   if (key instanceof CborArray) return ['A', key.items.map(fingerprintKeyVal)];
   if (key instanceof CborMap) {
-    // Sort by key fingerprint so that maps with the same entries in different
-    // insertion order fingerprint identically (RFC 8949 data model: unordered).
     const pairs = key.entries.map(([k, v]) => [
       fingerprintKeyVal(k),
       fingerprintKeyVal(v),
     ]);
-    pairs.sort((a, b) => {
-      const ak = JSON.stringify(a[0]);
-      const bk = JSON.stringify(b[0]);
-      return ak < bk ? -1 : ak > bk ? 1 : 0;
-    });
-    return ['M', pairs];
+    // 0/1 entries: nothing to sort — and skipping the stringify here keeps
+    // deeply-nested single-entry map chains linear instead of quadratic.
+    if (pairs.length <= 1) return ['M', pairs];
+    // Sort by key fingerprint so that maps with the same entries in different
+    // insertion order fingerprint identically (RFC 8949 data model: unordered).
+    // Decorate-sort-undecorate: stringify each key once, not per comparison.
+    const decorated = pairs.map(
+      (pair) => [JSON.stringify(pair[0]), pair] as const
+    );
+    decorated.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    return ['M', decorated.map((d) => d[1])];
   }
   if (key instanceof CborTag)
     return ['G', String(key.tag), fingerprintKeyVal(key.content)];
@@ -141,6 +146,31 @@ function fingerprintKeyVal(key: CborItem): unknown {
 }
 
 function fingerprintKey(key: CborItem): string {
+  // Fast paths for scalar keys (the overwhelmingly common case) — avoids a
+  // throwaway array + JSON.stringify per key.  JSON fingerprints always start
+  // with '[', so these single-letter prefixes cannot collide with them, and
+  // each fast-path prefix is distinct so they cannot collide with each other.
+  if (key instanceof CborUint) return 'u' + key.value;
+  if (key instanceof CborNint) return 'n' + key.value;
+  if (key instanceof CborTextString) return 't' + key.value;
+  if (key instanceof CborIndefiniteTextString) {
+    let s = 't';
+    for (const c of key.chunks) s += c.value;
+    return s;
+  }
+  if (key instanceof CborByteString)
+    return 'b' + bytesToHexFingerprint(key.value);
+  if (key instanceof CborIndefiniteByteString) {
+    let s = 'b';
+    for (const chunk of key.chunks) s += bytesToHexFingerprint(chunk.value);
+    return s;
+  }
+  if (key instanceof CborFloat) {
+    if (isNaN(key.value)) return 'fNaN';
+    if (Object.is(key.value, -0)) return 'f-0';
+    return 'f' + key.value;
+  }
+  if (key instanceof CborSimple) return 's' + key.value;
   return JSON.stringify(fingerprintKeyVal(key));
 }
 
@@ -187,13 +217,68 @@ function readArgument(
 
 type DecodeResult = { value: CborItem; nextOffset: number };
 
+/**
+ * Decode the chunks of an indefinite-length string (major type 2 or 3) up to
+ * and including the "break" code.  `what` is used in error messages and
+ * `isChunk` enforces that every chunk is a definite string of that type.
+ */
+function decodeIndefiniteChunks<T extends CborItem>(
+  view: DataView,
+  offset: number,
+  options: FromCBOROptions | undefined,
+  tagExts: readonly CborExtension[],
+  what: 'byte string' | 'text string',
+  isChunk: (item: CborItem) => item is T
+): { chunks: T[]; nextOffset: number } {
+  const chunks: T[] = [];
+  let pos = offset;
+  while (true) {
+    if (pos >= view.byteLength)
+      decodeError(`unexpected end of indefinite ${what}`);
+    if (view.getUint8(pos) === BREAK_CODE) {
+      pos++;
+      break;
+    }
+    const result = decodeItem(view, pos, options, tagExts);
+    if (!isChunk(result.value))
+      decodeError(`indefinite-length ${what} chunk must be a definite ${what}`);
+    chunks.push(result.value);
+    pos = result.nextOffset;
+  }
+  return { chunks, nextOffset: pos };
+}
+
+/**
+ * Record a duplicate-key strict violation if `key` was already seen.
+ * Mutates `seenKeys` and appends any non-strict-mode warning to `warnings`.
+ */
+function checkDuplicateKey(
+  key: CborItem,
+  seenKeys: Set<string>,
+  warnings: DecodeWarning[],
+  options: FromCBOROptions | undefined
+): void {
+  const fp = fingerprintKey(key);
+  if (seenKeys.has(fp)) {
+    warnings.push(
+      strictViolation(
+        `duplicate map key at offset ${key.start}`,
+        key.start!,
+        options
+      )
+    );
+  }
+  seenKeys.add(fp);
+}
+
 function decodeItem(
   view: DataView,
   offset: number,
-  options?: FromCBOROptions
+  options: FromCBOROptions | undefined,
+  tagExts: readonly CborExtension[]
 ): DecodeResult {
   const startOffset = offset;
-  const result = decodeItemInner(view, offset, options);
+  const result = decodeItemInner(view, offset, options, tagExts);
   result.value.start = startOffset;
   result.value.end = result.nextOffset;
   return result;
@@ -202,7 +287,8 @@ function decodeItem(
 function decodeItemInner(
   view: DataView,
   offset: number,
-  options?: FromCBOROptions
+  options: FromCBOROptions | undefined,
+  tagExts: readonly CborExtension[]
 ): DecodeResult {
   if (offset >= view.byteLength) decodeError('unexpected end of input');
 
@@ -227,25 +313,15 @@ function decodeItemInner(
     // ── Major Type 2: byte string ─────────────────────────────────────────────
     case MT_BYTES: {
       if (ai === AI_INDEFINITE) {
-        const chunks: CborByteString[] = [];
-        let pos = offset;
-        while (true) {
-          if (pos >= view.byteLength)
-            decodeError('unexpected end of indefinite byte string');
-          if (view.getUint8(pos) === BREAK_CODE) {
-            pos++;
-            break;
-          }
-          const result = decodeItem(view, pos, options);
-          if (!(result.value instanceof CborByteString)) {
-            decodeError(
-              'indefinite-length byte string chunk must be a definite byte string'
-            );
-          }
-          chunks.push(result.value);
-          pos = result.nextOffset;
-        }
-        return { value: new CborIndefiniteByteString(chunks), nextOffset: pos };
+        const { chunks, nextOffset } = decodeIndefiniteChunks(
+          view,
+          offset,
+          options,
+          tagExts,
+          'byte string',
+          (item): item is CborByteString => item instanceof CborByteString
+        );
+        return { value: new CborIndefiniteByteString(chunks), nextOffset };
       }
       const { value: len, nextOffset: dataOffset } = readArgument(
         view,
@@ -269,25 +345,15 @@ function decodeItemInner(
     // ── Major Type 3: text string ─────────────────────────────────────────────
     case MT_TEXT: {
       if (ai === AI_INDEFINITE) {
-        const chunks: CborTextString[] = [];
-        let pos = offset;
-        while (true) {
-          if (pos >= view.byteLength)
-            decodeError('unexpected end of indefinite text string');
-          if (view.getUint8(pos) === BREAK_CODE) {
-            pos++;
-            break;
-          }
-          const result = decodeItem(view, pos, options);
-          if (!(result.value instanceof CborTextString)) {
-            decodeError(
-              'indefinite-length text string chunk must be a definite text string'
-            );
-          }
-          chunks.push(result.value);
-          pos = result.nextOffset;
-        }
-        return { value: new CborIndefiniteTextString(chunks), nextOffset: pos };
+        const { chunks, nextOffset } = decodeIndefiniteChunks(
+          view,
+          offset,
+          options,
+          tagExts,
+          'text string',
+          (item): item is CborTextString => item instanceof CborTextString
+        );
+        return { value: new CborIndefiniteTextString(chunks), nextOffset };
       }
       const { value: len, nextOffset: dataOffset } = readArgument(
         view,
@@ -332,7 +398,7 @@ function decodeItemInner(
             pos++;
             break;
           }
-          const result = decodeItem(view, pos, options);
+          const result = decodeItem(view, pos, options, tagExts);
           items.push(result.value);
           pos = result.nextOffset;
         }
@@ -350,7 +416,7 @@ function decodeItemInner(
       const items: CborItem[] = [];
       let pos = itemsStart;
       for (let i = 0; i < length; i++) {
-        const result = decodeItem(view, pos, options);
+        const result = decodeItem(view, pos, options, tagExts);
         items.push(result.value);
         pos = result.nextOffset;
       }
@@ -371,20 +437,15 @@ function decodeItemInner(
             pos++;
             break;
           }
-          const keyResult = decodeItem(view, pos, options);
-          const keyHex = fingerprintKey(keyResult.value);
-          if (seenKeysIndef.has(keyHex)) {
-            indefMapWarnings.push(
-              strictViolation(
-                `duplicate map key at offset ${keyResult.value.start}`,
-                keyResult.value.start!,
-                options
-              )
-            );
-          }
-          seenKeysIndef.add(keyHex);
+          const keyResult = decodeItem(view, pos, options, tagExts);
+          checkDuplicateKey(
+            keyResult.value,
+            seenKeysIndef,
+            indefMapWarnings,
+            options
+          );
           pos = keyResult.nextOffset;
-          const valResult = decodeItem(view, pos, options);
+          const valResult = decodeItem(view, pos, options, tagExts);
           pos = valResult.nextOffset;
           entries.push([keyResult.value, valResult.value]);
         }
@@ -403,20 +464,10 @@ function decodeItemInner(
       const mapWarnings: DecodeWarning[] = [];
       let pos = entriesStart;
       for (let i = 0; i < length; i++) {
-        const keyResult = decodeItem(view, pos, options);
-        const keyHex = fingerprintKey(keyResult.value);
-        if (seenKeys.has(keyHex)) {
-          mapWarnings.push(
-            strictViolation(
-              `duplicate map key at offset ${keyResult.value.start}`,
-              keyResult.value.start!,
-              options
-            )
-          );
-        }
-        seenKeys.add(keyHex);
+        const keyResult = decodeItem(view, pos, options, tagExts);
+        checkDuplicateKey(keyResult.value, seenKeys, mapWarnings, options);
         pos = keyResult.nextOffset;
-        const valResult = decodeItem(view, pos, options);
+        const valResult = decodeItem(view, pos, options, tagExts);
         pos = valResult.nextOffset;
         entries.push([keyResult.value, valResult.value]);
       }
@@ -434,16 +485,11 @@ function decodeItemInner(
         offset,
         ai
       );
-      const contentResult = decodeItem(view, contentStart, options);
-      for (const ext of [
-        ...(options?.extensions ?? []),
-        ...BUILTIN_EXTENSIONS,
-      ]) {
-        if (ext.parseTag) {
-          const result = ext.parseTag(tagNum, contentResult.value, options);
-          if (result !== undefined)
-            return { value: result, nextOffset: contentResult.nextOffset };
-        }
+      const contentResult = decodeItem(view, contentStart, options, tagExts);
+      for (const ext of tagExts) {
+        const result = ext.parseTag!(tagNum, contentResult.value, options);
+        if (result !== undefined)
+          return { value: result, nextOffset: contentResult.nextOffset };
       }
       return {
         value: new CborTag(tagNum, contentResult.value),
@@ -570,7 +616,13 @@ export function decodeCBOR(
       `CBOR decode offset must be an integer between 0 and ${view.byteLength}`
     );
   }
-  const { value, nextOffset } = decodeItem(view, offset, options);
+  // Build the tag-extension list once per decode call; the previous
+  // per-tag spread of user + builtin extensions showed up in profiles.
+  const tagExts = [
+    ...(options?.extensions ?? []),
+    ...BUILTIN_EXTENSIONS,
+  ].filter((ext) => ext.parseTag !== undefined);
+  const { value, nextOffset } = decodeItem(view, offset, options, tagExts);
   if (!options?.allowTrailing && nextOffset !== view.byteLength) {
     decodeError(
       `${view.byteLength - nextOffset} trailing byte(s) after end of CBOR item`

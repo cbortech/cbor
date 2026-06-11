@@ -3,7 +3,12 @@ import { CborItem } from './CborItem';
 import { Tag } from '../tag';
 import type { AnnotatedLine } from './CborItem';
 import { MT_TAG } from '../cbor/constants';
-import { writeHead, concat, type EncodingWidth } from '../cbor/encode';
+import {
+  writeHead,
+  writeHeadTo,
+  type CborWriter,
+  type EncodingWidth,
+} from '../cbor/encode';
 
 /** CBOR Major Type 6 — tagged data item. */
 export class CborTag extends CborItem {
@@ -24,11 +29,9 @@ export class CborTag extends CborItem {
     this.encodingWidth = options?.encodingWidth;
   }
 
-  _toCBOR(options?: ToCBOROptions): Uint8Array {
-    return concat([
-      writeHead(MT_TAG, this.tag, this.encodingWidth),
-      this.content._toCBOR(options),
-    ]);
+  override _encodeTo(writer: CborWriter, options?: ToCBOROptions): void {
+    writeHeadTo(writer, MT_TAG, this.tag, this.encodingWidth);
+    this.content._encode(writer, options);
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {

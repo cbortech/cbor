@@ -2,6 +2,7 @@ import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import { Simple } from '../simple';
 import { MT_SIMPLE, AI_1BYTE } from '../cbor/constants';
+import type { CborWriter } from '../cbor/encode';
 
 /**
  * CBOR Major Type 7 — simple value (0–255).
@@ -27,12 +28,15 @@ export class CborSimple extends CborItem {
   static readonly NULL = new CborSimple(22);
   static readonly UNDEFINED = new CborSimple(23);
 
-  _toCBOR(_options?: ToCBOROptions): Uint8Array {
+  override _encodeTo(writer: CborWriter, _options?: ToCBOROptions): void {
     // Values 0–23: encoded in the initial byte (MT7 | value)
-    if (this.value <= 23)
-      return new Uint8Array([(MT_SIMPLE << 5) | this.value]);
+    if (this.value <= 23) {
+      writer.writeByte((MT_SIMPLE << 5) | this.value);
+      return;
+    }
     // Values 24–255: MT7, AI_1BYTE, then one value byte
-    return new Uint8Array([(MT_SIMPLE << 5) | AI_1BYTE, this.value]);
+    writer.writeByte((MT_SIMPLE << 5) | AI_1BYTE);
+    writer.writeByte(this.value);
   }
 
   _toCDN(_options: ToCDNOptions | undefined, _depth: number): string {

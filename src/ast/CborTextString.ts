@@ -1,7 +1,11 @@
 import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import { MT_TEXT } from '../cbor/constants';
-import { writeHead, concat, type EncodingWidth } from '../cbor/encode';
+import {
+  writeHeadTo,
+  type CborWriter,
+  type EncodingWidth,
+} from '../cbor/encode';
 import { parseCDN } from '../cdn/parser';
 // Internal lexer reuse: parseCDN() validates embedded CDN first; this pass
 // only needs token offsets so string formatting can split without changing text.
@@ -23,12 +27,10 @@ export class CborTextString extends CborItem {
     this.encodingWidth = options?.encodingWidth;
   }
 
-  _toCBOR(_options?: ToCBOROptions): Uint8Array {
+  override _encodeTo(writer: CborWriter, _options?: ToCBOROptions): void {
     const encoded = textEncoder.encode(this.value);
-    return concat([
-      writeHead(MT_TEXT, BigInt(encoded.length), this.encodingWidth),
-      encoded,
-    ]);
+    writeHeadTo(writer, MT_TEXT, encoded.length, this.encodingWidth);
+    writer.writeBytes(encoded);
   }
 
   _toCDN(options: ToCDNOptions | undefined, depth: number): string {
