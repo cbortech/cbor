@@ -4,6 +4,7 @@
  */
 
 import type { CborComment, CborComments, ToCDNOptions } from '../types';
+import { bytesToHex as toHex } from '../utils/hex';
 
 // ─── Indent helpers ───────────────────────────────────────────────────────────
 
@@ -147,14 +148,6 @@ export function resolveSeparators(
 }
 
 // ─── Byte string encoding ─────────────────────────────────────────────────────
-
-function toHex(bytes: Uint8Array): string {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if (typeof (bytes as any).toHex === 'function')
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (bytes as any).toHex();
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const _hasNativeToBase64 =

@@ -27,19 +27,7 @@ import { CborFloat } from '../ast/CborFloat';
 import { CborByteString } from '../ast/CborByteString';
 import { float16BitsToFloat64 } from '../utils/float16';
 import { stripComments } from '../utils/strip-comments';
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const _fromHex =
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  typeof (Uint8Array as any).fromHex === 'function'
-    ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (h: string) => (Uint8Array as any).fromHex(h) as Uint8Array
-    : (h: string): Uint8Array => {
-        const out = new Uint8Array(h.length / 2);
-        for (let i = 0; i < h.length; i += 2)
-          out[i / 2] = parseInt(h.slice(i, i + 2), 16);
-        return out;
-      };
+import { hexToBytes } from '../utils/hex';
 
 // ── Bit-preserving CborFloat subclasses ───────────────────────────────────────
 // CborFloat stores a JS `number`, which loses NaN payloads.  These subclasses
@@ -115,7 +103,7 @@ export const float: CborExtension = {
       throw new SyntaxError(
         `float'...' hex content has odd length (${hex.length} digits)`
       );
-    return floatFromBytes(_fromHex(hex));
+    return floatFromBytes(hexToBytes(hex));
   },
 
   parseAppSequence(
