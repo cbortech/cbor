@@ -25,6 +25,7 @@ import { CborSimple } from '../ast/CborSimple';
 import { CborEmbeddedCBOR } from '../ast/CborEmbeddedCBOR';
 import { maxForEncodingWidth, type EncodingWidth } from '../cbor/encode';
 import { parseHexFloat } from '../utils/hexfloat';
+import { hexToBytes } from '../utils/hex';
 import { float64ToFloat16Bits, float16BitsToFloat64 } from '../utils/float16';
 import { BUILTIN_EXTENSIONS } from '../extensions/builtins';
 import { CborUnresolvedAppExt } from '../ast/CborUnresolvedAppExt';
@@ -128,19 +129,6 @@ function parseFloatToken(
     return { value: parseHexFloat(numStr), precision };
 
   return { value: parseFloat(numStr), precision };
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if (typeof (Uint8Array as any).fromHex === 'function')
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (Uint8Array as any).fromHex(hex);
-  if (hex.length % 2 !== 0)
-    throw new SyntaxError(`hex string has odd length: ${hex.length}`);
-  const out = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2)
-    out[i / 2] = parseInt(hex.slice(i, i + 2), 16);
-  return out;
 }
 
 function base64ToBytes(
