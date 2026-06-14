@@ -571,11 +571,35 @@ console.log(item.toCDN());
 // [1,2,3]
 ```
 
+## トークナイズ
+
+`@cbortech/cbor/cdn` サブパスからは、パーサが使用しているのと同じレキサーを
+利用できます。シンタックスハイライターなど、パース挙動と厳密に一致する必要が
+あるツール向けです。
+
+```ts
+import { tokenize, tokenizeLenient } from '@cbortech/cbor/cdn';
+
+const { tokens, comments } = tokenize('[1, "ab"] # note');
+// tokens: [{ type: 'LBRACKET', offset: 0, endOffset: 1, ... }, ...]
+
+const lenient = tokenizeLenient('[1, "ab');
+// 例外を投げません: 正常にスキャンできたトークンの後に、スキャン不能な
+// 末尾全体を覆う ERROR トークンが 1 つ付き、失敗内容は lenient.error に
+// 格納されます。
+```
+
+`fromCDN` / `parse` / `tokenize` が投げる構文エラーは `CdnSyntaxError`
+(`SyntaxError` のサブクラスで、メインエントリからも export されています)の
+インスタンスで、`offset`・`line`・`column`、判明している場合は `endOffset` を
+保持します。
+
 ## 公開 API
 
 ドキュメント化している公開 export は次のとおりです。
 
 - `CBOR`
+- `CdnSyntaxError`
 
 `CBOR` ファサードからは次にもアクセスできます。
 
@@ -584,6 +608,10 @@ console.log(item.toCDN());
 - `CBOR.MapEntries`
 - `CBOR.dt_as_Date`
 - `CBOR.OMIT`
+
+より低レベルの CDN トークナイズ API は `@cbortech/cbor/cdn`
+(`tokenize`, `tokenizeLenient`, `Token`, `TokenType`, `EdnComment`)に、
+AST ノードクラスは `@cbortech/cbor/ast` にあります。
 
 ## 準拠している仕様
 

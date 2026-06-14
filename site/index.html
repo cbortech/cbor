@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>@cbortech/cbor — CBOR ⇄ CDN playground</title>
+    <meta
+      name="description"
+      content="Convert between CBOR, CBOR Diagnostic Notation (CDN), and JavaScript values. Zero-dependency TypeScript library with a live playground."
+    />
+    <meta
+      property="og:title"
+      content="@cbortech/cbor — CBOR ⇄ CDN playground"
+    />
+    <meta
+      property="og:description"
+      content="Type CBOR Diagnostic Notation, get annotated CBOR bytes — and back. Powered by the zero-dependency @cbortech/cbor library."
+    />
+    <meta property="og:type" content="website" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="brand">
+        <span class="brand-name">@cbortech/cbor</span>
+        <span class="brand-tag">CBOR ⇄ CDN ⇄ JS</span>
+      </div>
+      <nav class="site-nav">
+        <a
+          href="https://github.com/cbortech/cbor"
+          target="_blank"
+          rel="noopener"
+          >GitHub</a
+        >
+        <a
+          href="https://www.npmjs.com/package/@cbortech/cbor"
+          target="_blank"
+          rel="noopener"
+          >npm</a
+        >
+        <button id="theme-toggle" class="icon-btn" title="Toggle theme">
+          ◐
+        </button>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <h1>Convert between CBOR, CDN, and JavaScript values</h1>
+      <p class="hero-sub">
+        A zero-dependency TypeScript library implementing
+        <a
+          href="https://www.rfc-editor.org/rfc/rfc8949"
+          target="_blank"
+          rel="noopener"
+          >RFC 8949 CBOR</a
+        >
+        and
+        <a
+          href="https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/"
+          target="_blank"
+          rel="noopener"
+          >CBOR Diagnostic Notation (CDN/EDN)</a
+        >
+        — encode, decode, parse, pretty-print, and round-trip with full
+        fidelity. Everything on this page runs in your browser using the library
+        itself.
+      </p>
+      <div class="hero-install">
+        <code id="install-cmd">npm install @cbortech/cbor</code>
+        <button id="copy-install" class="icon-btn" title="Copy">⧉</button>
+      </div>
+      <ul class="features">
+        <li>
+          <strong>Lossless round-trips</strong> — encoding widths, indefinite
+          lengths, duplicate map keys, and comments survive CDN ⇄ CBOR
+          conversion.
+        </li>
+        <li>
+          <strong>JSON-like API</strong> — <code>CBOR.parse</code> /
+          <code>CBOR.stringify</code> with reviver and replacer support.
+        </li>
+        <li>
+          <strong>AST access</strong> — inspect every data item with byte
+          ranges, warnings, and annotated hex dumps.
+        </li>
+        <li>
+          <strong>Extensible</strong> — app-string extensions like
+          <code>dt'…'</code>, <code>b32'…'</code>, and your own.
+        </li>
+      </ul>
+    </section>
+
+    <main class="playground">
+      <section class="pane pane-cdn" aria-label="CDN editor">
+        <div class="pane-toolbar">
+          <span class="pane-title">CDN</span>
+          <select id="samples" class="ctl" title="Load a sample">
+            <option value="" disabled selected>Samples…</option>
+          </select>
+          <span class="toolbar-spacer"></span>
+          <div class="format-group">
+            <button
+              id="format-btn"
+              class="ctl"
+              title="Pretty-print the CDN text"
+            >
+              Format
+            </button>
+            <button
+              id="format-opts-btn"
+              class="ctl"
+              title="Formatting options"
+              aria-expanded="false"
+            >
+              ⚙
+            </button>
+          </div>
+          <button id="copy-cdn" class="ctl" title="Copy CDN text">Copy</button>
+          <button id="share-btn" class="ctl" title="Copy a shareable link">
+            Share
+          </button>
+        </div>
+        <div id="format-popover" class="popover" hidden>
+          <label
+            >Indent
+            <select id="opt-indent">
+              <option value="2" selected>2 spaces</option>
+              <option value="4">4 spaces</option>
+              <option value="tab">Tab</option>
+              <option value="">Compact</option>
+            </select>
+          </label>
+          <label
+            >Commas
+            <select id="opt-commas">
+              <option value="comma" selected>Comma</option>
+              <option value="trailing">Trailing</option>
+              <option value="none">None</option>
+            </select>
+          </label>
+          <label
+            >Integers
+            <select id="opt-int">
+              <option value="decimal" selected>Decimal</option>
+              <option value="hex">Hex</option>
+              <option value="octal">Octal</option>
+              <option value="binary">Binary</option>
+            </select>
+          </label>
+          <label
+            >Floats
+            <select id="opt-float">
+              <option value="decimal" selected>Decimal</option>
+              <option value="hex">Hex (C99)</option>
+            </select>
+          </label>
+          <label
+            >Byte strings
+            <select id="opt-bstr">
+              <option value="hex" selected>Hex</option>
+              <option value="base64">Base64</option>
+              <option value="base64url">Base64url</option>
+            </select>
+          </label>
+          <label class="check">
+            <input type="checkbox" id="opt-comments" checked />
+            Keep comments
+          </label>
+        </div>
+        <div id="editor" class="editor-host"></div>
+      </section>
+
+      <section class="pane pane-bytes" aria-label="CBOR bytes">
+        <div class="pane-toolbar">
+          <span class="pane-title"
+            >CBOR <span id="byte-count" class="byte-count"></span
+          ></span>
+          <span class="toolbar-spacer"></span>
+          <div class="mode-tabs" role="tablist">
+            <button class="tab is-active" data-mode="annotated" role="tab">
+              Annotated
+            </button>
+            <button class="tab" data-mode="plain" role="tab">Hex</button>
+            <button class="tab" data-mode="js" role="tab">JS</button>
+            <button class="tab" data-mode="edit" role="tab">Edit</button>
+          </div>
+          <button id="copy-bytes" class="ctl" title="Copy hex bytes">
+            Copy
+          </button>
+        </div>
+        <div id="hexview" class="bytes-view" tabindex="0"></div>
+        <pre id="js-view" class="bytes-view" hidden></pre>
+        <div id="bytes-edit-wrap" class="bytes-view" hidden>
+          <p class="edit-hint">
+            Paste plain hex or an annotated hex dump — it is parsed as you type
+            and converted back to CDN.
+          </p>
+          <textarea
+            id="bytes-edit"
+            spellcheck="false"
+            placeholder="83 01 02 03"
+          ></textarea>
+        </div>
+        <div id="bytes-status" class="bytes-status" hidden></div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>
+        Built with
+        <a
+          href="https://github.com/cbortech/cbor"
+          target="_blank"
+          rel="noopener"
+          >@cbortech/cbor</a
+        >
+        — conversion, formatting, tokenization, and hex dumps on this page all
+        come from the library. Apache-2.0.
+      </p>
+    </footer>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

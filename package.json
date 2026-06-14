@@ -50,10 +50,23 @@
         "types": "./dist/ast/index.d.ts",
         "default": "./dist/ast/index.cjs"
       }
+    },
+    "./cdn": {
+      "import": {
+        "types": "./dist/cdn/index.d.ts",
+        "default": "./dist/cdn/index.js"
+      },
+      "require": {
+        "types": "./dist/cdn/index.d.ts",
+        "default": "./dist/cdn/index.cjs"
+      }
     }
   },
   "files": [
     "dist"
+  ],
+  "workspaces": [
+    "site"
   ],
   "sideEffects": false,
   "engines": {
@@ -81,7 +94,11 @@
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "site:dev": "npm run build && npm run --workspace site dev",
+    "site:build": "npm run build && npm run --workspace site build",
+    "site:preview": "npm run site:build && npm run --workspace site preview",
+    "site:deploy": "npm run site:build && npm run --workspace site deploy"
   },
   "devDependencies": {
     "@types/node": "^24.13.1",

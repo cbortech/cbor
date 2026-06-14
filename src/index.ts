@@ -16,6 +16,9 @@ export type {
   ToHexDumpOptions,
 } from './types';
 
+// Structured syntax error thrown by fromCDN/parse
+export { CdnSyntaxError } from './cdn/errors';
+
 // Tag annotation utilities
 export { CBOR_TAG, Null, Tag, Undefined } from './tag';
 

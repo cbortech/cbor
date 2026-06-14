@@ -578,11 +578,33 @@ console.log(item.toCDN());
 // [1,2,3]
 ```
 
+## Tokenization
+
+The `@cbortech/cbor/cdn` subpath exposes the same lexer the parser uses, for
+tooling such as syntax highlighters that must stay in exact agreement with
+parsing behavior:
+
+```ts
+import { tokenize, tokenizeLenient } from '@cbortech/cbor/cdn';
+
+const { tokens, comments } = tokenize('[1, "ab"] # note');
+// tokens: [{ type: 'LBRACKET', offset: 0, endOffset: 1, ... }, ...]
+
+const lenient = tokenizeLenient('[1, "ab');
+// Never throws: clean tokens, then one ERROR token covering the
+// unscannable tail, plus the failure in lenient.error.
+```
+
+Syntax errors thrown by `fromCDN`/`parse`/`tokenize` are `CdnSyntaxError`
+instances (a `SyntaxError` subclass, also exported from the main entry) and
+carry `offset`, `line`, `column`, and — where known — `endOffset`.
+
 ## Public API
 
-The documented public export is:
+The documented public exports are:
 
 - `CBOR`
+- `CdnSyntaxError`
 
 The `CBOR` facade also exposes:
 
@@ -591,6 +613,10 @@ The `CBOR` facade also exposes:
 - `CBOR.MapEntries`
 - `CBOR.dt_as_Date`
 - `CBOR.OMIT`
+
+Lower-level CDN tokenization lives in `@cbortech/cbor/cdn`
+(`tokenize`, `tokenizeLenient`, `Token`, `TokenType`, `EdnComment`),
+and AST node classes in `@cbortech/cbor/ast`.
 
 ## Specifications
 
