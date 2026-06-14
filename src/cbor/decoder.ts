@@ -504,10 +504,13 @@ function decodeItemInner(
         return { value: new CborSimple(ai), nextOffset: offset };
       }
       // ai 20–23: false / true / null / undefined
-      if (ai === 20) return { value: CborSimple.FALSE, nextOffset: offset };
-      if (ai === 21) return { value: CborSimple.TRUE, nextOffset: offset };
-      if (ai === 22) return { value: CborSimple.NULL, nextOffset: offset };
-      if (ai === 23) return { value: CborSimple.UNDEFINED, nextOffset: offset };
+      // Use new instances (not the static singletons) so that decodeItem() can
+      // safely set byte-offset properties without corrupting any concurrently
+      // live CDN AST that shares the same singleton.
+      if (ai === 20) return { value: new CborSimple(20), nextOffset: offset };
+      if (ai === 21) return { value: new CborSimple(21), nextOffset: offset };
+      if (ai === 22) return { value: new CborSimple(22), nextOffset: offset };
+      if (ai === 23) return { value: new CborSimple(23), nextOffset: offset };
 
       // ai 24: simple value in next byte (value must be >= 32)
       if (ai === AI_1BYTE) {

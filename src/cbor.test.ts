@@ -65,12 +65,14 @@ describe('CBOR.fromCBOR()', () => {
 
   test('decodes CborSimple.TRUE', () => {
     const node = CBOR.fromCBOR(hex('f5'));
-    expect(node).toBe(CborSimple.TRUE);
+    expect(node).toBeInstanceOf(CborSimple);
+    expect((node as CborSimple).value).toBe(21);
   });
 
   test('decodes CborSimple.NULL', () => {
     const node = CBOR.fromCBOR(hex('f6'));
-    expect(node).toBe(CborSimple.NULL);
+    expect(node).toBeInstanceOf(CborSimple);
+    expect((node as CborSimple).value).toBe(22);
   });
 
   test('supports offset and allowTrailing', () => {
@@ -116,9 +118,10 @@ describe('CBOR.fromCDN()', () => {
   });
 
   test('parses true/false/null', () => {
-    expect(CBOR.fromCDN('true')).toBe(CborSimple.TRUE);
-    expect(CBOR.fromCDN('false')).toBe(CborSimple.FALSE);
-    expect(CBOR.fromCDN('null')).toBe(CborSimple.NULL);
+    expect(CBOR.fromCDN('true')).toBeInstanceOf(CborSimple);
+    expect((CBOR.fromCDN('true') as CborSimple).value).toBe(21);
+    expect((CBOR.fromCDN('false') as CborSimple).value).toBe(20);
+    expect((CBOR.fromCDN('null') as CborSimple).value).toBe(22);
   });
 
   test('supports offset and allowTrailing', () => {

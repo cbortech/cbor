@@ -670,6 +670,14 @@ describe('toHexDump / CBOR.fromHexDump', () => {
     expect(toHex(CBOR.fromHexDump(dump).toCBOR())).toBe(toHex(ast.toCBOR()));
   });
 
+  test('fromHexDump accepts em-dash (—) line comments', () => {
+    const node = CBOR.fromHexDump(`83 — array(3)
+      01 — 1
+      02 — 2
+      03 — 3`);
+    expect(node.toCDN()).toBe('[1,2,3]');
+  });
+
   test('fromHexDump accepts // comments', () => {
     const node = CBOR.fromHexDump(`83 // array(3)
       01 // 1
@@ -698,6 +706,15 @@ describe('toHexDump / CBOR.fromHexDump', () => {
       /* 2 */ 02
       03 /* 3 */`);
     expect(node.toCDN()).toBe('[1,2,3]');
+  });
+
+  test('fromHexDump accepts continuous hex without spaces', () => {
+    expect(CBOR.fromHexDump('83010203').toCDN()).toBe('[1,2,3]');
+    expect(CBOR.fromHexDump('a1616101').toCDN()).toBe('{"a":1}');
+  });
+
+  test('fromHexDump accepts mixed spacing and continuous tokens', () => {
+    expect(CBOR.fromHexDump('83 01 0203').toCDN()).toBe('[1,2,3]');
   });
 
   test('fromHexDump rejects invalid token', () => {
