@@ -2,7 +2,12 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "cbor-site",
   "compatibility_date": "2026-06-01",
+  "main": "worker.js",
   "assets": {
     "directory": "./dist",
+    "binding": "ASSETS",
   },
+  "routes": [
+    { "pattern": "cbor.tech/*", "zone_name": "cbor.tech" },
+  ],
 }

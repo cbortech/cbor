@@ -1,6 +1,10 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  base: '/cbor/',
+  build: {
+    outDir: 'dist/cbor',
+  },
   optimizeDeps: {
     // These packages import from @cbortech/cbor/ast. Excluding them from
     // pre-bundling ensures all code shares the same CborByteString (etc.)

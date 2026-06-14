@@ -95,6 +95,7 @@
     "test:coverage": "vitest run --coverage",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "site:clean": "npm run --workspace site clean",
     "site:dev": "npm run build && npm run --workspace site dev",
     "site:build": "npm run build && npm run --workspace site build",
     "site:preview": "npm run site:build && npm run --workspace site preview",
