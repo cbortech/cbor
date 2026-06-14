@@ -7,7 +7,7 @@ export const SAMPLES: Sample[] = [
   {
     name: 'Hello CBOR',
     cdn: `{
-  # CBOR Diagnostic Notation — edit me!
+  # Concise Diagnostic Notation (CDN / CBOR-EDN) — edit me!
   "name": "CBOR",
   "spec": 8949,
   "binary": h'001122deadbeef',

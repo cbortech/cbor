@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
@@ -22,6 +23,6 @@
   "devDependencies": {
     "typescript": "^5.9.3",
     "vite": "^8.0.16",
-    "wrangler": "^4.0.0"
+    "wrangler": "^4.100.0"
   }
 }
