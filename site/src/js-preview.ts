@@ -12,10 +12,6 @@ function hex(bytes: Uint8Array): string {
 }
 
 export function inspectJS(value: unknown, depth = 0): string {
-  if (depth > 32) return '…';
-  const pad = IND.repeat(depth + 1);
-  const close = IND.repeat(depth);
-
   if (
     value !== null &&
     (typeof value === 'object' || typeof value === 'function')
@@ -23,15 +19,24 @@ export function inspectJS(value: unknown, depth = 0): string {
     const tag = Tag.get(value);
     if (tag !== undefined) {
       // Tagged primitives come back boxed; unbox for display.
+      // For non-primitives, inner === value (same tagged object), so we call
+      // _render directly to avoid re-checking the tag and looping infinitely.
       const inner =
         value instanceof Number ||
         value instanceof String ||
         value instanceof Boolean
           ? (value as { valueOf(): unknown }).valueOf()
           : value;
-      return `Tag(${tag}) ${inspectJS(inner, depth)}`;
+      return `Tag(${tag}) ${_render(inner, depth)}`;
     }
   }
+  return _render(value, depth);
+}
+
+function _render(value: unknown, depth: number): string {
+  if (depth > 32) return '…';
+  const pad = IND.repeat(depth + 1);
+  const close = IND.repeat(depth);
 
   if (value === undefined) return 'undefined';
   if (value === null) return 'null';

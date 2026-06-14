@@ -170,6 +170,7 @@
         <div id="editor" class="editor-host"></div>
       </section>
 
+      <div class="pane-divider" id="pane-divider" title="Drag to resize"></div>
       <section class="pane pane-bytes" aria-label="CBOR bytes">
         <div class="pane-toolbar">
           <span class="pane-title"
@@ -184,10 +185,22 @@
             <button class="tab" data-mode="js" role="tab">JS</button>
             <button class="tab" data-mode="edit" role="tab">Edit</button>
           </div>
+          <button id="import-btn" class="ctl" title="Open a .cbor file">
+            Import
+          </button>
+          <button id="export-btn" class="ctl" title="Save as .cbor file">
+            Export
+          </button>
           <button id="copy-bytes" class="ctl" title="Copy hex bytes">
             Copy
           </button>
         </div>
+        <input
+          type="file"
+          id="import-input"
+          accept=".cbor,application/cbor"
+          hidden
+        />
         <div id="hexview" class="bytes-view" tabindex="0"></div>
         <pre id="js-view" class="bytes-view" hidden></pre>
         <div id="bytes-edit-wrap" class="bytes-view" hidden>

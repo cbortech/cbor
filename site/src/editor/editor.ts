@@ -55,7 +55,7 @@ export function createEditor(
           if (update.docChanged)
             callbacks.onDocChanged(update.state.doc.toString());
           if (update.selectionSet)
-            callbacks.onCursorMoved(update.state.selection.main.head);
+            callbacks.onCursorMoved(update.state.selection.main.from);
         }),
       ],
     }),

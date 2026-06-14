@@ -267,11 +267,16 @@ export class CBOR {
     const uncommented = stripHexDumpComments(text);
     const tokens = uncommented.trim().split(/\s+/).filter(Boolean);
     for (const token of tokens) {
-      if (!/^[0-9A-Fa-f]{2}$/.test(token))
+      if (/^[0-9A-Fa-f]{2}$/.test(token)) {
+        bytes.push(parseInt(token, 16));
+      } else if (/^[0-9A-Fa-f]+$/.test(token) && token.length % 2 === 0) {
+        for (let i = 0; i < token.length; i += 2)
+          bytes.push(parseInt(token.slice(i, i + 2), 16));
+      } else {
         throw new SyntaxError(
           `Invalid hex token in dump: ${JSON.stringify(token)}`
         );
-      bytes.push(parseInt(token, 16));
+      }
     }
     return decodeCBOR(new Uint8Array(bytes), options);
   }
@@ -463,6 +468,12 @@ function stripHexDumpComments(text: string): string {
 
     if (ch === '-' && next === '-') {
       i = skipLineComment(text, i + 2);
+      out += ' ';
+      continue;
+    }
+
+    if (ch === '—') {
+      i = skipLineComment(text, i + 1);
       out += ' ';
       continue;
     }

@@ -70,12 +70,16 @@ function renderBytesPane(): void {
     const e = conversion.error;
     byteCountEl.textContent = '';
     setStatus('error', e instanceof Error ? e.message : String(e));
+    hexView.renderEmpty('');
+    jsViewEl.textContent = '';
+    if (document.activeElement !== editTextarea) editTextarea.value = '';
     return;
   }
   if (conversion.empty) {
     byteCountEl.textContent = '';
     hexView.renderEmpty('Type CDN on the left to see CBOR bytes.');
     jsViewEl.textContent = '';
+    if (document.activeElement !== editTextarea) editTextarea.value = '';
     setStatus(null);
     return;
   }
@@ -108,6 +112,7 @@ function renderBytesPane(): void {
 const update = (text: string): void => {
   conversion = convertCdn(text);
   renderBytesPane();
+  updateCopyBytesBtn();
 };
 
 const debouncedUpdate = debounce(update, 200);
@@ -128,13 +133,48 @@ const editor = createEditor(el('editor'), initialText, {
   onCursorMoved,
 });
 
+// ── Pane resize ──────────────────────────────────────────────────────────────
+
+const divider = el<HTMLDivElement>('pane-divider');
+const playgroundEl = divider.parentElement!;
+const cdnPane = playgroundEl.querySelector<HTMLElement>('.pane-cdn')!;
+const bytesPane = playgroundEl.querySelector<HTMLElement>('.pane-bytes')!;
+
+divider.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  divider.setPointerCapture(e.pointerId);
+  divider.classList.add('is-dragging');
+  const startX = e.clientX;
+  const startCdn = cdnPane.getBoundingClientRect().width;
+  const startBytes = bytesPane.getBoundingClientRect().width;
+  const total = startCdn + startBytes;
+
+  const onMove = (ev: PointerEvent) => {
+    const delta = ev.clientX - startX;
+    const newCdn = Math.max(200, Math.min(total - 200, startCdn + delta));
+    const ratio = newCdn / total;
+    cdnPane.style.flex = `${ratio} 1 0`;
+    bytesPane.style.flex = `${1 - ratio} 1 0`;
+  };
+  const onUp = () => {
+    divider.classList.remove('is-dragging');
+    divider.removeEventListener('pointermove', onMove);
+    divider.removeEventListener('pointerup', onUp);
+  };
+  divider.addEventListener('pointermove', onMove);
+  divider.addEventListener('pointerup', onUp);
+});
+
 // ── Bytes edit mode: hex / annotated dump → CDN ──────────────────────────────
 
 editTextarea.addEventListener(
   'input',
   debounce(() => {
     const text = editTextarea.value;
-    if (text.trim() === '') return;
+    if (text.trim() === '') {
+      setEditorText(editor, '');
+      return;
+    }
     try {
       setEditorText(editor, bytesToCdnText(text));
       setStatus(null);
@@ -164,6 +204,7 @@ initSamples((cdn) => setEditorText(editor, cdn));
 initModeTabs((next) => {
   mode = next;
   renderBytesPane();
+  updateCopyBytesBtn();
 });
 
 el('format-btn').addEventListener('click', () => {
@@ -183,12 +224,58 @@ el('copy-cdn').addEventListener('click', (e) => {
   );
 });
 
-el('copy-bytes').addEventListener('click', (e) => {
+// ── CBOR file import ─────────────────────────────────────────────────────────
+
+const importInput = el<HTMLInputElement>('import-input');
+
+el('import-btn').addEventListener('click', () => importInput.click());
+
+importInput.addEventListener('change', () => {
+  const file = importInput.files?.[0];
+  if (!file) return;
+  importInput.value = '';
+  file.arrayBuffer().then((buf) => {
+    try {
+      const cdn = CBOR.fromCBOR(new Uint8Array(buf)).toCDN({ indent: 2 });
+      setEditorText(editor, cdn);
+    } catch (e) {
+      setStatus('error', e instanceof Error ? e.message : String(e));
+    }
+  });
+});
+
+// ── CBOR file export ─────────────────────────────────────────────────────────
+
+el('export-btn').addEventListener('click', () => {
   if (!conversion.ok || conversion.empty) return;
-  void copyWithFeedback(
-    e.currentTarget as HTMLElement,
-    bytesToHexString(conversion.bytes)
+  const blob = new Blob([conversion.bytes.buffer as ArrayBuffer], {
+    type: 'application/cbor',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'data.cbor';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+const copyBytesBtn = el('copy-bytes');
+
+function updateCopyBytesBtn(): void {
+  const active = mode === 'annotated' || mode === 'plain';
+  copyBytesBtn.toggleAttribute(
+    'disabled',
+    !active || !conversion.ok || conversion.empty
   );
+}
+
+copyBytesBtn.addEventListener('click', (e) => {
+  if (!conversion.ok || conversion.empty) return;
+  const text =
+    mode === 'annotated'
+      ? conversion.binAst.toHexDump()
+      : bytesToHexString(conversion.bytes);
+  void copyWithFeedback(e.currentTarget as HTMLElement, text);
 });
 
 el('share-btn').addEventListener('click', (e) => {

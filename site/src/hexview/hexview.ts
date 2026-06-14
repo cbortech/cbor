@@ -50,32 +50,34 @@ export class HexView {
     const table = document.createElement('div');
     table.className = 'hex-table';
     for (const row of rows) {
-      const rowEl = document.createElement('div');
-      rowEl.className = 'hex-row';
-
       const bytesCell = document.createElement('span');
       bytesCell.className = 'hex-bytes';
       bytesCell.style.paddingLeft = `${row.depth * 3}ch`;
       for (const span of row.spans) {
         const spanEl = document.createElement('span');
         spanEl.className = `hex-span mt${span.majorType} role-${span.role}`;
-        spanEl.textContent = hexPairs(bytes, span.byteStart, span.byteEnd);
+        const displayEnd = Math.min(span.byteEnd, span.byteStart + 16);
+        spanEl.textContent = hexPairs(bytes, span.byteStart, displayEnd);
         bytesCell.appendChild(spanEl);
-        bytesCell.appendChild(document.createTextNode(' '));
+        if (displayEnd < span.byteEnd)
+          bytesCell.appendChild(document.createTextNode('… '));
+        else bytesCell.appendChild(document.createTextNode(' '));
       }
 
       const commentCell = document.createElement('span');
       commentCell.className = 'hex-comment';
       commentCell.textContent = `— ${row.comment}`;
 
-      rowEl.appendChild(bytesCell);
-      rowEl.appendChild(commentCell);
-      rowEl.addEventListener('click', () =>
-        this.callbacks.onSelectBytes(row.byteStart)
-      );
-      table.appendChild(rowEl);
+      // Flat grid children — both cells get the click listener.
+      const onClick = () => this.callbacks.onSelectBytes(row.byteStart);
+      bytesCell.addEventListener('click', onClick);
+      commentCell.addEventListener('click', onClick);
+
+      table.appendChild(bytesCell);
+      table.appendChild(commentCell);
+      // Track the bytes cell; CSS handles the comment via adjacent sibling.
       this.rendered.push({
-        el: rowEl,
+        el: bytesCell,
         byteStart: row.byteStart,
         byteEnd: row.byteEnd,
       });
@@ -86,23 +88,45 @@ export class HexView {
   private renderPlain(rows: HexRow[], bytes: Uint8Array): void {
     const pre = document.createElement('div');
     pre.className = 'hex-plain';
-    // Rows are in byte order and their spans cover every byte exactly once,
-    // so concatenating spans reproduces the full encoding.
+    const addrWidth = bytes.length > 0xffff ? 6 : 4;
+    let needAddr = true;
+
+    const addAddr = (offset: number) => {
+      const el = document.createElement('span');
+      el.className = 'hex-addr';
+      el.textContent =
+        offset.toString(16).toUpperCase().padStart(addrWidth, '0') + ':';
+      pre.appendChild(el);
+      needAddr = false;
+    };
+
     for (const row of rows) {
       for (const span of row.spans) {
-        const spanEl = document.createElement('span');
-        spanEl.className = `hex-span mt${span.majorType} role-${span.role}`;
-        spanEl.textContent = hexPairs(bytes, span.byteStart, span.byteEnd);
-        spanEl.addEventListener('click', () =>
-          this.callbacks.onSelectBytes(span.byteStart)
-        );
-        pre.appendChild(spanEl);
-        pre.appendChild(document.createTextNode(' '));
-        this.rendered.push({
-          el: spanEl,
-          byteStart: span.byteStart,
-          byteEnd: span.byteEnd,
-        });
+        let cursor = span.byteStart;
+        while (cursor < span.byteEnd) {
+          // Break to a new line at every 16-byte boundary.
+          if (cursor > 0 && cursor % 16 === 0) {
+            pre.appendChild(document.createElement('br'));
+            needAddr = true;
+          }
+          if (needAddr) addAddr(cursor);
+          // Emit bytes up to the next line boundary or end of span.
+          const lineEnd = Math.min(span.byteEnd, cursor + (16 - (cursor % 16)));
+          const spanEl = document.createElement('span');
+          spanEl.className = `hex-span mt${span.majorType} role-${span.role}`;
+          spanEl.textContent = hexPairs(bytes, cursor, lineEnd);
+          spanEl.addEventListener('click', () =>
+            this.callbacks.onSelectBytes(span.byteStart)
+          );
+          pre.appendChild(spanEl);
+          pre.appendChild(document.createTextNode(' '));
+          this.rendered.push({
+            el: spanEl,
+            byteStart: cursor,
+            byteEnd: lineEnd,
+          });
+          cursor = lineEnd;
+        }
       }
     }
     this.container.appendChild(pre);

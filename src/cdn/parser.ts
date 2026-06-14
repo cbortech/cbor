@@ -442,16 +442,16 @@ class CDNParser {
         return new CborIndefiniteTextString([]);
       case 'TRUE':
         this.t.consume();
-        return CborSimple.TRUE;
+        return new CborSimple(21);
       case 'FALSE':
         this.t.consume();
-        return CborSimple.FALSE;
+        return new CborSimple(20);
       case 'NULL':
         this.t.consume();
-        return CborSimple.NULL;
+        return new CborSimple(22);
       case 'UNDEFINED':
         this.t.consume();
-        return CborSimple.UNDEFINED;
+        return new CborSimple(23);
       case 'SIMPLE':
         return this.parseSimple();
       case 'LBRACKET':

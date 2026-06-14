@@ -65,5 +65,9 @@ export function bytesToCdnText(hexDumpText: string): string {
 }
 
 export function bytesToHexString(bytes: Uint8Array): string {
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  const pairs = Array.from(bytes, (b) => b.toString(16).padStart(2, '0'));
+  const lines: string[] = [];
+  for (let i = 0; i < pairs.length; i += 16)
+    lines.push(pairs.slice(i, i + 16).join(' '));
+  return lines.join('\n');
 }
