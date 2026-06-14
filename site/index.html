@@ -84,8 +84,25 @@
           ranges, warnings, and annotated hex dumps.
         </li>
         <li>
-          <strong>Extensible</strong> — app-string extensions like
-          <code>dt'…'</code>, <code>b32'…'</code>, and your own.
+          <strong>Extensible</strong> — built-in app-string extensions:
+          <code>dt'…'</code> / <code>DT'…'</code>, <code>ip'…'</code> /
+          <code>IP'…'</code>, <code>cri'…'</code> / <code>CRI'…'</code>,
+          <code>b32'…'</code>, <code>h32'…'</code>, <code>float'…'</code>,
+          <code>same'…'</code>. This playground additionally enables
+          <a
+            href="https://github.com/cbortech/uuid-extension"
+            target="_blank"
+            rel="noopener"
+            >@cbortech/uuid-extension</a
+          >
+          (<code>uuid'…'</code> / <code>UUID'…'</code>) and
+          <a
+            href="https://github.com/cbortech/hash-extension"
+            target="_blank"
+            rel="noopener"
+            >@cbortech/hash-extension</a
+          >
+          (<code>hash'…'</code>).
         </li>
       </ul>
     </section>
@@ -160,6 +177,15 @@
               <option value="hex" selected>Hex</option>
               <option value="base64">Base64</option>
               <option value="base64url">Base64url</option>
+            </select>
+          </label>
+          <label
+            >Text strings
+            <select id="opt-tsfmt">
+              <option value="" selected>No split</option>
+              <option value="newline">Newline</option>
+              <option value="cdn">CDN</option>
+              <option value="newline,cdn">Newline + CDN</option>
             </select>
           </label>
           <label class="check">

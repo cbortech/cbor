@@ -83,6 +83,11 @@ export function readFormatOptions(): FromCDNOptions & ToCDNOptions {
   };
   if (indentRaw !== '')
     options.indent = indentRaw === 'tab' ? '\t' : Number(indentRaw);
+  const tsfmt = sel('opt-tsfmt');
+  if (tsfmt !== '')
+    options.textStringFormat = tsfmt.split(
+      ','
+    ) as ToCDNOptions['textStringFormat'];
   if ((document.getElementById('opt-comments') as HTMLInputElement).checked)
     options.preserveComments = true;
   return options;

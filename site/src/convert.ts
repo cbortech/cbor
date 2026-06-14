@@ -6,6 +6,7 @@ import { CBOR, type ParseWarning } from '@cbortech/cbor';
 import type { CborItem } from '@cbortech/cbor/ast';
 import { buildRangeMap, type NodeRange } from './mapping/lockstep';
 import { buildRows, type HexRow } from './hexview/build-rows';
+import { SITE_EXTENSIONS } from './extensions';
 
 export interface ConversionOk {
   ok: true;
@@ -37,9 +38,10 @@ export function convertCdn(text: string): Conversion {
     const cdnAst = CBOR.fromCDN(text, {
       strict: false,
       onWarning: (w) => warnings.push(w),
+      extensions: SITE_EXTENSIONS,
     });
     const bytes = cdnAst.toCBOR();
-    const binAst = CBOR.fromCBOR(bytes);
+    const binAst = CBOR.fromCBOR(bytes, { extensions: SITE_EXTENSIONS });
     return {
       ok: true,
       empty: false,
@@ -60,7 +62,7 @@ export function convertCdn(text: string): Conversion {
  * Throws on invalid input.
  */
 export function bytesToCdnText(hexDumpText: string): string {
-  const item = CBOR.fromHexDump(hexDumpText);
+  const item = CBOR.fromHexDump(hexDumpText, { extensions: SITE_EXTENSIONS });
   return item.toCDN({ indent: 2 });
 }
 

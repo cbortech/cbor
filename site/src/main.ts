@@ -1,5 +1,6 @@
 import './styles.css';
 import { CBOR } from '@cbortech/cbor';
+import { SITE_EXTENSIONS } from './extensions';
 import {
   bytesToCdnText,
   bytesToHexString,
@@ -211,7 +212,10 @@ el('format-btn').addEventListener('click', () => {
   const text = editor.state.doc.toString();
   if (text.trim() === '') return;
   try {
-    setEditorText(editor, CBOR.format(text, readFormatOptions()));
+    setEditorText(
+      editor,
+      CBOR.format(text, { ...readFormatOptions(), extensions: SITE_EXTENSIONS })
+    );
   } catch {
     // Invalid CDN: the lint squiggle already explains the problem.
   }
@@ -236,7 +240,9 @@ importInput.addEventListener('change', () => {
   importInput.value = '';
   file.arrayBuffer().then((buf) => {
     try {
-      const cdn = CBOR.fromCBOR(new Uint8Array(buf)).toCDN({ indent: 2 });
+      const cdn = CBOR.fromCBOR(new Uint8Array(buf), {
+        extensions: SITE_EXTENSIONS,
+      }).toCDN({ indent: 2 });
       setEditorText(editor, cdn);
     } catch (e) {
       setStatus('error', e instanceof Error ? e.message : String(e));

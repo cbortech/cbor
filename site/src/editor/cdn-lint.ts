@@ -4,6 +4,7 @@
  */
 import { linter, type Diagnostic } from '@codemirror/lint';
 import { CBOR, CdnSyntaxError } from '@cbortech/cbor';
+import { SITE_EXTENSIONS } from '../extensions';
 
 export const cdnLinter = linter((view) => {
   const text = view.state.doc.toString();
@@ -13,6 +14,7 @@ export const cdnLinter = linter((view) => {
   try {
     CBOR.fromCDN(text, {
       strict: false,
+      extensions: SITE_EXTENSIONS,
       onWarning: (w) => {
         const from = clamp(w.offset ?? 0);
         diagnostics.push({
