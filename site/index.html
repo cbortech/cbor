@@ -7,15 +7,15 @@
     <title>@cbortech/cbor — CBOR ⇄ CDN playground</title>
     <meta
       name="description"
-      content="Convert between CBOR, CBOR Diagnostic Notation (CDN), and JavaScript values. Zero-dependency TypeScript library with a live playground."
+      content="Convert between CBOR, Concise Diagnostic Notation (CDN / CBOR-EDN), and JavaScript values. Zero-dependency TypeScript library with a live playground."
     />
     <meta
       property="og:title"
-      content="@cbortech/cbor — CBOR ⇄ CDN playground"
+      content="@cbortech/cbor — CBOR ⇄ CDN (CBOR-EDN) playground"
     />
     <meta
       property="og:description"
-      content="Type CBOR Diagnostic Notation, get annotated CBOR bytes — and back. Powered by the zero-dependency @cbortech/cbor library."
+      content="Type Concise Diagnostic Notation (CDN / CBOR-EDN), get annotated CBOR bytes — and back. Powered by the zero-dependency @cbortech/cbor library."
     />
     <meta property="og:type" content="website" />
   </head>
@@ -23,7 +23,7 @@
     <header class="site-header">
       <div class="brand">
         <span class="brand-name">@cbortech/cbor</span>
-        <span class="brand-tag">CBOR ⇄ CDN ⇄ JS</span>
+        <span class="brand-tag">CBOR ⇄ CDN (CBOR-EDN) ⇄ JS</span>
       </div>
       <nav class="site-nav">
         <a
@@ -45,9 +45,15 @@
     </header>
 
     <section class="hero">
-      <h1>Convert between CBOR, CDN, and JavaScript values</h1>
+      <h1>Convert between CBOR, CDN (CBOR-EDN), and JavaScript values</h1>
       <p class="hero-sub">
-        A zero-dependency TypeScript library implementing
+        <a
+          href="https://www.npmjs.com/package/@cbortech/cbor"
+          target="_blank"
+          rel="noopener"
+          >@cbortech/cbor</a
+        >
+        is a zero-dependency TypeScript library implementing
         <a
           href="https://www.rfc-editor.org/rfc/rfc8949"
           target="_blank"
@@ -59,7 +65,7 @@
           href="https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/"
           target="_blank"
           rel="noopener"
-          >CBOR Diagnostic Notation (CDN/EDN)</a
+          >Concise Diagnostic Notation (CDN / CBOR-EDN)</a
         >
         — encode, decode, parse, pretty-print, and round-trip with full
         fidelity. Everything on this page runs in your browser using the library
@@ -72,8 +78,8 @@
       <ul class="features">
         <li>
           <strong>Lossless round-trips</strong> — encoding widths, indefinite
-          lengths, duplicate map keys, and comments survive CDN ⇄ CBOR
-          conversion.
+          lengths, duplicate map keys, and comments survive CDN (CBOR-EDN) ⇄
+          CBOR conversion.
         </li>
         <li>
           <strong>JSON-like API</strong> — <code>CBOR.parse</code> /
@@ -90,19 +96,19 @@
           <code>b32'…'</code>, <code>h32'…'</code>, <code>float'…'</code>,
           <code>same'…'</code>. This playground additionally enables
           <a
-            href="https://github.com/cbortech/uuid-extension"
-            target="_blank"
-            rel="noopener"
-            >@cbortech/uuid-extension</a
-          >
-          (<code>uuid'…'</code> / <code>UUID'…'</code>) and
-          <a
-            href="https://github.com/cbortech/hash-extension"
+            href="https://www.npmjs.com/package/@cbortech/hash-extension"
             target="_blank"
             rel="noopener"
             >@cbortech/hash-extension</a
           >
-          (<code>hash'…'</code>).
+          (<code>hash'…'</code>) and
+          <a
+            href="https://www.npmjs.com/package/@cbortech/uuid-extension"
+            target="_blank"
+            rel="noopener"
+            >@cbortech/uuid-extension</a
+          >
+          (<code>uuid'…'</code> / <code>UUID'…'</code>).
         </li>
       </ul>
     </section>
@@ -110,7 +116,7 @@
     <main class="playground">
       <section class="pane pane-cdn" aria-label="CDN editor">
         <div class="pane-toolbar">
-          <span class="pane-title">CDN</span>
+          <span class="pane-title">CDN (CBOR-EDN)</span>
           <select id="samples" class="ctl" title="Load a sample">
             <option value="" disabled selected>Samples…</option>
           </select>

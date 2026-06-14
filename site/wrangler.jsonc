@@ -7,7 +7,5 @@
     "directory": "./dist",
     "binding": "ASSETS",
   },
-  "routes": [
-    { "pattern": "cbor.tech/*", "zone_name": "cbor.tech" },
-  ],
+  "routes": [{ "pattern": "cbor.tech/*", "zone_name": "cbor.tech" }],
 }

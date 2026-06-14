@@ -1,7 +1,9 @@
 # @cbortech/cbor
 
 TypeScript library for converting between [CBOR](#specifications),
-[CDN](#specifications), and JavaScript values.
+[CDN (CBOR-EDN)](#specifications), and JavaScript values.
+
+A live playground is available at **https://cbor.tech/cbor/**.
 
 This package exposes the `CBOR` facade plus a separate AST entrypoint for the
 CBOR node classes needed by extensions. Lower-level parser and encoder internals
