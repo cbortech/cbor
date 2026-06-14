@@ -4,6 +4,7 @@ import {
   type Token,
   type TokenType,
 } from './tokenizer';
+import { CdnSyntaxError } from './errors';
 import type { CborItem } from '../ast/CborItem';
 import type {
   CborComment,
@@ -383,9 +384,7 @@ class CDNParser {
           `CDN strict violation at line ${line}, column ${col}: ${msg}`
         );
       if (this._options.strict !== false)
-        throw new SyntaxError(
-          `EDN parse error at line ${line}, column ${col}: ${msg}`
-        );
+        throw new CdnSyntaxError(msg, { offset, line, column: col });
     };
   }
 
@@ -443,16 +442,16 @@ class CDNParser {
         return new CborIndefiniteTextString([]);
       case 'TRUE':
         this.t.consume();
-        return CborSimple.TRUE;
+        return new CborSimple(21);
       case 'FALSE':
         this.t.consume();
-        return CborSimple.FALSE;
+        return new CborSimple(20);
       case 'NULL':
         this.t.consume();
-        return CborSimple.NULL;
+        return new CborSimple(22);
       case 'UNDEFINED':
         this.t.consume();
-        return CborSimple.UNDEFINED;
+        return new CborSimple(23);
       case 'SIMPLE':
         return this.parseSimple();
       case 'LBRACKET':
@@ -769,7 +768,13 @@ class CDNParser {
       case 'SQSTR':
         return hexToBytes(tok.value);
       case 'BYTES_B64':
-        return base64ToBytes(tok.value, onRecoverableError);
+        try {
+          return base64ToBytes(tok.value, onRecoverableError);
+        } catch (e) {
+          if (e instanceof CdnSyntaxError || !(e instanceof SyntaxError))
+            throw e;
+          this._fail(e.message, tok);
+        }
       default:
         this._fail(`expected byte string token`, tok);
     }
@@ -1293,7 +1298,16 @@ class CDNParser {
   }
 
   private _fail(msg: string, tok?: Token): never {
-    const loc = tok ? ` at line ${tok.line}, column ${tok.col}` : '';
-    throw new SyntaxError(`EDN parse error${loc}: ${msg}`);
+    throw new CdnSyntaxError(
+      msg,
+      tok
+        ? {
+            offset: tok.offset,
+            line: tok.line,
+            column: tok.col,
+            endOffset: tok.endOffset,
+          }
+        : undefined
+    );
   }
 }

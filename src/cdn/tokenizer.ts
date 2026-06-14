@@ -5,6 +5,8 @@
  * source offsets after parseCDN() has already validated embedded CDN.
  */
 
+import { CdnSyntaxError } from './errors';
+
 export type TokenType =
   | 'INTEGER'
   | 'FLOAT'
@@ -37,7 +39,9 @@ export type TokenType =
   | 'LT_LT'
   | 'GT_GT'
   | 'ELLIPSIS'
-  | 'EOF';
+  | 'EOF'
+  /** Synthetic token emitted by tokenizeLenient() for the unscannable tail. */
+  | 'ERROR';
 
 export interface Token {
   type: TokenType;
@@ -68,6 +72,22 @@ export interface EdnComment {
   end: number;
   line: number;
   col: number;
+}
+
+/** Inverse of positionAt; only used on the cold error path. */
+function offsetAt(input: string, line: number, col: number): number {
+  let l = 1;
+  let c = 1;
+  for (let i = 0; i < input.length; i++) {
+    if (l === line && c === col) return i;
+    if (input[i] === '\n') {
+      l++;
+      c = 1;
+    } else {
+      c++;
+    }
+  }
+  return input.length;
 }
 
 function positionAt(
@@ -182,9 +202,11 @@ export class Tokenizer {
   }
 
   private _fail(msg: string, line = this.line, col = this.col): never {
-    throw new SyntaxError(
-      `EDN parse error at line ${line}, column ${col}: ${msg}`
-    );
+    const offset =
+      line === this.line && col === this.col
+        ? this.pos
+        : offsetAt(this.input, line, col);
+    throw new CdnSyntaxError(msg, { offset, line, column: col });
   }
 
   private _skipWS(): void {
@@ -450,8 +472,10 @@ export class Tokenizer {
       // / … / comment
       while (i < raw.length && raw[i] !== '/') i++;
       if (i >= raw.length)
-        throw new SyntaxError(
-          `EDN parse error at line ${tokenLine}, column ${tokenCol}: unterminated block comment in ${context}`
+        this._fail(
+          `unterminated block comment in ${context}`,
+          tokenLine,
+          tokenCol
         );
       return i + 1; // consume closing /
     }
@@ -968,8 +992,10 @@ export class Tokenizer {
       }
       // HT is still forbidden (rawchars excludes %x09)
       if (ch === '\t') {
-        throw new SyntaxError(
-          `EDN parse error at line ${tokenLine}, column ${tokenCol}: horizontal tab (HT) is not allowed inside h\`\` raw byte string literals (§5.3.3)`
+        this._fail(
+          'horizontal tab (HT) is not allowed inside h`` raw byte string literals (§5.3.3)',
+          tokenLine,
+          tokenCol
         );
       }
       // Comments (§2.2)
@@ -999,8 +1025,10 @@ export class Tokenizer {
         hex += raw.slice(runStart, i);
         continue;
       }
-      throw new SyntaxError(
-        `EDN parse error at line ${tokenLine}, column ${tokenCol}: unexpected character ${JSON.stringify(ch)} in h\`\` raw byte string`
+      this._fail(
+        `unexpected character ${JSON.stringify(ch)} in h\`\` raw byte string`,
+        tokenLine,
+        tokenCol
       );
     }
     return { value: hex, elided };
@@ -1031,8 +1059,10 @@ export class Tokenizer {
       }
       // HT forbidden
       if (ch === '\t') {
-        throw new SyntaxError(
-          `EDN parse error at line ${tokenLine}, column ${tokenCol}: horizontal tab (HT) is not allowed inside b64\`\` raw byte string literals (§5.3.4)`
+        this._fail(
+          'horizontal tab (HT) is not allowed inside b64`` raw byte string literals (§5.3.4)',
+          tokenLine,
+          tokenCol
         );
       }
       // Line comment: # … (to end of line)

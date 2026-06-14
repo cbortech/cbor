@@ -963,11 +963,26 @@ describe('parseCDN — tags', () => {
 // ─── Simple values ────────────────────────────────────────────────────────────
 
 describe('parseCDN — simple values', () => {
-  test('true', () => expect(parseCDN('true')).toBe(CborSimple.TRUE));
-  test('false', () => expect(parseCDN('false')).toBe(CborSimple.FALSE));
-  test('null', () => expect(parseCDN('null')).toBe(CborSimple.NULL));
-  test('undefined', () =>
-    expect(parseCDN('undefined')).toBe(CborSimple.UNDEFINED));
+  test('true', () => {
+    const n = parseCDN('true') as CborSimple;
+    expect(n).toBeInstanceOf(CborSimple);
+    expect(n.value).toBe(21);
+  });
+  test('false', () => {
+    const n = parseCDN('false') as CborSimple;
+    expect(n).toBeInstanceOf(CborSimple);
+    expect(n.value).toBe(20);
+  });
+  test('null', () => {
+    const n = parseCDN('null') as CborSimple;
+    expect(n).toBeInstanceOf(CborSimple);
+    expect(n.value).toBe(22);
+  });
+  test('undefined', () => {
+    const n = parseCDN('undefined') as CborSimple;
+    expect(n).toBeInstanceOf(CborSimple);
+    expect(n.value).toBe(23);
+  });
   test('simple(16)', () => {
     const n = parseCDN('simple(16)') as CborSimple;
     expect(n).toBeInstanceOf(CborSimple);
