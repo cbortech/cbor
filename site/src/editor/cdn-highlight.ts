@@ -73,9 +73,19 @@ function buildDecorations(text: string): DecorationSet {
       if (com.end > com.start) builder.add(com.start, com.end, mark('comment'));
       ci++;
     } else if (tok) {
-      const cls = TOKEN_CLASS[tok.type];
-      if (cls && tok.endOffset > tok.offset)
-        builder.add(tok.offset, tok.endOffset, mark(cls));
+      if (tok.type === 'APP_SEQUENCE' && tok.appPrefix !== undefined) {
+        // Color the prefix (e.g. "same") as 'app' and the '<<' as 'punct',
+        // so '<<' matches the closing '>>' (GT_GT → 'punct').
+        const prefixEnd = tok.offset + tok.appPrefix.length;
+        if (prefixEnd > tok.offset)
+          builder.add(tok.offset, prefixEnd, mark('app'));
+        if (tok.endOffset > prefixEnd)
+          builder.add(prefixEnd, tok.endOffset, mark('punct'));
+      } else {
+        const cls = TOKEN_CLASS[tok.type];
+        if (cls && tok.endOffset > tok.offset)
+          builder.add(tok.offset, tok.endOffset, mark(cls));
+      }
       ti++;
     }
   }
