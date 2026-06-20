@@ -1331,6 +1331,15 @@ describe('parseCDN — encoding indicators on tags', () => {
     expect(n.encodingWidth).toBe(1);
     expect((n.content as CborUint).value).toBe(42n);
   });
+
+  test('1_1(4711) → encodingWidth=1 preserved through DT extension parseTag', () => {
+    // Bug: encodingWidth was discarded when ext.parseTag() returned a result.
+    // Expected CBOR: D9 00 01 (tag 1, 2-byte) 19 12 67 (uint 4711, 2-byte).
+    const n = parseCDN('1_1(4711)') as CborTag;
+    expect(n).toBeInstanceOf(CborTag);
+    expect(n.encodingWidth).toBe(1);
+    expect(toHex(n.toCBOR())).toBe('d90001191267');
+  });
 });
 
 describe('parseCDN — encoding indicators on strings', () => {

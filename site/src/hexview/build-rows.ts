@@ -45,7 +45,7 @@ const MAX_COMMENT = 72;
 function leafComment(node: CborItem): string {
   let cdn: string;
   try {
-    cdn = node.toCDN();
+    cdn = node.toCDN({ appStrings: false }); // raw binary-level value, not app-string notation
   } catch {
     cdn = '(unrepresentable)';
   }

@@ -296,7 +296,10 @@ export function createDtExtension(options?: {
       else if (value instanceof CborNint) epochSeconds = Number(value.value);
       else if (value instanceof CborFloat) epochSeconds = value.value;
       else return undefined;
-      return makeTagged(epochToRfc3339(epochSeconds));
+      const result = makeTagged(epochToRfc3339(epochSeconds));
+      result.content.start = value.start;
+      result.content.end = value.end;
+      return result;
     },
   };
 

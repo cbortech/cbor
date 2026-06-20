@@ -175,6 +175,21 @@ describe('dt — fromCBOR round-trip', () => {
   });
 });
 
+// ─── parseTag byte-offset propagation ────────────────────────────────────────
+
+describe('dt — parseTag byte-offset propagation', () => {
+  test('fromCBOR: result.content carries start/end byte offsets from original value', () => {
+    // Bug: parseTag created a new content node without copying value.start/end,
+    // so buildRows() could not split the hex view into separate tag + content rows.
+    // Encoding: C1 (tag 1, 1 byte) + 1A 6A 2D EF 00 (uint 1781395200, 5 bytes).
+    const cbor = new CborTag(1n, new CborUint(1781395200n)).toCBOR();
+    const decoded = decodeCBOR(cbor) as CborTaggedEpochDtExt;
+    expect(decoded).toBeInstanceOf(CborTaggedEpochDtExt);
+    expect(decoded.content.start).toBe(1); // tag header is 1 byte (C1)
+    expect(decoded.content.end).toBe(6); // total: 1 + 5 = 6 bytes
+  });
+});
+
 // ─── fromJS round-trip (DT_EXT built-in, no extensions option needed) ─────────
 
 describe('dt — fromJS round-trip', () => {
