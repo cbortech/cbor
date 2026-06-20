@@ -705,6 +705,8 @@ export const cri: CborExtension = {
       indefiniteLength: value.indefiniteLength,
       encodingWidth: value.encodingWidth,
     });
+    inner.start = value.start;
+    inner.end = value.end;
     return new CborTaggedCriExt(inner);
   },
 };

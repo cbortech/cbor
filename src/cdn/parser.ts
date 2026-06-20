@@ -640,6 +640,12 @@ class CDNParser {
       if (ext?.parseTag) {
         const result = ext.parseTag(tagNum, content);
         if (result !== undefined) {
+          if (
+            result instanceof CborTag &&
+            encodingWidth !== undefined &&
+            result.encodingWidth === undefined
+          )
+            result.encodingWidth = encodingWidth;
           if (setupWarnings.length > 0) {
             result.warnings ??= [];
             result.warnings.push(...setupWarnings);

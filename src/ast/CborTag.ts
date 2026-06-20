@@ -14,7 +14,7 @@ import {
 export class CborTag extends CborItem {
   readonly tag: bigint;
   readonly content: CborItem;
-  readonly encodingWidth: EncodingWidth | undefined;
+  encodingWidth: EncodingWidth | undefined;
 
   constructor(
     tag: number | bigint,
@@ -52,7 +52,9 @@ export class CborTag extends CborItem {
         comment: `Tag ${this.tag}`,
       },
     ];
-    lines.push(...this.content._toHexDump(depth + 1, options));
+    lines.push(
+      ...this.content._toHexDump(depth + 1, { ...options, appStrings: false })
+    );
     return lines;
   }
 

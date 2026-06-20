@@ -343,6 +343,23 @@ describe('cri — CBOR round-trip', () => {
   });
 });
 
+// ─── parseTag byte-offset propagation ────────────────────────────────────────
+
+describe('cri — parseTag byte-offset propagation', () => {
+  test('fromCBOR: CborCriExt inner node carries start/end byte offsets', () => {
+    // Bug: parseTag built a new CborCriExt without copying value.start/end,
+    // so buildRows() could not split the hex view into separate tag + content rows.
+    const v = CBOR.fromCDN("CRI'https://example.com'");
+    const cbor = v.toCBOR();
+    const decoded = decodeCBOR(cbor) as CborTaggedCriExt;
+    expect(decoded).toBeInstanceOf(CborTaggedCriExt);
+    expect(decoded.content).toBeInstanceOf(CborCriExt);
+    // Tag 99 header is 2 bytes (D8 63); content starts after that.
+    expect((decoded.content as CborCriExt).start).toBe(2);
+    expect((decoded.content as CborCriExt).end).toBeDefined();
+  });
+});
+
 // ─── cri<<…>> app-sequence ────────────────────────────────────────────────────
 
 describe('cri — app-sequence cri<<…>>', () => {
