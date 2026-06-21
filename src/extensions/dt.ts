@@ -162,7 +162,9 @@ export class CborEpochDtExtUint extends CborUint {
 
   override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
     if (options?.appStrings === false) return super._toCDN(options, _depth);
-    return `${PREFIX_DT}'${epochToRfc3339(Number(this.value))}'`;
+    const eiSuffix =
+      this.encodingWidth !== undefined ? `_${this.encodingWidth}` : '';
+    return `${PREFIX_DT}'${epochToRfc3339(Number(this.value))}'${eiSuffix}`;
   }
 }
 
@@ -180,7 +182,9 @@ export class CborEpochDtExtNint extends CborNint {
 
   override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
     if (options?.appStrings === false) return super._toCDN(options, _depth);
-    return `${PREFIX_DT}'${epochToRfc3339(Number(this.value))}'`;
+    const eiSuffix =
+      this.encodingWidth !== undefined ? `_${this.encodingWidth}` : '';
+    return `${PREFIX_DT}'${epochToRfc3339(Number(this.value))}'${eiSuffix}`;
   }
 }
 
@@ -198,7 +202,15 @@ export class CborEpochDtExtFloat extends CborFloat {
 
   override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
     if (options?.appStrings === false) return super._toCDN(options, _depth);
-    return `${PREFIX_DT}'${epochToRfc3339(this.value)}'`;
+    const eiSuffix =
+      this.precision === 'half'
+        ? '_1'
+        : this.precision === 'single'
+          ? '_2'
+          : this.precision === 'double'
+            ? '_3'
+            : '';
+    return `${PREFIX_DT}'${epochToRfc3339(this.value)}'${eiSuffix}`;
   }
 }
 

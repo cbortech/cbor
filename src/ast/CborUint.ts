@@ -10,7 +10,7 @@ import {
 /** CBOR Major Type 0 — unsigned integer (0 … 2^64−1). */
 export class CborUint extends CborItem {
   readonly value: bigint;
-  readonly encodingWidth: EncodingWidth | undefined;
+  encodingWidth: EncodingWidth | undefined;
 
   constructor(
     value: number | bigint,

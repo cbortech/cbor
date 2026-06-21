@@ -19,7 +19,7 @@ let didWarnCborEdnTextStringFormat = false;
 export class CborTextString extends CborItem {
   readonly indefiniteLength = false as const;
   readonly value: string;
-  readonly encodingWidth: EncodingWidth | undefined;
+  encodingWidth: EncodingWidth | undefined;
 
   constructor(value: string, options?: { encodingWidth?: EncodingWidth }) {
     super();

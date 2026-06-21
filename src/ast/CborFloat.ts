@@ -23,7 +23,7 @@ export class CborFloat extends CborItem {
    *   decoder to guarantee lossless round-trips).
    * - `undefined`: encoder auto-selects the smallest lossless size.
    */
-  readonly precision: FloatPrecision | undefined;
+  precision: FloatPrecision | undefined;
   /**
    * Original app-string source (e.g. `float'7e00'`), set by the parser when
    * this float is the result of a `float'...'` app-string.  Used by toCDN()

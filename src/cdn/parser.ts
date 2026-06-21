@@ -464,6 +464,14 @@ class CDNParser {
         return this.parseEmbeddedCBOR();
       case 'APP_STRING': {
         this.t.consume();
+        // Consume optional encoding indicator (e.g. float'fe00'_2).
+        let appStrEw: EncodingWidth | undefined;
+        let appStrEiRaw = '';
+        if (this.t.peek().type === 'ENCODING_INDICATOR') {
+          const eiTok = this.t.consume();
+          appStrEw = this._resolveEncodingWidth(eiTok.value, eiTok);
+          appStrEiRaw = eiTok.raw;
+        }
         const ext = this.extByPrefix.get(tok.appPrefix!);
         if (!ext?.parseAppString) {
           if (!ext) this._hintMissingExtension(tok.appPrefix!, tok);
@@ -482,8 +490,85 @@ class CDNParser {
             const result = ext.parseAppString(
               tok.appPrefix!,
               tok.value,
-              this._extOnError(tok)
+              this._extOnError(tok),
+              appStrEw !== undefined ? { encodingWidth: appStrEw } : undefined
             );
+            // Generic EI post-processing: apply encoding indicator when the
+            // extension didn't handle it itself (e.g. dt'...'_2).
+            if (appStrEw !== undefined) {
+              if (result instanceof CborFloat) {
+                const targetPrec: FloatPrecision | undefined =
+                  appStrEw === 1
+                    ? 'half'
+                    : appStrEw === 2
+                      ? 'single'
+                      : appStrEw === 3
+                        ? 'double'
+                        : undefined;
+                if (targetPrec === undefined) {
+                  this._warnOrFail(
+                    `encoding indicator _${appStrEw} is not valid for a float; use _1, _2, or _3`,
+                    tok
+                  );
+                } else if (result.precision !== targetPrec) {
+                  if (targetPrec !== 'double') {
+                    const rt =
+                      targetPrec === 'half'
+                        ? float16BitsToFloat64(
+                            float64ToFloat16Bits(result.value)
+                          )
+                        : Math.fround(result.value);
+                    if (!Object.is(rt, result.value) && !isNaN(result.value))
+                      this._warnOrFail(
+                        `${result.value} cannot be exactly represented as ${targetPrec === 'half' ? 'float16 (_1)' : 'float32 (_2)'}`,
+                        tok
+                      );
+                  }
+                  result.precision = targetPrec;
+                }
+              } else if (result instanceof CborUint) {
+                if (result.encodingWidth === undefined) {
+                  const ew = this._validateEncodingFit(
+                    result.value,
+                    appStrEw,
+                    tok
+                  );
+                  if (ew !== undefined) result.encodingWidth = ew;
+                }
+              } else if (result instanceof CborNint) {
+                if (result.encodingWidth === undefined) {
+                  const ew = this._validateEncodingFit(
+                    result.argument,
+                    appStrEw,
+                    tok
+                  );
+                  if (ew !== undefined) result.encodingWidth = ew;
+                }
+              } else if (result instanceof CborByteString) {
+                if (result.encodingWidth === undefined) {
+                  const ew = this._validateEncodingFit(
+                    BigInt(result.value.length),
+                    appStrEw,
+                    tok
+                  );
+                  if (ew !== undefined) result.encodingWidth = ew;
+                }
+              } else if (result instanceof CborTextString) {
+                if (result.encodingWidth === undefined) {
+                  const ew = this._validateEncodingFit(
+                    BigInt(textEncoder.encode(result.value).length),
+                    appStrEw,
+                    tok
+                  );
+                  if (ew !== undefined) result.encodingWidth = ew;
+                }
+              } else {
+                this._warnOrFail(
+                  `encoding indicator _${appStrEw} is not applicable to this app-string result type`,
+                  tok
+                );
+              }
+            }
             // Propagate ednSource so preserveByteString / appStrings round-trips correctly.
             // instanceof narrows the type; getPrototypeOf excludes subclasses like CborIpExt.
             if (
@@ -494,10 +579,10 @@ class CDNParser {
               return new CborByteString(result.value, {
                 ednEncoding: result.ednEncoding,
                 encodingWidth: result.encodingWidth,
-                ednSource: tok.raw,
+                ednSource: tok.raw + appStrEiRaw,
               });
             if (result instanceof CborFloat && result.ednSource === undefined)
-              result.ednSource = tok.raw;
+              result.ednSource = tok.raw + appStrEiRaw;
             return result;
           } catch (e) {
             if (this._options.strict !== false) throw e;

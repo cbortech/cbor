@@ -17,6 +17,12 @@ import { CborEmbeddedCBOR } from '../ast/CborEmbeddedCBOR';
 import { CborUnresolvedAppExt } from '../ast/CborUnresolvedAppExt';
 import { CborEllipsis } from '../ast/CborEllipsis';
 import { b32, h32 } from '../extensions/b32';
+import { dt } from '../extensions/dt';
+import {
+  CborEpochDtExtUint,
+  CborEpochDtExtNint,
+  CborEpochDtExtFloat,
+} from '../extensions/dt';
 
 /** Convert Uint8Array to lowercase hex string. */
 function toHex(bytes: Uint8Array): string {
@@ -1339,6 +1345,76 @@ describe('parseCDN — encoding indicators on tags', () => {
     expect(n).toBeInstanceOf(CborTag);
     expect(n.encodingWidth).toBe(1);
     expect(toHex(n.toCBOR())).toBe('d90001191267');
+  });
+});
+
+describe('parseCDN — encoding indicators on app-strings (generic post-processing)', () => {
+  test("dt'1970-01-01T00:01:00Z'_1 → CborEpochDtExtUint with encodingWidth=1", () => {
+    // 60 seconds fits in _1 (max 65535); 0x19003C = 1-byte-uint 60
+    const n = parseCDN("dt'1970-01-01T00:01:00Z'_1", { extensions: [dt] });
+    expect(n).toBeInstanceOf(CborEpochDtExtUint);
+    expect((n as CborUint).encodingWidth).toBe(1);
+    expect(toHex(n.toCBOR())).toBe('19003c');
+  });
+
+  test("dt'1970-01-02T00:00:00Z'_2 → CborEpochDtExtUint with encodingWidth=2", () => {
+    // 86400 seconds; 0x1A00015180 = 4-byte-uint 86400
+    const n = parseCDN("dt'1970-01-02T00:00:00Z'_2", { extensions: [dt] });
+    expect(n).toBeInstanceOf(CborEpochDtExtUint);
+    expect((n as CborUint).encodingWidth).toBe(2);
+    expect(toHex(n.toCBOR())).toBe('1a00015180');
+  });
+
+  test("dt'1969-12-31T23:59:00Z'_1 → CborEpochDtExtNint with encodingWidth=1", () => {
+    // -60 seconds → CBOR argument 59; 0x39003B = 1-byte-nint argument 59
+    const n = parseCDN("dt'1969-12-31T23:59:00Z'_1", { extensions: [dt] });
+    expect(n).toBeInstanceOf(CborEpochDtExtNint);
+    expect((n as CborNint).encodingWidth).toBe(1);
+    expect(toHex(n.toCBOR())).toBe('39003b');
+  });
+
+  test("dt'1970-01-02T00:00:01.5Z'_2 → CborEpochDtExtFloat with precision='single'", () => {
+    // 86401.5 s is exactly representable as float32
+    const n = parseCDN("dt'1970-01-02T00:00:01.5Z'_2", { extensions: [dt] });
+    expect(n).toBeInstanceOf(CborEpochDtExtFloat);
+    expect((n as CborFloat).precision).toBe('single');
+    expect(toHex(n.toCBOR()).startsWith('fa')).toBe(true);
+  });
+
+  test("dt'1970-01-01T00:01:00Z'_1 toCDN() round-trips EI", () => {
+    const n = parseCDN("dt'1970-01-01T00:01:00Z'_1", { extensions: [dt] });
+    const cdn = toCDN(n);
+    expect(cdn).toBe("dt'1970-01-01T00:01:00Z'_1");
+    const n2 = parseCDN(cdn, { extensions: [dt] });
+    expect(toHex(n2.toCBOR())).toBe('19003c');
+  });
+
+  test("dt'1969-12-31T23:59:00Z'_1 toCDN() round-trips EI (nint)", () => {
+    const n = parseCDN("dt'1969-12-31T23:59:00Z'_1", { extensions: [dt] });
+    expect(toCDN(n)).toBe("dt'1969-12-31T23:59:00Z'_1");
+  });
+
+  test("dt'1970-01-02T00:00:01.5Z'_2 toCDN() round-trips EI (float, date normalized)", () => {
+    // epochToRfc3339 normalises .5Z → .500Z; the EI suffix must still be preserved.
+    const n = parseCDN("dt'1970-01-02T00:00:01.5Z'_2", { extensions: [dt] });
+    const cdn = toCDN(n);
+    expect(cdn).toBe("dt'1970-01-02T00:00:01.500Z'_2");
+    const n2 = parseCDN(cdn, { extensions: [dt] });
+    expect(toHex(n2.toCBOR())).toBe(toHex(n.toCBOR()));
+  });
+
+  test('dt uint _1 overflow → throws (strict mode)', () => {
+    // 1781395200 does not fit in _1 (max 65535)
+    expect(() =>
+      parseCDN("dt'2026-06-14T00:00:00Z'_1", { extensions: [dt] })
+    ).toThrow(/does not fit/);
+  });
+
+  test('dt float lossy _2 → throws (strict mode)', () => {
+    // 1781395200.5 cannot be exactly represented as float32
+    expect(() =>
+      parseCDN("dt'2026-06-14T00:00:00.5Z'_2", { extensions: [dt] })
+    ).toThrow(/cannot be exactly represented/);
   });
 });
 

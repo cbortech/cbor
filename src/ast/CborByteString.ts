@@ -14,7 +14,7 @@ export class CborByteString extends CborItem {
   readonly value: Uint8Array;
   /** Preferred EDN encoding for this byte string. */
   readonly ednEncoding: 'hex' | 'base64' | 'base64url' | 'base32' | 'base32hex';
-  readonly encodingWidth: EncodingWidth | undefined;
+  encodingWidth: EncodingWidth | undefined;
   readonly ednSource: string | undefined;
 
   constructor(

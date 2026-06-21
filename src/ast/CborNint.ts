@@ -21,7 +21,7 @@ import {
 export class CborNint extends CborItem {
   /** CBOR raw argument n, where actual value = −1 − n. */
   readonly argument: bigint;
-  readonly encodingWidth: EncodingWidth | undefined;
+  encodingWidth: EncodingWidth | undefined;
 
   constructor(
     value: number | bigint,
