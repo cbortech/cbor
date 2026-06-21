@@ -10,6 +10,7 @@ import { CborMap } from '../ast/CborMap';
 import { CborTag } from '../ast/CborTag';
 import { CborFloat } from '../ast/CborFloat';
 import { CborSimple } from '../ast/CborSimple';
+import { CborTaggedEpochDtExt } from '../extensions/dt';
 
 // ─── Leaf nodes ───────────────────────────────────────────────────────────────
 
@@ -135,6 +136,17 @@ describe('toHexDump — CborTag', () => {
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatch(/^C1\s+-- Tag 1/);
     expect(lines[1]).toMatch(/^\s+18 2A\s+-- 42$/);
+  });
+
+  test('DT tag content shows raw integer, not app-string notation', () => {
+    // Bug: _toHexDump called content._toHexDump without { appStrings: false },
+    // so dt extension returned "dt'...'" instead of the raw epoch integer.
+    const node = new CborTaggedEpochDtExt('2026-06-14T00:00:00Z');
+    const lines = node.toHexDump().split('\n');
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^C1\s+-- Tag 1$/);
+    expect(lines[1]).toMatch(/1781395200/);
+    expect(lines[1]).not.toMatch(/dt'/);
   });
 });
 

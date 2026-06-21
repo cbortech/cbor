@@ -23,7 +23,7 @@ export class CborFloat extends CborItem {
    *   decoder to guarantee lossless round-trips).
    * - `undefined`: encoder auto-selects the smallest lossless size.
    */
-  readonly precision: FloatPrecision | undefined;
+  precision: FloatPrecision | undefined;
   /**
    * Original app-string source (e.g. `float'7e00'`), set by the parser when
    * this float is the result of a `float'...'` app-string.  Used by toCDN()
@@ -55,14 +55,24 @@ export class CborFloat extends CborItem {
   }
 
   _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
-    if (options?.appStrings !== false && this.ednSource !== undefined)
+    const mode = options?.encodingIndicators ?? 'auto';
+    if (options?.appStrings !== false && this.ednSource !== undefined) {
+      if (mode === 'never') return this.ednSource.replace(/_[0-3i]$/, '');
+      if (mode === 'always') {
+        if (/_[0-3i]$/.test(this.ednSource)) return this.ednSource;
+        const actual = this.precision ?? autoSelectFloatPrecision(this.value);
+        const suffix =
+          actual === 'half' ? '_1' : actual === 'single' ? '_2' : '_3';
+        return this.ednSource + suffix;
+      }
       return this.ednSource;
+    }
     const autoSelected = autoSelectFloatPrecision(this.value);
     const numStr =
       options?.floatFormat === 'hex'
         ? floatToHexFloat(this.value)
         : floatValueToString(this.value);
-    return numStr + floatSuffix(this.value, this.precision, autoSelected);
+    return numStr + floatSuffix(this.value, this.precision, autoSelected, mode);
   }
 
   _toJS(_options?: ToJSOptions): unknown {

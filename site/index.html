@@ -38,8 +38,16 @@
           rel="noopener"
           >npm</a
         >
-        <button id="theme-toggle" class="icon-btn" title="Toggle theme">
-          ◐
+        <button
+          id="theme-toggle"
+          class="icon-btn toolbar-icon-btn"
+          title="Toggle color theme"
+          aria-label="Toggle color theme"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 3a9 9 0 0 0 0 18Z" fill="currentColor" stroke="none" />
+          </svg>
         </button>
       </nav>
     </header>
@@ -62,10 +70,10 @@
         >
         and
         <a
-          href="https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/"
+          href="https://datatracker.ietf.org/doc/html/draft-ietf-cbor-edn-literals-25"
           target="_blank"
           rel="noopener"
-          >Concise Diagnostic Notation (CDN / CBOR-EDN)</a
+          >Concise Diagnostic Notation (CDN / CBOR-EDN), draft-25</a
         >
         — encode, decode, parse, pretty-print, and round-trip with full
         fidelity. Everything on this page runs in your browser using the library
@@ -73,7 +81,17 @@
       </p>
       <div class="hero-install">
         <code id="install-cmd">npm install @cbortech/cbor</code>
-        <button id="copy-install" class="icon-btn" title="Copy">⧉</button>
+        <button
+          id="copy-install"
+          class="icon-btn toolbar-icon-btn"
+          title="Copy install command to clipboard"
+          aria-label="Copy install command to clipboard"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="9" y="9" width="11" height="11" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+        </button>
       </div>
       <ul class="features">
         <li>
@@ -116,7 +134,7 @@
     <main class="playground">
       <section class="pane pane-cdn" aria-label="CDN editor">
         <div class="pane-toolbar">
-          <span class="pane-title">CDN (CBOR-EDN)</span>
+          <span class="pane-title">CDN (CBOR-EDN, draft-25)</span>
           <select id="samples" class="ctl" title="Load a sample">
             <option value="" disabled selected>Samples…</option>
           </select>
@@ -131,18 +149,72 @@
             </button>
             <button
               id="format-opts-btn"
-              class="ctl"
+              class="ctl toolbar-icon-btn"
               title="Formatting options"
+              aria-label="Formatting options"
               aria-expanded="false"
             >
-              ⚙
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"
+                />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
             </button>
           </div>
-          <button id="copy-cdn" class="ctl" title="Copy CDN text">Copy</button>
-          <button id="share-btn" class="ctl" title="Copy a shareable link">
-            Share
+          <button
+            id="cdn-import-btn"
+            class="ctl toolbar-icon-btn"
+            title="Open a CDN-compatible UTF-8 text file"
+            aria-label="Import CDN text file"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" />
+            </svg>
+          </button>
+          <button
+            id="cdn-export-btn"
+            class="ctl toolbar-icon-btn"
+            title="Save as a .cdn UTF-8 text file"
+            aria-label="Export CDN text file"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 21V9m0 0 4 4m-4-4-4 4M5 3h14" />
+            </svg>
+          </button>
+          <button
+            id="copy-cdn"
+            class="ctl toolbar-icon-btn"
+            title="Copy CDN text to clipboard"
+            aria-label="Copy CDN text to clipboard"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="9" y="9" width="11" height="11" rx="2" />
+              <path
+                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+              />
+            </svg>
+          </button>
+          <button
+            id="share-btn"
+            class="ctl toolbar-icon-btn"
+            title="Copy a shareable link to clipboard"
+            aria-label="Copy a shareable link to clipboard"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="18" cy="5" r="2" />
+              <circle cx="6" cy="12" r="2" />
+              <circle cx="18" cy="19" r="2" />
+              <path d="m8 11 8-5M8 13l8 5" />
+            </svg>
           </button>
         </div>
+        <input
+          type="file"
+          id="cdn-import-input"
+          accept=".cdn,.edn,.diag,.json,.jsonc,application/cdn,application/cbor-diagnostic,application/json,text/plain"
+          hidden
+        />
         <div id="format-popover" class="popover" hidden>
           <label
             >Indent
@@ -217,14 +289,38 @@
             <button class="tab" data-mode="js" role="tab">JS</button>
             <button class="tab" data-mode="edit" role="tab">Edit</button>
           </div>
-          <button id="import-btn" class="ctl" title="Open a .cbor file">
-            Import
+          <button
+            id="import-btn"
+            class="ctl toolbar-icon-btn"
+            title="Open a .cbor file"
+            aria-label="Import CBOR file"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" />
+            </svg>
           </button>
-          <button id="export-btn" class="ctl" title="Save as .cbor file">
-            Export
+          <button
+            id="export-btn"
+            class="ctl toolbar-icon-btn"
+            title="Save as a .cbor file"
+            aria-label="Export CBOR file"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 21V9m0 0 4 4m-4-4-4 4M5 3h14" />
+            </svg>
           </button>
-          <button id="copy-bytes" class="ctl" title="Copy hex bytes">
-            Copy
+          <button
+            id="copy-bytes"
+            class="ctl toolbar-icon-btn"
+            title="Copy hex bytes to clipboard"
+            aria-label="Copy hex bytes to clipboard"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="9" y="9" width="11" height="11" rx="2" />
+              <path
+                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+              />
+            </svg>
           </button>
         </div>
         <input

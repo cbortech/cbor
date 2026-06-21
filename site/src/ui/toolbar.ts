@@ -8,6 +8,20 @@ import { SAMPLES } from '../samples';
 export type BytesMode = 'annotated' | 'plain' | 'js' | 'edit';
 
 const THEME_KEY = 'cbor-site-theme';
+const copyFeedback = new WeakMap<
+  HTMLElement,
+  { html: string; timer: ReturnType<typeof setTimeout> }
+>();
+
+function createCheckIcon(): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'm5 12 4 4L19 6');
+  svg.appendChild(path);
+  return svg;
+}
 
 export function initTheme(): void {
   const stored = localStorage.getItem(THEME_KEY);
@@ -30,17 +44,21 @@ export async function copyWithFeedback(
 ): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
-    const original = button.textContent;
-    button.textContent = '✓';
-    setTimeout(() => {
-      button.textContent = original;
+    const active = copyFeedback.get(button);
+    if (active) clearTimeout(active.timer);
+    const html = active?.html ?? button.innerHTML;
+    button.replaceChildren(createCheckIcon());
+    const timer = setTimeout(() => {
+      button.innerHTML = html;
+      copyFeedback.delete(button);
     }, 1200);
+    copyFeedback.set(button, { html, timer });
   } catch {
     // Clipboard unavailable (permissions); nothing sensible to do.
   }
 }
 
-export function initSamples(onSelect: (cdn: string) => void): void {
+export function initSamples(onSelect: (cdn: string) => void): () => void {
   const select = document.getElementById('samples') as HTMLSelectElement;
   for (const sample of SAMPLES) {
     const option = document.createElement('option');
@@ -51,8 +69,10 @@ export function initSamples(onSelect: (cdn: string) => void): void {
   select.addEventListener('change', () => {
     const sample = SAMPLES.find((s) => s.name === select.value);
     if (sample) onSelect(sample.cdn);
-    select.selectedIndex = 0; // restore the "Samples…" label
   });
+  return () => {
+    select.selectedIndex = 0;
+  };
 }
 
 export function initFormatPopover(): void {

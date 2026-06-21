@@ -12,6 +12,7 @@
 // the real CborItem type: extensions/types → ast/CborItem → types → extensions/types.
 import type { CborItem } from '../ast/CborItem';
 import type { FromCBOROptions, FromJSOptions } from '../types';
+import type { EncodingWidth } from '../cbor/encode';
 
 /**
  * Plugin that extends EDN parsing, CBOR decoding, and `fromJS()` for specific
@@ -58,7 +59,8 @@ export interface CborExtension {
   parseAppString?(
     prefix: string,
     content: string,
-    onError?: (msg: string) => void
+    onError?: (msg: string) => void,
+    options?: { encodingWidth?: EncodingWidth }
   ): CborItem;
 
   /**

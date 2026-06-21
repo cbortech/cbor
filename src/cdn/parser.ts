@@ -464,6 +464,14 @@ class CDNParser {
         return this.parseEmbeddedCBOR();
       case 'APP_STRING': {
         this.t.consume();
+        // Consume optional encoding indicator (e.g. float'fe00'_2).
+        let appStrEw: EncodingWidth | undefined;
+        let appStrEiRaw = '';
+        if (this.t.peek().type === 'ENCODING_INDICATOR') {
+          const eiTok = this.t.consume();
+          appStrEw = this._resolveEncodingWidth(eiTok.value, eiTok);
+          appStrEiRaw = eiTok.raw;
+        }
         const ext = this.extByPrefix.get(tok.appPrefix!);
         if (!ext?.parseAppString) {
           if (!ext) this._hintMissingExtension(tok.appPrefix!, tok);
@@ -482,8 +490,13 @@ class CDNParser {
             const result = ext.parseAppString(
               tok.appPrefix!,
               tok.value,
-              this._extOnError(tok)
+              this._extOnError(tok),
+              appStrEw !== undefined ? { encodingWidth: appStrEw } : undefined
             );
+            // Generic EI post-processing: apply encoding indicator when the
+            // extension didn't handle it itself (e.g. dt'...'_2).
+            if (appStrEw !== undefined)
+              this._applyEiToResult(result, appStrEw, tok);
             // Propagate ednSource so preserveByteString / appStrings round-trips correctly.
             // instanceof narrows the type; getPrototypeOf excludes subclasses like CborIpExt.
             if (
@@ -494,10 +507,10 @@ class CDNParser {
               return new CborByteString(result.value, {
                 ednEncoding: result.ednEncoding,
                 encodingWidth: result.encodingWidth,
-                ednSource: tok.raw,
+                ednSource: tok.raw + appStrEiRaw,
               });
             if (result instanceof CborFloat && result.ednSource === undefined)
-              result.ednSource = tok.raw;
+              result.ednSource = tok.raw + appStrEiRaw;
             return result;
           } catch (e) {
             if (this._options.strict !== false) throw e;
@@ -522,6 +535,12 @@ class CDNParser {
           items.push(this.parseValue());
         }
         this.expect('GT_GT');
+        let seqEw: EncodingWidth | undefined;
+        let seqEiTok: Token | undefined;
+        if (this.t.peek().type === 'ENCODING_INDICATOR') {
+          seqEiTok = this.t.consume();
+          seqEw = this._resolveEncodingWidth(seqEiTok.value, seqEiTok);
+        }
         const seqExt = this.extByPrefix.get(tok.appPrefix!);
         if (!seqExt) {
           this._hintMissingExtension(tok.appPrefix!, tok);
@@ -545,6 +564,8 @@ class CDNParser {
               items,
               this._extOnError(tok)
             );
+            if (seqEw !== undefined)
+              this._applyEiToResult(result, seqEw, seqEiTok ?? tok);
             const rawSource = this.t.source.slice(
               tok.offset,
               this.t.lastEndOffset
@@ -640,6 +661,12 @@ class CDNParser {
       if (ext?.parseTag) {
         const result = ext.parseTag(tagNum, content);
         if (result !== undefined) {
+          if (
+            result instanceof CborTag &&
+            encodingWidth !== undefined &&
+            result.encodingWidth === undefined
+          )
+            result.encodingWidth = encodingWidth;
           if (setupWarnings.length > 0) {
             result.warnings ??= [];
             result.warnings.push(...setupWarnings);
@@ -996,7 +1023,12 @@ class CDNParser {
       items.push(this.parseValue());
     }
     this.expect('GT_GT');
-    return new CborEmbeddedCBOR(items);
+    let encodingWidth: EncodingWidth | undefined;
+    if (this.t.peek().type === 'ENCODING_INDICATOR') {
+      const eiTok = this.t.consume();
+      encodingWidth = this._resolveEncodingWidth(eiTok.value, eiTok);
+    }
+    return new CborEmbeddedCBOR(items, { encodingWidth });
   }
 
   private parseArray(): CborArray {
@@ -1211,6 +1243,101 @@ class CDNParser {
    * `storedValue` is the CBOR argument: the integer itself for uint/tag, `abs(n)−1` for nint,
    * the byte-length for strings, or the item count for arrays/maps.
    */
+  /** Apply an encoding indicator to a parsed app-string / app-sequence result. */
+  private _applyEiToResult(
+    result: CborItem,
+    ew: EncodingWidth,
+    tok: Token
+  ): void {
+    if (result instanceof CborFloat) {
+      const targetPrec: FloatPrecision | undefined =
+        ew === 1
+          ? 'half'
+          : ew === 2
+            ? 'single'
+            : ew === 3
+              ? 'double'
+              : undefined;
+      if (targetPrec === undefined) {
+        this._warnOrFail(
+          `encoding indicator _${ew} is not valid for a float; use _1, _2, or _3`,
+          tok
+        );
+      } else if (result.precision !== targetPrec) {
+        if (targetPrec !== 'double') {
+          const rt =
+            targetPrec === 'half'
+              ? float16BitsToFloat64(float64ToFloat16Bits(result.value))
+              : Math.fround(result.value);
+          if (!Object.is(rt, result.value) && !isNaN(result.value))
+            this._warnOrFail(
+              `${result.value} cannot be exactly represented as ${targetPrec === 'half' ? 'float16 (_1)' : 'float32 (_2)'}`,
+              tok
+            );
+        }
+        result.precision = targetPrec;
+      }
+    } else if (result instanceof CborUint) {
+      if (result.encodingWidth === undefined) {
+        const ewv = this._validateEncodingFit(result.value, ew, tok);
+        if (ewv !== undefined) result.encodingWidth = ewv;
+      }
+    } else if (result instanceof CborNint) {
+      if (result.encodingWidth === undefined) {
+        const ewv = this._validateEncodingFit(result.argument, ew, tok);
+        if (ewv !== undefined) result.encodingWidth = ewv;
+      }
+    } else if (result instanceof CborByteString) {
+      if (result.encodingWidth === undefined) {
+        const ewv = this._validateEncodingFit(
+          BigInt(result.value.length),
+          ew,
+          tok
+        );
+        if (ewv !== undefined) result.encodingWidth = ewv;
+      }
+    } else if (result instanceof CborTextString) {
+      if (result.encodingWidth === undefined) {
+        const ewv = this._validateEncodingFit(
+          BigInt(textEncoder.encode(result.value).length),
+          ew,
+          tok
+        );
+        if (ewv !== undefined) result.encodingWidth = ewv;
+      }
+    } else if (result instanceof CborArray) {
+      if (result.encodingWidth === undefined) {
+        const ewv = this._validateEncodingFit(
+          BigInt(result.items.length),
+          ew,
+          tok
+        );
+        if (ewv !== undefined) result.encodingWidth = ewv;
+      }
+    } else if (result instanceof CborMap) {
+      if (result.encodingWidth === undefined) {
+        const ewv = this._validateEncodingFit(
+          BigInt(result.entries.length),
+          ew,
+          tok
+        );
+        if (ewv !== undefined) result.encodingWidth = ewv;
+      }
+    } else if (result instanceof CborTag) {
+      // Per draft-ietf-cbor-edn-literals-25 §2.3.1, the EI applies to
+      // the tag number, not to the content (e.g. 1_1(4711) → 2-byte tag).
+      if (result.encodingWidth === undefined) {
+        const ewv = this._validateEncodingFit(result.tag, ew, tok);
+        if (ewv !== undefined) result.encodingWidth = ewv;
+      }
+    } else {
+      this._warnOrFail(
+        `encoding indicator _${ew} is not applicable to this app-string result type`,
+        tok
+      );
+    }
+  }
+
   private _validateEncodingFit(
     storedValue: bigint,
     ew: EncodingWidth,

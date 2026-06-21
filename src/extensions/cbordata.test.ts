@@ -53,4 +53,16 @@ describe('tag 24: embedded CBOR (RFC 8949 §3.4.5.1)', () => {
     expect(r.tag).toBe(24n);
     expect(r.content).toBeInstanceOf(CborByteString);
   });
+
+  test('tag(24, byte-string with 2-byte length for 1-byte content) → 24(<<1>>_1)', () => {
+    // d8 18 = tag(24, 1-byte number)
+    // 59 0001 = byte-string with 2-byte length=1 (non-canonical; canonical is 41)
+    // 01 = inner CBOR: uint(1)
+    // The CborEmbeddedCBOR must carry the outer byte-string's encodingWidth.
+    const r = decodeCBOR(hex('d8 18 59 0001 01')) as CborTag;
+    expect(r.tag).toBe(24n);
+    expect(r.content).toBeInstanceOf(CborEmbeddedCBOR);
+    expect((r.content as CborEmbeddedCBOR).encodingWidth).toBe(1);
+    expect(r.toCDN()).toBe('24(<<1>>_1)');
+  });
 });

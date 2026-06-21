@@ -9,12 +9,16 @@ import {
   type CborWriter,
   type EncodingWidth,
 } from '../cbor/encode';
+import {
+  resolveEiSuffix,
+  canonicalEncodingWidth,
+} from '../cdn/serialize-utils';
 
 /** CBOR Major Type 6 — tagged data item. */
 export class CborTag extends CborItem {
   readonly tag: bigint;
   readonly content: CborItem;
-  readonly encodingWidth: EncodingWidth | undefined;
+  encodingWidth: EncodingWidth | undefined;
 
   constructor(
     tag: number | bigint,
@@ -35,8 +39,9 @@ export class CborTag extends CborItem {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    const suffix =
-      this.encodingWidth !== undefined ? `_${this.encodingWidth}` : '';
+    const suffix = resolveEiSuffix(options, this.encodingWidth, () =>
+      canonicalEncodingWidth(this.tag)
+    );
     return `${this.tag}${suffix}(${this.content._toCDN(options, depth)})`;
   }
 
@@ -52,7 +57,9 @@ export class CborTag extends CborItem {
         comment: `Tag ${this.tag}`,
       },
     ];
-    lines.push(...this.content._toHexDump(depth + 1, options));
+    lines.push(
+      ...this.content._toHexDump(depth + 1, { ...options, appStrings: false })
+    );
     return lines;
   }
 

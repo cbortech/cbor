@@ -128,11 +128,46 @@ const onCursorMoved = debounce((pos: number): void => {
 }, 100);
 
 const initialText = decodeShareHash(location.hash) ?? DEFAULT_SAMPLE;
+let resetSamples = (): void => {};
 
 const editor = createEditor(el('editor'), initialText, {
-  onDocChanged: debouncedUpdate,
+  onDocChanged(text) {
+    if (text.trim() === '') resetSamples();
+    debouncedUpdate(text);
+  },
   onCursorMoved,
 });
+
+function initFileDrop(target: HTMLElement, onFile: (file: File) => void): void {
+  const hasFiles = (event: DragEvent): boolean =>
+    Array.from(event.dataTransfer?.types ?? []).includes('Files');
+
+  target.addEventListener('dragover', (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    target.classList.add('is-file-dragover');
+  });
+  target.addEventListener('dragleave', (event) => {
+    const next = event.relatedTarget;
+    if (!(next instanceof Node) || !target.contains(next)) {
+      target.classList.remove('is-file-dragover');
+    }
+  });
+  target.addEventListener(
+    'drop',
+    (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      target.classList.remove('is-file-dragover');
+      const file = event.dataTransfer?.files[0];
+      if (!file) return;
+      onFile(file);
+    },
+    true
+  );
+}
 
 // ── Pane resize ──────────────────────────────────────────────────────────────
 
@@ -201,7 +236,7 @@ hexviewEl.addEventListener('paste', (e) => {
 
 initTheme();
 initFormatPopover();
-initSamples((cdn) => setEditorText(editor, cdn));
+resetSamples = initSamples((cdn) => setEditorText(editor, cdn));
 initModeTabs((next) => {
   mode = next;
   renderBytesPane();
@@ -228,9 +263,62 @@ el('copy-cdn').addEventListener('click', (e) => {
   );
 });
 
+// ── CDN text file import / export ────────────────────────────────────────────
+
+const cdnImportInput = el<HTMLInputElement>('cdn-import-input');
+
+function importCdnFile(file: File): void {
+  file
+    .text()
+    .then((text) => {
+      resetSamples();
+      setEditorText(editor, text);
+    })
+    .catch((e: unknown) => {
+      setStatus('error', e instanceof Error ? e.message : String(e));
+    });
+}
+
+el('cdn-import-btn').addEventListener('click', () => cdnImportInput.click());
+
+cdnImportInput.addEventListener('change', () => {
+  const file = cdnImportInput.files?.[0];
+  if (!file) return;
+  cdnImportInput.value = '';
+  importCdnFile(file);
+});
+
+initFileDrop(el('editor'), importCdnFile);
+
+el('cdn-export-btn').addEventListener('click', () => {
+  const text = editor.state.doc.toString().replace(/\r\n?|\n/g, '\r\n');
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'data.cdn';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
 // ── CBOR file import ─────────────────────────────────────────────────────────
 
 const importInput = el<HTMLInputElement>('import-input');
+
+function importCborFile(file: File): void {
+  file
+    .arrayBuffer()
+    .then((buf) => {
+      const cdn = CBOR.fromCBOR(new Uint8Array(buf), {
+        extensions: SITE_EXTENSIONS,
+      }).toCDN({ indent: 2 });
+      resetSamples();
+      setEditorText(editor, cdn);
+    })
+    .catch((e: unknown) => {
+      setStatus('error', e instanceof Error ? e.message : String(e));
+    });
+}
 
 el('import-btn').addEventListener('click', () => importInput.click());
 
@@ -238,17 +326,12 @@ importInput.addEventListener('change', () => {
   const file = importInput.files?.[0];
   if (!file) return;
   importInput.value = '';
-  file.arrayBuffer().then((buf) => {
-    try {
-      const cdn = CBOR.fromCBOR(new Uint8Array(buf), {
-        extensions: SITE_EXTENSIONS,
-      }).toCDN({ indent: 2 });
-      setEditorText(editor, cdn);
-    } catch (e) {
-      setStatus('error', e instanceof Error ? e.message : String(e));
-    }
-  });
+  importCborFile(file);
 });
+
+[hexviewEl, jsViewEl, editWrapEl].forEach((target) =>
+  initFileDrop(target, importCborFile)
+);
 
 // ── CBOR file export ─────────────────────────────────────────────────────────
 

@@ -10,7 +10,13 @@ import { parseCDN } from '../cdn/parser';
 // Internal lexer reuse: parseCDN() validates embedded CDN first; this pass
 // only needs token offsets so string formatting can split without changing text.
 import { Tokenizer, type TokenType } from '../cdn/tokenizer';
-import { escapeString, indentOf, resolveIndent } from '../cdn/serialize-utils';
+import {
+  escapeString,
+  indentOf,
+  resolveIndent,
+  resolveEiSuffix,
+  canonicalEncodingWidth,
+} from '../cdn/serialize-utils';
 
 const textEncoder = new TextEncoder();
 let didWarnCborEdnTextStringFormat = false;
@@ -19,7 +25,7 @@ let didWarnCborEdnTextStringFormat = false;
 export class CborTextString extends CborItem {
   readonly indefiniteLength = false as const;
   readonly value: string;
-  readonly encodingWidth: EncodingWidth | undefined;
+  encodingWidth: EncodingWidth | undefined;
 
   constructor(value: string, options?: { encodingWidth?: EncodingWidth }) {
     super();
@@ -34,8 +40,9 @@ export class CborTextString extends CborItem {
   }
 
   _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    const suffix =
-      this.encodingWidth !== undefined ? `_${this.encodingWidth}` : '';
+    const suffix = resolveEiSuffix(options, this.encodingWidth, () =>
+      canonicalEncodingWidth(BigInt(textEncoder.encode(this.value).length))
+    );
     return formatTextString(this.value, suffix, options, depth);
   }
 
