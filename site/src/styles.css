@@ -295,6 +295,21 @@ select.ctl {
   padding: 3px 6px;
 }
 
+.toolbar-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  padding: 3px 6px;
+}
+.toolbar-icon-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .format-group {
   display: inline-flex;
 }
@@ -365,6 +380,32 @@ select.ctl {
 }
 .editor-host > .cm-editor {
   height: 100%;
+}
+
+.is-file-dragover {
+  position: relative;
+  box-shadow: inset 0 0 0 2px var(--accent);
+  cursor: copy;
+}
+
+.is-file-dragover::after {
+  content: 'Drop to import';
+  position: absolute;
+  z-index: 20;
+  inset: 8px;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  background: var(--bg-editor);
+  color: var(--accent);
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-size: 1rem;
+  font-weight: 600;
+  pointer-events: none;
 }
 
 /* ── CDN token colors (classes added by cdn-highlight) ──────────────────── */
