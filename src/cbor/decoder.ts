@@ -29,8 +29,28 @@ import {
   AI_INDEFINITE,
   BREAK_CODE,
 } from './constants';
+import type { EncodingWidth } from './encode';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Returns a non-canonical EncodingWidth when the CBOR additional-info byte
+ * uses more bytes than the minimum needed for `value`. Returns undefined for
+ * canonical (minimum-width) encodings so they round-trip without an _N marker.
+ *
+ * Canonical ranges: immediate 0–23, 1-byte 24–255, 2-byte 256–65535,
+ * 4-byte 65536–4294967295, 8-byte ≥ 4294967296.
+ */
+function aiToNonCanonicalEW(
+  ai: number,
+  value: bigint
+): EncodingWidth | undefined {
+  if (ai === AI_1BYTE && value <= 23n) return 0;
+  if (ai === AI_2BYTE && value <= 0xffn) return 1;
+  if (ai === AI_4BYTE && value <= 0xffffn) return 2;
+  if (ai === AI_8BYTE && value <= 0xffff_ffffn) return 3;
+  return undefined;
+}
 
 const textDecoderStrict = new TextDecoder('utf-8', {
   fatal: true,
@@ -300,14 +320,19 @@ function decodeItemInner(
     // ── Major Type 0: unsigned integer ────────────────────────────────────────
     case MT_UINT: {
       const { value, nextOffset } = readArgument(view, offset, ai);
-      return { value: new CborUint(value), nextOffset };
+      const encodingWidth = aiToNonCanonicalEW(ai, value);
+      return { value: new CborUint(value, { encodingWidth }), nextOffset };
     }
 
     // ── Major Type 1: negative integer ───────────────────────────────────────
     case MT_NINT: {
       const { value, nextOffset } = readArgument(view, offset, ai);
+      const encodingWidth = aiToNonCanonicalEW(ai, value);
       // CBOR encodes negative integers as -1 - argument
-      return { value: new CborNint(-1n - value), nextOffset };
+      return {
+        value: new CborNint(-1n - value, { encodingWidth }),
+        nextOffset,
+      };
     }
 
     // ── Major Type 2: byte string ─────────────────────────────────────────────
@@ -329,6 +354,7 @@ function decodeItemInner(
         ai
       );
       const length = Number(len);
+      const encodingWidth = aiToNonCanonicalEW(ai, len);
       if (dataOffset + length > view.byteLength)
         decodeError('byte string extends beyond input');
       const bytes = new Uint8Array(
@@ -337,7 +363,7 @@ function decodeItemInner(
         length
       );
       return {
-        value: new CborByteString(bytes.slice()),
+        value: new CborByteString(bytes.slice(), { encodingWidth }),
         nextOffset: dataOffset + length,
       };
     }
@@ -361,6 +387,7 @@ function decodeItemInner(
         ai
       );
       const length = Number(len);
+      const encodingWidth = aiToNonCanonicalEW(ai, len);
       if (dataOffset + length > view.byteLength)
         decodeError('text string extends beyond input');
       const bytes = new Uint8Array(
@@ -381,7 +408,7 @@ function decodeItemInner(
         // Only reached in non-strict mode — decode with replacement characters
         text = textDecoderLenient.decode(bytes);
       }
-      const textNode = new CborTextString(text);
+      const textNode = new CborTextString(text, { encodingWidth });
       if (utf8Warning) addWarning(textNode, utf8Warning);
       return { value: textNode, nextOffset: dataOffset + length };
     }
@@ -413,6 +440,7 @@ function decodeItemInner(
         ai
       );
       const length = Number(count);
+      const encodingWidth = aiToNonCanonicalEW(ai, count);
       const items: CborItem[] = [];
       let pos = itemsStart;
       for (let i = 0; i < length; i++) {
@@ -420,7 +448,10 @@ function decodeItemInner(
         items.push(result.value);
         pos = result.nextOffset;
       }
-      return { value: new CborArray(items), nextOffset: pos };
+      return {
+        value: new CborArray(items, { encodingWidth }),
+        nextOffset: pos,
+      };
     }
 
     // ── Major Type 5: map ─────────────────────────────────────────────────────
@@ -459,6 +490,7 @@ function decodeItemInner(
         ai
       );
       const length = Number(count);
+      const encodingWidth = aiToNonCanonicalEW(ai, count);
       const entries: [CborItem, CborItem][] = [];
       const seenKeys = new Set<string>();
       const mapWarnings: DecodeWarning[] = [];
@@ -471,7 +503,7 @@ function decodeItemInner(
         pos = valResult.nextOffset;
         entries.push([keyResult.value, valResult.value]);
       }
-      const mapNode = new CborMap(entries);
+      const mapNode = new CborMap(entries, { encodingWidth });
       for (const w of mapWarnings) addWarning(mapNode, w);
       return { value: mapNode, nextOffset: pos };
     }
@@ -485,14 +517,20 @@ function decodeItemInner(
         offset,
         ai
       );
+      const tagEncodingWidth = aiToNonCanonicalEW(ai, tagNum);
       const contentResult = decodeItem(view, contentStart, options, tagExts);
       for (const ext of tagExts) {
         const result = ext.parseTag!(tagNum, contentResult.value, options);
-        if (result !== undefined)
+        if (result !== undefined) {
+          if (result instanceof CborTag && tagEncodingWidth !== undefined)
+            result.encodingWidth = tagEncodingWidth;
           return { value: result, nextOffset: contentResult.nextOffset };
+        }
       }
       return {
-        value: new CborTag(tagNum, contentResult.value),
+        value: new CborTag(tagNum, contentResult.value, {
+          encodingWidth: tagEncodingWidth,
+        }),
         nextOffset: contentResult.nextOffset,
       };
     }

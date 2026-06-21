@@ -38,6 +38,10 @@ import { CborTextString } from '../ast/CborTextString';
 import { CborByteString } from '../ast/CborByteString';
 import { CborSimple } from '../ast/CborSimple';
 import { parseIPv4, parseIPv6, formatIPv4, formatIPv6 } from '../utils/ip';
+import {
+  resolveEiSuffix,
+  canonicalEncodingWidth,
+} from '../cdn/serialize-utils';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -633,7 +637,10 @@ export class CborCriExt extends CborArray {
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     if (options?.appStrings === false) return super._toCDN(options, depth);
     try {
-      return `${PREFIX_CRI}'${criItemsToUri(this.items)}'`;
+      const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
+        canonicalEncodingWidth(BigInt(this.items.length))
+      );
+      return `${PREFIX_CRI}'${criItemsToUri(this.items)}'${eiSuffix}`;
     } catch {
       return super._toCDN(options, depth);
     }
@@ -652,7 +659,15 @@ export class CborTaggedCriExt extends CborTag {
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     if (options?.appStrings === false) return super._toCDN(options, depth);
     try {
-      return `${PREFIX_CRI_TAGGED}'${criItemsToUri((this.content as CborArray).items)}'`;
+      const inner = this.content as CborArray;
+      // CRI'...'_N only encodes the tag's width. If the inner array uses a
+      // non-canonical count header, fall back to generic tag notation to preserve it.
+      if (inner.encodingWidth !== undefined)
+        return super._toCDN(options, depth);
+      const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
+        canonicalEncodingWidth(TAG_CRI)
+      );
+      return `${PREFIX_CRI_TAGGED}'${criItemsToUri(inner.items)}'${eiSuffix}`;
     } catch {
       return super._toCDN(options, depth);
     }

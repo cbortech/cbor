@@ -4,6 +4,7 @@
  */
 
 import type { CborComment, CborComments, ToCDNOptions } from '../types';
+import type { EncodingWidth } from '../cbor/encode';
 import { bytesToHex as toHex } from '../utils/hex';
 
 // ─── Indent helpers ───────────────────────────────────────────────────────────
@@ -359,13 +360,47 @@ export function floatValueToString(value: number): string {
 
 /**
  * EDN encoding-indicator suffix for a float precision.
- * Returns '' when the auto-selected precision matches (no suffix needed).
+ * Returns '' when the auto-selected precision matches (no suffix needed) in auto mode.
  */
 export function floatSuffix(
   _value: number,
   precision: 'half' | 'single' | 'double' | undefined,
-  autoSelected: 'half' | 'single' | 'double'
+  autoSelected: 'half' | 'single' | 'double',
+  mode?: 'always' | 'auto' | 'never'
 ): string {
+  if (mode === 'never') return '';
+  const actual = precision ?? autoSelected;
+  if (mode === 'always')
+    return actual === 'half' ? '_1' : actual === 'single' ? '_2' : '_3';
+  // 'auto' (default)
   if (precision === undefined || precision === autoSelected) return '';
   return precision === 'half' ? '_1' : precision === 'single' ? '_2' : '_3';
+}
+
+/** Compute the canonical (minimum) CBOR encoding width for a non-negative integer argument. */
+export function canonicalEncodingWidth(n: bigint): EncodingWidth {
+  if (n <= 23n) return 'i';
+  if (n <= 0xffn) return 0;
+  if (n <= 0xffffn) return 1;
+  if (n <= 0xffff_ffffn) return 2;
+  return 3;
+}
+
+/**
+ * Resolve the encoding-indicator suffix string (`''` or `'_N'`) based on
+ * `options.encodingIndicators` and the item's recorded encoding width.
+ *
+ * @param options       - toCDN options (may be undefined)
+ * @param encodingWidth - width stored on the item (undefined = canonical)
+ * @param getCanonical  - lazily compute the canonical width (only called in 'always' mode)
+ */
+export function resolveEiSuffix(
+  options: ToCDNOptions | undefined,
+  encodingWidth: EncodingWidth | undefined,
+  getCanonical: () => EncodingWidth
+): string {
+  const mode = options?.encodingIndicators ?? 'auto';
+  if (mode === 'never') return '';
+  if (mode === 'always') return `_${encodingWidth ?? getCanonical()}`;
+  return encodingWidth !== undefined ? `_${encodingWidth}` : '';
 }

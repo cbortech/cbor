@@ -402,3 +402,46 @@ describe('ip — appStrings: false', () => {
     );
   });
 });
+
+// ─── IP: non-canonical inner encoding falls back to generic tag notation ──────
+
+function hexBytes(s: string): Uint8Array {
+  s = s.replace(/\s+/g, '');
+  const result = new Uint8Array(s.length / 2);
+  for (let i = 0; i < s.length; i += 2)
+    result[i / 2] = parseInt(s.slice(i, i + 2), 16);
+  return result;
+}
+
+describe('ip — non-canonical inner encoding falls back to generic tag notation', () => {
+  // Per §2.3.1: IP'...'_N encodes only the tag number's width.
+  // When the inner byte string has a non-canonical length header, _toCDN() falls back
+  // to CborTag._toCDN() so the inner EI is preserved.
+
+  test("tag(52, 4-byte content with 2-byte length header) → 52(h'c000022a'_1)", () => {
+    // d8 34 = tag(52, 1-byte number)
+    // 59 0004 = byte-string with 2-byte length=4 (non-canonical; canonical is 44)
+    // c0 00 02 2a = 192.0.2.42
+    const r = decodeCBOR(
+      hexBytes('d8 34 59 0004 c0 00 02 2a')
+    ) as CborTaggedIpExt;
+    expect(r).toBeInstanceOf(CborTaggedIpExt);
+    expect(r.toCDN()).toBe("52(h'c000022a'_1)");
+  });
+
+  test("tag(54, 16-byte content with 2-byte length header) → 54(h'…'_1)", () => {
+    // d8 36 = tag(54, 1-byte number); 59 0010 = 2-byte length=16 (non-canonical)
+    const addr = '20010db8000000000000000000000001'; // 2001:db8::1
+    const r = decodeCBOR(hexBytes(`d8 36 59 0010 ${addr}`)) as CborTaggedIpExt;
+    expect(r).toBeInstanceOf(CborTaggedIpExt);
+    expect(r.toCDN()).toBe(`54(h'${addr}'_1)`);
+  });
+
+  test("direct construction: tag(52, CborByteString with encodingWidth=1) → 52(h'…'_1)", () => {
+    // Verify _toCDN fallback without going through decodeCBOR.
+    const inner = new CborByteString(new Uint8Array([192, 0, 2, 42]));
+    inner.encodingWidth = 1;
+    const tagged = new CborTaggedIpExt(52n, inner);
+    expect(tagged.toCDN()).toBe("52(h'c000022a'_1)");
+  });
+});

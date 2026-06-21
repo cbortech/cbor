@@ -416,3 +416,51 @@ describe('dt_as_Date — round-trip', () => {
     expect(restored.toCDN()).toBe("DT'1969-07-21T02:56:16.500Z'");
   });
 });
+
+// ─── DT: non-canonical inner encoding falls back to generic tag notation ──────
+
+describe('dt — non-canonical inner encoding falls back to generic tag notation', () => {
+  // Per §2.3.1: DT'...'_N encodes only the tag number's width.
+  // When the inner content uses a non-canonical encoding that cannot be
+  // expressed in app-string notation, _toCDN() falls back to CborTag._toCDN()
+  // so the inner EI is preserved in generic tag notation.
+
+  test('tag(1, float64(1.0)) — double is non-canonical, falls back to 1(1.0_3)', () => {
+    // 1.0 is exactly representable in float16; using float64 is non-canonical.
+    // parseTag must copy float.precision so _toCDN can detect the discrepancy.
+    const content = new CborEpochDtExtFloat(1.0);
+    content.precision = 'double';
+    const tagged = new CborTaggedEpochDtExt(content);
+    expect(tagged.toCDN()).toBe('1(1.0_3)');
+  });
+
+  test('tag(1, uint(1_0)) — 1-byte header non-canonical, falls back to 1(1_0)', () => {
+    // Value 1 fits in inline encoding; 1-byte header (AI=24) is non-canonical.
+    const content = new CborEpochDtExtUint(1n, { encodingWidth: 0 });
+    const tagged = new CborTaggedEpochDtExt(content);
+    expect(tagged.toCDN()).toBe('1(1_0)');
+  });
+
+  test('fromCBOR tag(1, float64(1.0)) → fallback preserved through decoding', () => {
+    // c1 = tag(1, inline AI), fb 3ff0... = float64(1.0).
+    // After decodeCBOR, parseTag must copy precision='double' to CborEpochDtExtFloat.
+    const bytes = new Uint8Array([
+      0xc1, 0xfb, 0x3f, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ]);
+    const n = decodeCBOR(bytes) as CborTaggedEpochDtExt;
+    expect(n).toBeInstanceOf(CborTaggedEpochDtExt);
+    const cdn = n.toCDN();
+    expect(cdn).toBe('1(1.0_3)');
+    expect(CBOR.fromCDN(cdn).toCBOR()).toEqual(bytes);
+  });
+
+  test('fromCBOR tag(1, uint(1) with 1-byte header) → fallback preserved through decoding', () => {
+    // c1 = tag(1, inline AI), 18 01 = uint(1) with 1-byte header (non-canonical).
+    const bytes = new Uint8Array([0xc1, 0x18, 0x01]);
+    const n = decodeCBOR(bytes) as CborTaggedEpochDtExt;
+    expect(n).toBeInstanceOf(CborTaggedEpochDtExt);
+    const cdn = n.toCDN();
+    expect(cdn).toBe('1(1_0)');
+    expect(CBOR.fromCDN(cdn).toCBOR()).toEqual(bytes);
+  });
+});

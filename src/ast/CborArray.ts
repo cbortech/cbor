@@ -18,13 +18,15 @@ import {
   formatTrailingComments,
   hasContainerLayoutComments,
   hasPreservedComments,
+  resolveEiSuffix,
+  canonicalEncodingWidth,
 } from '../cdn/serialize-utils';
 
 /** CBOR Major Type 4 — array (definite- or indefinite-length). */
 export class CborArray extends CborItem {
   readonly items: CborItem[];
   readonly indefiniteLength: boolean;
-  readonly encodingWidth: EncodingWidth | undefined;
+  encodingWidth: EncodingWidth | undefined;
 
   constructor(
     items: CborItem[],
@@ -61,10 +63,12 @@ export class CborArray extends CborItem {
       options,
       indentStr === null
     );
-    const eiSuffix =
-      !this.indefiniteLength && this.encodingWidth !== undefined
-        ? `_${this.encodingWidth} `
-        : '';
+    const eiRaw = this.indefiniteLength
+      ? ''
+      : resolveEiSuffix(options, this.encodingWidth, () =>
+          canonicalEncodingWidth(BigInt(this.items.length))
+        );
+    const eiSuffix = eiRaw ? eiRaw + ' ' : '';
 
     if (indentStr === null || (this.items.length === 0 && !hasComments)) {
       // single-line

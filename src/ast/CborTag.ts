@@ -9,6 +9,10 @@ import {
   type CborWriter,
   type EncodingWidth,
 } from '../cbor/encode';
+import {
+  resolveEiSuffix,
+  canonicalEncodingWidth,
+} from '../cdn/serialize-utils';
 
 /** CBOR Major Type 6 — tagged data item. */
 export class CborTag extends CborItem {
@@ -35,8 +39,9 @@ export class CborTag extends CborItem {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    const suffix =
-      this.encodingWidth !== undefined ? `_${this.encodingWidth}` : '';
+    const suffix = resolveEiSuffix(options, this.encodingWidth, () =>
+      canonicalEncodingWidth(this.tag)
+    );
     return `${this.tag}${suffix}(${this.content._toCDN(options, depth)})`;
   }
 

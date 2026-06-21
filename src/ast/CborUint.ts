@@ -6,11 +6,15 @@ import {
   type CborWriter,
   type EncodingWidth,
 } from '../cbor/encode';
+import {
+  resolveEiSuffix,
+  canonicalEncodingWidth,
+} from '../cdn/serialize-utils';
 
 /** CBOR Major Type 0 — unsigned integer (0 … 2^64−1). */
 export class CborUint extends CborItem {
   readonly value: bigint;
-  readonly encodingWidth: EncodingWidth | undefined;
+  encodingWidth: EncodingWidth | undefined;
 
   constructor(
     value: number | bigint,
@@ -30,8 +34,9 @@ export class CborUint extends CborItem {
   }
 
   _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
-    const suffix =
-      this.encodingWidth !== undefined ? `_${this.encodingWidth}` : '';
+    const suffix = resolveEiSuffix(options, this.encodingWidth, () =>
+      canonicalEncodingWidth(this.value)
+    );
     const v = this.value;
     switch (options?.intFormat) {
       case 'hex':

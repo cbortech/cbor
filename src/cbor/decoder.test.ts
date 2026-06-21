@@ -807,3 +807,63 @@ describe('input with non-zero byteOffset', () => {
     expect(r.value).toEqual(new Uint8Array([0x01, 0x02, 0x03]));
   });
 });
+
+// ─── CBOR → CDN: non-canonical widths produce EI suffix ──────────────────────
+
+describe('CBOR → CDN: non-canonical encoding width is captured as EI', () => {
+  test('uint: 18 01 (1-byte header for value 1, canonical is inline) → "1_0"', () => {
+    // AI_1BYTE with value ≤ 23 is non-canonical; canonical would be 0x01 (inline)
+    const n = decodeCBOR(hex('18 01')) as CborUint;
+    expect(n.encodingWidth).toBe(0);
+    expect(n.toCDN()).toBe('1_0');
+  });
+
+  test('nint: 38 00 (1-byte header for -1, canonical is inline) → "-1_0"', () => {
+    // argument 0 ≤ 23; canonical inline = 0x20
+    const n = decodeCBOR(hex('38 00')) as CborNint;
+    expect(n.encodingWidth).toBe(0);
+    expect(n.toCDN()).toBe('-1_0');
+  });
+
+  test('byte string: 59 0001 ff (2-byte length for 1-byte content) → "h\'ff\'_1"', () => {
+    // length 1 ≤ 0xff; canonical would use 1-byte header (0x41)
+    const n = decodeCBOR(hex('59 0001 ff')) as CborByteString;
+    expect(n.encodingWidth).toBe(1);
+    expect(n.toCDN()).toBe("h'ff'_1");
+  });
+
+  test('text string: 79 0001 41 (2-byte length for "A") → \'"A"_1\'', () => {
+    // UTF-8 length 1 ≤ 0xff; canonical would use 1-byte header (0x61)
+    const n = decodeCBOR(hex('79 0001 41')) as CborTextString;
+    expect(n.encodingWidth).toBe(1);
+    expect(n.toCDN()).toBe('"A"_1');
+  });
+
+  test('array: 99 0002 01 02 (2-byte count for 2 items) → "[_1 1,2]"', () => {
+    // count 2 ≤ 0xff; canonical would use 1-byte header (0x82)
+    const n = decodeCBOR(hex('99 0002 01 02')) as CborArray;
+    expect(n.encodingWidth).toBe(1);
+    expect(n.toCDN()).toBe('[_1 1,2]');
+  });
+
+  test('map: b9 0001 6161 01 (2-byte count for 1 entry) → \'{_1 "a":1}\'', () => {
+    // count 1 ≤ 0xff; canonical would use 1-byte header (0xa1)
+    const n = decodeCBOR(hex('b9 0001 61 61 01')) as CborMap;
+    expect(n.encodingWidth).toBe(1);
+    expect(n.toCDN()).toBe('{_1 "a":1}');
+  });
+
+  test('tag: d9 002a 01 (2-byte tag number 42) → "42_1(1)"', () => {
+    // tag 42 ≤ 0xff; canonical would be 1-byte (d8 2a); 2-byte header is non-canonical
+    const n = decodeCBOR(hex('d9 002a 01')) as CborTag;
+    expect(n.encodingWidth).toBe(1);
+    expect(n.toCDN()).toBe('42_1(1)');
+  });
+
+  test('float: fb 3ff0000000000000 (double-precision 1.0, canonical is half) → "1.0_3"', () => {
+    // 1.0 is exactly representable in float16; double is non-canonical
+    const n = decodeCBOR(hex('fb 3ff0 0000 0000 0000')) as CborFloat;
+    expect(n.precision).toBe('double');
+    expect(n.toCDN()).toBe('1.0_3');
+  });
+});

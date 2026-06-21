@@ -41,7 +41,10 @@ const cbordata: CborExtension = {
       : undefined;
     try {
       const decoded = decodeCBOR(value.value, innerOptions);
-      return new CborTag(TAG_CBOR_DATA, new CborEmbeddedCBOR([decoded]));
+      return new CborTag(
+        TAG_CBOR_DATA,
+        new CborEmbeddedCBOR([decoded], { encodingWidth: value.encodingWidth })
+      );
     } catch (e) {
       if (innerOptions?.strict !== false) {
         // In strict mode, propagate inner violations to the outer decode.

@@ -563,3 +563,42 @@ describe('cri — parse errors', () => {
     );
   });
 });
+
+// ─── CRI: non-canonical inner encoding falls back to generic tag notation ─────
+
+function hexBytes(s: string): Uint8Array {
+  s = s.replace(/\s+/g, '');
+  const result = new Uint8Array(s.length / 2);
+  for (let i = 0; i < s.length; i += 2)
+    result[i / 2] = parseInt(s.slice(i, i + 2), 16);
+  return result;
+}
+
+describe('cri — non-canonical inner encoding falls back to generic tag notation', () => {
+  // Per §2.3.1: CRI'...'_N encodes only the tag number's width.
+  // When the inner CRI array uses a non-canonical count header, _toCDN() falls
+  // back to CborTag._toCDN() so the inner EI is preserved.
+
+  test("tag(99, array with 2-byte count) → 99(cri'https:'_1)", () => {
+    // CRI'https:' encodes as tag(99, array(3: nint(-4), true, array([""]))).
+    // d8 63 = tag(99, 1-byte number)
+    // 99 0003 = array with 2-byte count=3 (non-canonical; canonical is 83)
+    // 23 = nint(-4, inline)   f5 = true   81 60 = array(1): [""]
+    const r = decodeCBOR(hexBytes('d8 63 99 0003 23 f5 81 60'));
+    expect(r).toBeInstanceOf(CborTaggedCriExt);
+    expect(r.toCDN()).toBe("99(cri'https:'_1)");
+  });
+
+  test('direct construction: CborTaggedCriExt with inner encodingWidth=1 → fallback', () => {
+    const inner = new CborCriExt(
+      [
+        new CborNint(-4n),
+        new CborSimple(21),
+        new CborArray([new CborTextString('')]),
+      ],
+      { encodingWidth: 1 }
+    );
+    const tagged = new CborTaggedCriExt(inner);
+    expect(tagged.toCDN()).toBe("99(cri'https:'_1)");
+  });
+});
