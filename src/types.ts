@@ -488,6 +488,19 @@ export interface ToCDNOptions {
    * newline split points.
    */
   textStringFormat?: TextStringFormat[];
+
+  /**
+   * Control whether CBOR encoding-width indicators (`_N`) are appended to CDN output.
+   *
+   * - `'always'`: always emit the encoding indicator, even for canonical encodings
+   *   (e.g. `1_i`, `"hello"_i`, `[_i 1, 2]`)
+   * - `'auto'`: emit indicators only when the CBOR encoding is non-canonical —
+   *   i.e. more bytes were used than necessary (e.g. `1_3` for a uint encoded with 8 bytes)
+   * - `'never'`: never emit encoding indicators
+   *
+   * @default 'auto'
+   */
+  encodingIndicators?: 'always' | 'auto' | 'never';
 }
 
 export type TextStringFormat = 'newline' | 'cdn' | DeprecatedTextStringFormat;

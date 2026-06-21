@@ -2,11 +2,18 @@ import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import type { AnnotatedLine } from './CborItem';
 import { MT_BYTES } from '../cbor/constants';
-import { writeHead, writeHeadTo, CborWriter } from '../cbor/encode';
+import {
+  writeHead,
+  writeHeadTo,
+  CborWriter,
+  type EncodingWidth,
+} from '../cbor/encode';
 import {
   resolveIndent,
   indentOf,
   resolveSeparators,
+  resolveEiSuffix,
+  canonicalEncodingWidth,
 } from '../cdn/serialize-utils';
 
 /**
@@ -21,10 +28,12 @@ import {
  */
 export class CborEmbeddedCBOR extends CborItem {
   readonly items: CborItem[];
+  encodingWidth: EncodingWidth | undefined;
 
-  constructor(items: CborItem[]) {
+  constructor(items: CborItem[], options?: { encodingWidth?: EncodingWidth }) {
     super();
     this.items = items;
+    this.encodingWidth = options?.encodingWidth;
   }
 
   /** The raw concatenated CBOR bytes of all contained items. */
@@ -38,12 +47,15 @@ export class CborEmbeddedCBOR extends CborItem {
     // The head needs the content's byte length, so the items are encoded
     // into a separate buffer first.
     const content = this._content(options);
-    writeHeadTo(writer, MT_BYTES, content.length);
+    writeHeadTo(writer, MT_BYTES, content.length, this.encodingWidth);
     writer.writeBytes(content);
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    if (this.items.length === 0) return '<<>>';
+    const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
+      canonicalEncodingWidth(BigInt(this._content(options).length))
+    );
+    if (this.items.length === 0) return `<<>>${eiSuffix}`;
 
     const indentStr = resolveIndent(options);
     const { inlineSep, multilineSep, trailSep } = resolveSeparators(
@@ -56,7 +68,7 @@ export class CborEmbeddedCBOR extends CborItem {
       const inner = this.items
         .map((item) => item._toCDN(options, depth + 1))
         .join(inlineSep);
-      return `<<${inner}>>`;
+      return `<<${inner}>>${eiSuffix}`;
     }
 
     // multi-line
@@ -71,7 +83,7 @@ export class CborEmbeddedCBOR extends CborItem {
         i < lastIdx ? `${line}${multilineSep}` : `${line}${trailSep}`
       )
       .join('\n');
-    return `<<\n${body}\n${closeIndent}>>`;
+    return `<<\n${body}\n${closeIndent}>>${eiSuffix}`;
   }
 
   override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
@@ -85,7 +97,7 @@ export class CborEmbeddedCBOR extends CborItem {
     const lines: AnnotatedLine[] = [
       {
         depth,
-        hex: toHex(writeHead(MT_BYTES, BigInt(n))),
+        hex: toHex(writeHead(MT_BYTES, BigInt(n), this.encodingWidth)),
         comment: `Embedded CBOR sequence, ${n} byte${n !== 1 ? 's' : ''}`,
       },
     ];

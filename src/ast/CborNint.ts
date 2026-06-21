@@ -6,6 +6,10 @@ import {
   type CborWriter,
   type EncodingWidth,
 } from '../cbor/encode';
+import {
+  resolveEiSuffix,
+  canonicalEncodingWidth,
+} from '../cdn/serialize-utils';
 
 /**
  * CBOR Major Type 1 — negative integer (−2^64 … −1).
@@ -46,8 +50,9 @@ export class CborNint extends CborItem {
   }
 
   _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
-    const suffix =
-      this.encodingWidth !== undefined ? `_${this.encodingWidth}` : '';
+    const suffix = resolveEiSuffix(options, this.encodingWidth, () =>
+      canonicalEncodingWidth(this.argument)
+    );
     const abs = this.argument + 1n; // absolute value of the negative number
     switch (options?.intFormat) {
       case 'hex':

@@ -17,8 +17,14 @@ import { CborNint } from '../ast/CborNint';
 import { CborFloat } from '../ast/CborFloat';
 import { CborTag } from '../ast/CborTag';
 import type { EncodingWidth } from '../cbor/encode';
+import { autoSelectFloatPrecision } from '../cbor/encode';
 import { CborTextString } from '../ast/CborTextString';
 import { CborByteString } from '../ast/CborByteString';
+import {
+  resolveEiSuffix,
+  canonicalEncodingWidth,
+  floatSuffix,
+} from '../cdn/serialize-utils';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -162,8 +168,9 @@ export class CborEpochDtExtUint extends CborUint {
 
   override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
     if (options?.appStrings === false) return super._toCDN(options, _depth);
-    const eiSuffix =
-      this.encodingWidth !== undefined ? `_${this.encodingWidth}` : '';
+    const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
+      canonicalEncodingWidth(this.value)
+    );
     return `${PREFIX_DT}'${epochToRfc3339(Number(this.value))}'${eiSuffix}`;
   }
 }
@@ -182,8 +189,9 @@ export class CborEpochDtExtNint extends CborNint {
 
   override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
     if (options?.appStrings === false) return super._toCDN(options, _depth);
-    const eiSuffix =
-      this.encodingWidth !== undefined ? `_${this.encodingWidth}` : '';
+    const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
+      canonicalEncodingWidth(this.argument)
+    );
     return `${PREFIX_DT}'${epochToRfc3339(Number(this.value))}'${eiSuffix}`;
   }
 }
@@ -202,14 +210,13 @@ export class CborEpochDtExtFloat extends CborFloat {
 
   override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
     if (options?.appStrings === false) return super._toCDN(options, _depth);
-    const eiSuffix =
-      this.precision === 'half'
-        ? '_1'
-        : this.precision === 'single'
-          ? '_2'
-          : this.precision === 'double'
-            ? '_3'
-            : '';
+    const autoSelected = autoSelectFloatPrecision(this.value);
+    const eiSuffix = floatSuffix(
+      this.value,
+      this.precision,
+      autoSelected,
+      options?.encodingIndicators ?? 'auto'
+    );
     return `${PREFIX_DT}'${epochToRfc3339(this.value)}'${eiSuffix}`;
   }
 }
@@ -219,18 +226,44 @@ export class CborEpochDtExtFloat extends CborFloat {
  * The RFC 3339 string is re-derived from the numeric content on each call.
  */
 export class CborTaggedEpochDtExt extends CborTag {
-  constructor(datetime: string, options?: { encodingWidth?: EncodingWidth }) {
-    super(TAG_EPOCH, parseDtAppString(datetime), options);
+  constructor(
+    datetimeOrContent:
+      | string
+      | CborEpochDtExtUint
+      | CborEpochDtExtNint
+      | CborEpochDtExtFloat,
+    options?: { encodingWidth?: EncodingWidth }
+  ) {
+    super(
+      TAG_EPOCH,
+      typeof datetimeOrContent === 'string'
+        ? parseDtAppString(datetimeOrContent)
+        : datetimeOrContent,
+      options
+    );
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     if (options?.appStrings === false) return super._toCDN(options, depth);
+    // Per §2.3.1, DT'...'_N encodes only the tag number's width.
+    // If the inner content has non-canonical encoding, fall back to generic tag
+    // notation so the inner EI (e.g. dt'...'_3) is not silently discarded.
     const c = this.content as
       | CborEpochDtExtUint
       | CborEpochDtExtNint
       | CborEpochDtExtFloat;
-    const epochSeconds = c instanceof CborFloat ? c.value : Number(c.value);
-    return `${PREFIX_DT_TAGGED}'${epochToRfc3339(epochSeconds)}'`;
+    const innerIsNonCanonical =
+      c instanceof CborFloat
+        ? c.precision !== undefined &&
+          c.precision !== autoSelectFloatPrecision(c.value)
+        : (c as CborUint | CborNint).encodingWidth !== undefined;
+    if (innerIsNonCanonical)
+      return super._toCDN({ ...options, appStrings: false }, depth);
+    const epochSec = c instanceof CborFloat ? c.value : Number(c.value);
+    const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
+      canonicalEncodingWidth(TAG_EPOCH)
+    );
+    return `${PREFIX_DT_TAGGED}'${epochToRfc3339(epochSec)}'${eiSuffix}`;
   }
 }
 
@@ -239,8 +272,15 @@ export class CborTaggedEpochDtExt extends CborTag {
  * Use dt_as_Date (or createDtExtension({ jsDate: true })) to produce these nodes.
  */
 export class CborTaggedEpochDtAsDateExt extends CborTaggedEpochDtExt {
-  constructor(datetime: string, options?: { encodingWidth?: EncodingWidth }) {
-    super(datetime, options);
+  constructor(
+    datetimeOrContent:
+      | string
+      | CborEpochDtExtUint
+      | CborEpochDtExtNint
+      | CborEpochDtExtFloat,
+    options?: { encodingWidth?: EncodingWidth }
+  ) {
+    super(datetimeOrContent, options);
   }
 
   override _toJS(_options?: ToJSOptions): Date {
@@ -303,14 +343,31 @@ export function createDtExtension(options?: {
 
     parseTag(tag: bigint, value: CborItem): CborItem | undefined {
       if (tag !== TAG_EPOCH) return undefined;
-      let epochSeconds: number;
-      if (value instanceof CborUint) epochSeconds = Number(value.value);
-      else if (value instanceof CborNint) epochSeconds = Number(value.value);
-      else if (value instanceof CborFloat) epochSeconds = value.value;
-      else return undefined;
-      const result = makeTagged(epochToRfc3339(epochSeconds));
-      result.content.start = value.start;
-      result.content.end = value.end;
+      let content:
+        | CborEpochDtExtUint
+        | CborEpochDtExtNint
+        | CborEpochDtExtFloat;
+      if (value instanceof CborUint) {
+        content = new CborEpochDtExtUint(value.value, {
+          encodingWidth: value.encodingWidth,
+        });
+      } else if (value instanceof CborNint) {
+        content = new CborEpochDtExtNint(value.value, {
+          encodingWidth: value.encodingWidth,
+        });
+      } else if (value instanceof CborFloat) {
+        // Always preserve as float to avoid losing the original CBOR encoding
+        // type (e.g. float64(1.0) must not silently become uint(1)).
+        content = new CborEpochDtExtFloat(value.value);
+        if (value.precision !== undefined) content.precision = value.precision;
+      } else {
+        return undefined;
+      }
+      content.start = value.start;
+      content.end = value.end;
+      const result = useDate
+        ? new CborTaggedEpochDtAsDateExt(content)
+        : new CborTaggedEpochDtExt(content);
       return result;
     },
   };

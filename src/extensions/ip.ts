@@ -29,6 +29,10 @@ import { CborArray } from '../ast/CborArray';
 import { CborUint } from '../ast/CborUint';
 import { CborTextString } from '../ast/CborTextString';
 import { parseIPv4, parseIPv6, formatIPv4, formatIPv6 } from '../utils/ip';
+import {
+  resolveEiSuffix,
+  canonicalEncodingWidth,
+} from '../cdn/serialize-utils';
 
 const PREFIX_IP = 'ip';
 const PREFIX_IP_TAGGED = 'IP';
@@ -93,7 +97,10 @@ function expandToFull(truncated: Uint8Array, fullLen: number): Uint8Array {
 export class CborIpExt extends CborByteString {
   override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
     if (options?.appStrings === false) return super._toCDN(options, _depth);
-    return `${PREFIX_IP}'${formatAddress(this.value)}'`;
+    const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
+      canonicalEncodingWidth(BigInt(this.value.length))
+    );
+    return `${PREFIX_IP}'${formatAddress(this.value)}'${eiSuffix}`;
   }
 }
 
@@ -133,7 +140,13 @@ export class CborTaggedIpExt extends CborTag {
     const fullLen = this.tag === TAG_IPV4 ? 4 : 16;
     const c = this.content as CborItem;
     if (c instanceof CborByteString) {
-      return `${PREFIX_IP_TAGGED}'${formatAddress(c.value)}'`;
+      // IP'...'_N only encodes the tag's width. If the inner byte string uses a
+      // non-canonical length header, fall back to generic tag notation to preserve it.
+      if (c.encodingWidth !== undefined) return super._toCDN(options, depth);
+      const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
+        canonicalEncodingWidth(this.tag)
+      );
+      return `${PREFIX_IP_TAGGED}'${formatAddress(c.value)}'${eiSuffix}`;
     }
     if (
       c instanceof CborArray &&
@@ -141,9 +154,19 @@ export class CborTaggedIpExt extends CborTag {
       c.items[0] instanceof CborUint &&
       c.items[1] instanceof CborByteString
     ) {
+      // Fall back if the inner array or either of its items has non-canonical encoding.
+      if (
+        c.encodingWidth !== undefined ||
+        (c.items[0] as CborUint).encodingWidth !== undefined ||
+        (c.items[1] as CborByteString).encodingWidth !== undefined
+      )
+        return super._toCDN(options, depth);
       const prefixLen = Number((c.items[0] as CborUint).value);
       const full = expandToFull((c.items[1] as CborByteString).value, fullLen);
-      return `${PREFIX_IP_TAGGED}'${formatAddress(full)}/${prefixLen}'`;
+      const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
+        canonicalEncodingWidth(this.tag)
+      );
+      return `${PREFIX_IP_TAGGED}'${formatAddress(full)}/${prefixLen}'${eiSuffix}`;
     }
     return super._toCDN(options, depth);
   }

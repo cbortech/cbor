@@ -2,6 +2,7 @@ import { describe, test, expect, vi } from 'vitest';
 import { parseCDN } from './parser';
 import type { ParseWarning } from '../types';
 import { toCDN } from './serializer';
+import { decodeCBOR } from '../cbor/decoder';
 import { CborUint } from '../ast/CborUint';
 import { CborNint } from '../ast/CborNint';
 import { CborByteString } from '../ast/CborByteString';
@@ -23,6 +24,8 @@ import {
   CborEpochDtExtNint,
   CborEpochDtExtFloat,
 } from '../extensions/dt';
+import { ip } from '../extensions/ip';
+import { same } from '../extensions/same';
 
 /** Convert Uint8Array to lowercase hex string. */
 function toHex(bytes: Uint8Array): string {
@@ -1394,13 +1397,38 @@ describe('parseCDN — encoding indicators on app-strings (generic post-processi
     expect(toCDN(n)).toBe("dt'1969-12-31T23:59:00Z'_1");
   });
 
-  test("dt'1970-01-02T00:00:01.5Z'_2 toCDN() round-trips EI (float, date normalized)", () => {
-    // epochToRfc3339 normalises .5Z → .500Z; the EI suffix must still be preserved.
+  test("dt'1970-01-02T00:00:01.5Z'_2 toCDN() drops canonical EI in auto mode (float, date normalized)", () => {
+    // epochToRfc3339 normalises .5Z → .500Z.
+    // 86401.5 fits exactly in single-precision (canonical), so 'auto' drops _2.
     const n = parseCDN("dt'1970-01-02T00:00:01.5Z'_2", { extensions: [dt] });
+    expect(toCDN(n)).toBe("dt'1970-01-02T00:00:01.500Z'");
+    expect(toCDN(n, { encodingIndicators: 'always' })).toBe(
+      "dt'1970-01-02T00:00:01.500Z'_2"
+    );
+    expect(toCDN(n, { encodingIndicators: 'never' })).toBe(
+      "dt'1970-01-02T00:00:01.500Z'"
+    );
+  });
+
+  test('dt float with non-canonical EI round-trips in auto mode', () => {
+    // 1.5 fits in half-precision; _2 (single) is non-canonical → preserved in auto.
+    const n = parseCDN("dt'1970-01-01T00:00:01.5Z'_2", { extensions: [dt] });
     const cdn = toCDN(n);
-    expect(cdn).toBe("dt'1970-01-02T00:00:01.500Z'_2");
+    expect(cdn).toBe("dt'1970-01-01T00:00:01.500Z'_2");
     const n2 = parseCDN(cdn, { extensions: [dt] });
     expect(toHex(n2.toCBOR())).toBe(toHex(n.toCBOR()));
+  });
+
+  test("DT'2027-01-01T00:00:00Z'_3 → encodingWidth=3 on tag, inner uint canonical, toCDN round-trips", () => {
+    // Per §2.3.1, _3 applies to the tag number (tag 1), not to the inner content.
+    const n = parseCDN("DT'2027-01-01T00:00:00Z'_3", { extensions: [dt] });
+    // The tag itself should carry encodingWidth=3; inner uint is canonical.
+    expect((n as CborTag).encodingWidth).toBe(3);
+    expect(((n as CborTag).content as CborUint).encodingWidth).toBeUndefined();
+    // CBOR: DB 00 00 00 00 00 00 00 01 (tag 1, 8-byte) + canonical uint
+    expect(toHex(n.toCBOR()).startsWith('db0000000000000001')).toBe(true);
+    // toCDN() should include the _3 suffix.
+    expect(toCDN(n)).toBe("DT'2027-01-01T00:00:00Z'_3");
   });
 
   test('dt uint _1 overflow → throws (strict mode)', () => {
@@ -1415,6 +1443,84 @@ describe('parseCDN — encoding indicators on app-strings (generic post-processi
     expect(() =>
       parseCDN("dt'2026-06-14T00:00:00.5Z'_2", { extensions: [dt] })
     ).toThrow(/cannot be exactly represented/);
+  });
+});
+
+describe('parseCDN — encoding indicators on app-sequences', () => {
+  test("dt<<'1970-01-01T00:01:00Z'>>_1 → CborEpochDtExtUint with encodingWidth=1", () => {
+    // 60 s fits in _1 (max 65535); 19 003c = 2-byte uint
+    const n = parseCDN("dt<<'1970-01-01T00:01:00Z'>>_1", { extensions: [dt] });
+    expect(n).toBeInstanceOf(CborEpochDtExtUint);
+    expect((n as CborUint).encodingWidth).toBe(1);
+    expect(toHex(n.toCBOR())).toBe('19003c');
+  });
+
+  test("dt<<'1970-01-01T00:01:00Z'>>_1 toCDN auto round-trips EI", () => {
+    const n = parseCDN("dt<<'1970-01-01T00:01:00Z'>>_1", { extensions: [dt] });
+    expect(n.toCDN({ appStrings: true })).toBe("dt'1970-01-01T00:01:00Z'_1");
+  });
+
+  test("DT<<'2026-06-14T00:00:00Z'>>_3 → encodingWidth=3 on tag per §2.3.1", () => {
+    // Per §2.3.1 the EI applies to the tag number (tag 1 with 8-byte header).
+    const n = parseCDN("DT<<'2026-06-14T00:00:00Z'>>_3", { extensions: [dt] });
+    expect(n).toBeInstanceOf(CborTag);
+    expect((n as CborTag).encodingWidth).toBe(3);
+    // DB 0000000000000001 = tag 1 with 8-byte width; inner uint is canonical
+    expect(toHex(n.toCBOR()).startsWith('db0000000000000001')).toBe(true);
+  });
+
+  test("DT<<'2026-06-14T00:00:00Z'>>_3 toCDN auto round-trips EI", () => {
+    const n = parseCDN("DT<<'2026-06-14T00:00:00Z'>>_3", { extensions: [dt] });
+    expect(n.toCDN({ appStrings: true })).toBe("DT'2026-06-14T00:00:00Z'_3");
+  });
+
+  test("IP<<'192.0.2.1'>>_3 → encodingWidth=3 on tag per §2.3.1", () => {
+    // Tag 52 (IPv4) with 8-byte header; content = 4-byte IPv4 address bytes
+    const n = parseCDN("IP<<'192.0.2.1'>>_3", { extensions: [ip] });
+    expect(n).toBeInstanceOf(CborTag);
+    expect((n as CborTag).encodingWidth).toBe(3);
+    // DB 0000000000000034 (tag 52, 8-byte) + 44 c0000201 (IPv4 byte string)
+    expect(toHex(n.toCBOR())).toBe('db000000000000003444c0000201');
+  });
+
+  test("IP<<'192.0.2.1'>>_3 toCDN auto round-trips EI", () => {
+    const n = parseCDN("IP<<'192.0.2.1'>>_3", { extensions: [ip] });
+    expect(n.toCDN({ appStrings: true })).toBe("IP'192.0.2.1'_3");
+  });
+
+  test('user extension: myext<<42>>_2 → CborUint with encodingWidth=2', () => {
+    // parseAppSequence returns the first item (CborUint 42); _2 sets encodingWidth=2
+    const n = parseCDN('myext<<42>>_2', {
+      extensions: [
+        {
+          appStringPrefixes: ['myext'],
+          parseAppString: (_p, s) => new CborTextString(s),
+          parseAppSequence: (_p, items) => items[0]!,
+        },
+      ],
+    });
+    expect(n).toBeInstanceOf(CborUint);
+    expect((n as CborUint).encodingWidth).toBe(2);
+    expect(toHex(n.toCBOR())).toBe('1a0000002a'); // 4-byte uint 42
+  });
+
+  test("dt<<'2026-06-14T00:00:00Z'>>_1 overflow → throws (strict mode)", () => {
+    // Epoch 1781395200 does not fit in _1 (max 65535)
+    expect(() =>
+      parseCDN("dt<<'2026-06-14T00:00:00Z'>>_1", { extensions: [dt] })
+    ).toThrow(/does not fit/);
+  });
+
+  test('preserved app-sequence delegates recursively in always mode', () => {
+    const n = parseCDN('same<<[1]>>', { extensions: [same] });
+    expect(n.toCDN()).toBe('same<<[1]>>');
+    expect(n.toCDN({ encodingIndicators: 'always' })).toBe('[_i 1_i]');
+  });
+
+  test('preserved app-sequence removes nested indicators in never mode', () => {
+    const n = parseCDN('same<<[1_1]>>_3', { extensions: [same] });
+    expect(n.toCDN()).toBe('same<<[1_1]>>_3');
+    expect(n.toCDN({ encodingIndicators: 'never' })).toBe('[1]');
   });
 });
 
@@ -1504,6 +1610,146 @@ describe('toCDN — encoding indicators', () => {
         })
       )
     ).toBe('{_1 "a":1}');
+  });
+});
+
+// ─── encodingIndicators option ('always' | 'auto' | 'never') ─────────────────
+
+describe('toCDN — encodingIndicators option', () => {
+  // ── uint ──────────────────────────────────────────────────────────────────
+  describe('uint', () => {
+    test('canonical, no stored EI: auto → no suffix, always → _i, never → no suffix', () => {
+      const n = new CborUint(1n); // canonical: _i
+      expect(n.toCDN()).toBe('1');
+      expect(n.toCDN({ encodingIndicators: 'always' })).toBe('1_i');
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe('1');
+    });
+    test('non-canonical encodingWidth=1: auto → _1, always → _1, never → no suffix', () => {
+      const n = new CborUint(1n, { encodingWidth: 1 });
+      expect(n.toCDN()).toBe('1_1');
+      expect(n.toCDN({ encodingIndicators: 'always' })).toBe('1_1');
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe('1');
+    });
+  });
+
+  // ── nint ──────────────────────────────────────────────────────────────────
+  describe('nint', () => {
+    test('non-canonical encodingWidth=1: auto → _1, never → no suffix', () => {
+      const n = new CborNint(-1n, { encodingWidth: 1 });
+      expect(n.toCDN()).toBe('-1_1');
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe('-1');
+    });
+    test('canonical, no stored EI: always → _i', () => {
+      const n = new CborNint(-1n); // argument 0, canonical _i
+      expect(n.toCDN({ encodingIndicators: 'always' })).toBe('-1_i');
+    });
+  });
+
+  // ── byte string ───────────────────────────────────────────────────────────
+  describe('byte string', () => {
+    test('non-canonical encodingWidth=1: auto → _1, never → no suffix', () => {
+      const n = new CborByteString(new Uint8Array([0xff]), {
+        encodingWidth: 1,
+      });
+      expect(n.toCDN()).toBe("h'ff'_1");
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe("h'ff'");
+    });
+    test('canonical, no stored EI: always emits canonical EI', () => {
+      const n = new CborByteString(new Uint8Array([0xff])); // length 1, canonical _i
+      expect(n.toCDN({ encodingIndicators: 'always' })).toBe("h'ff'_i");
+    });
+  });
+
+  // ── text string ───────────────────────────────────────────────────────────
+  describe('text string', () => {
+    test('non-canonical encodingWidth=1: auto → _1, never → no suffix', () => {
+      const n = new CborTextString('A', { encodingWidth: 1 });
+      expect(n.toCDN()).toBe('"A"_1');
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe('"A"');
+    });
+    test('canonical, no stored EI: always emits canonical EI', () => {
+      const n = new CborTextString('A'); // UTF-8 length 1, canonical _i
+      expect(n.toCDN({ encodingIndicators: 'always' })).toBe('"A"_i');
+    });
+  });
+
+  // ── array ─────────────────────────────────────────────────────────────────
+  describe('array', () => {
+    test('non-canonical encodingWidth=1: auto → [_1 ...], never → [...]', () => {
+      const n = new CborArray([new CborUint(1n), new CborUint(2n)], {
+        encodingWidth: 1,
+      });
+      expect(n.toCDN()).toBe('[_1 1,2]');
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe('[1,2]');
+    });
+    test('canonical, no stored EI: always emits _i on outer and inner items', () => {
+      // 2 items → canonical outer = _i; CborUint(1/2) → canonical _i each
+      const n = new CborArray([new CborUint(1n), new CborUint(2n)]);
+      expect(n.toCDN({ encodingIndicators: 'always' })).toBe('[_i 1_i,2_i]');
+    });
+  });
+
+  // ── map ───────────────────────────────────────────────────────────────────
+  describe('map', () => {
+    test('non-canonical encodingWidth=1: auto → {_1 ...}, never → {...}', () => {
+      const n = new CborMap([[new CborTextString('a'), new CborUint(1n)]], {
+        encodingWidth: 1,
+      });
+      expect(n.toCDN()).toBe('{_1 "a":1}');
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe('{"a":1}');
+    });
+    test('canonical, no stored EI: always emits _i', () => {
+      const n = new CborMap([[new CborTextString('a'), new CborUint(1n)]]);
+      expect(n.toCDN({ encodingIndicators: 'always' })).toBe('{_i "a"_i:1_i}');
+    });
+  });
+
+  // ── tag ───────────────────────────────────────────────────────────────────
+  describe('tag', () => {
+    test('non-canonical encodingWidth=1: auto → 1_1(...), never → 1(...)', () => {
+      const n = new CborTag(1n, new CborUint(42n), { encodingWidth: 1 });
+      expect(n.toCDN()).toBe('1_1(42)');
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe('1(42)');
+    });
+    test('canonical, no stored EI: always emits _i on tag and content', () => {
+      // tag 1 ≤ 23 → canonical _i; content CborUint(5) ≤ 23 → canonical _i
+      const n = new CborTag(1n, new CborUint(5n));
+      expect(n.toCDN({ encodingIndicators: 'always' })).toBe('1_i(5_i)');
+    });
+  });
+
+  // ── float ─────────────────────────────────────────────────────────────────
+  describe('float', () => {
+    test('canonical (auto-selected precision): auto → no suffix, always → _1, never → no suffix', () => {
+      // 1.5 auto-selects half (_1); canonical, no stored precision
+      const n = new CborFloat(1.5);
+      expect(n.toCDN()).toBe('1.5');
+      expect(n.toCDN({ encodingIndicators: 'always' })).toBe('1.5_1');
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe('1.5');
+    });
+    test('non-canonical precision=single for 1.5: auto → _2, always → _2, never → no suffix', () => {
+      // 1.5 fits in half; storing single is non-canonical
+      const n = new CborFloat(1.5, { precision: 'single' });
+      expect(n.toCDN()).toBe('1.5_2');
+      expect(n.toCDN({ encodingIndicators: 'always' })).toBe('1.5_2');
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe('1.5');
+    });
+  });
+
+  // ── embedded CBOR ─────────────────────────────────────────────────────────
+  describe('embedded CBOR (<<...>>)', () => {
+    test('non-canonical encodingWidth=1: auto → <<...>>_1, never → <<...>>', () => {
+      const n = new CborEmbeddedCBOR([new CborUint(1n), new CborUint(2n)], {
+        encodingWidth: 1,
+      });
+      expect(n.toCDN()).toBe('<<1,2>>_1');
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe('<<1,2>>');
+    });
+    test('canonical, no stored EI: always emits _i on outer and inner items', () => {
+      // content = 2 bytes (0x01 0x02), canonical _i; items CborUint → _i each
+      const n = new CborEmbeddedCBOR([new CborUint(1n), new CborUint(2n)]);
+      expect(n.toCDN({ encodingIndicators: 'always' })).toBe('<<1_i,2_i>>_i');
+    });
   });
 });
 
@@ -1844,6 +2090,75 @@ describe('round-trip: parse(toCDN(node)).toCBOR() === node.toCBOR()', () => {
   });
 });
 
+// ─── CDN → CBOR → CDN: EI survives encoding round-trip ──────────────────────
+
+describe('CDN → CBOR → CDN: encoding indicator survives CBOR round-trip', () => {
+  /**
+   * Parse CDN with EI, encode to CBOR bytes, decode back, verify:
+   *   1. The decoded AST carries the same encodingWidth / precision.
+   *   2. toCDN() on the decoded node still includes the EI suffix.
+   */
+  function rt(cdn: string): {
+    decoded: ReturnType<typeof decodeCBOR>;
+    cdn: string;
+  } {
+    const ast = parseCDN(cdn);
+    const bytes = ast.toCBOR();
+    const decoded = decodeCBOR(bytes);
+    return { decoded, cdn: decoded.toCDN() };
+  }
+
+  test('uint 1_1 → CBOR 19 0001 → decoded toCDN "1_1"', () => {
+    const { decoded, cdn } = rt('1_1');
+    expect((decoded as CborUint).encodingWidth).toBe(1);
+    expect(cdn).toBe('1_1');
+  });
+
+  test('nint -1_1 → CBOR 39 0000 → decoded toCDN "-1_1"', () => {
+    const { decoded, cdn } = rt('-1_1');
+    expect((decoded as CborNint).encodingWidth).toBe(1);
+    expect(cdn).toBe('-1_1');
+  });
+
+  test("byte string h'ff'_1 → CBOR 59 0001 ff → decoded toCDN \"h'ff'_1\"", () => {
+    const { decoded, cdn } = rt("h'ff'_1");
+    expect((decoded as CborByteString).encodingWidth).toBe(1);
+    expect(cdn).toBe("h'ff'_1");
+  });
+
+  test('"A"_1 → CBOR 79 0001 41 → decoded toCDN \'"A"_1\'', () => {
+    const { decoded, cdn } = rt('"A"_1');
+    expect((decoded as CborTextString).encodingWidth).toBe(1);
+    expect(cdn).toBe('"A"_1');
+  });
+
+  test('[_1 1, 2] → CBOR 99 0002 ... → decoded toCDN "[_1 1,2]"', () => {
+    const { decoded, cdn } = rt('[_1 1, 2]');
+    expect((decoded as CborArray).encodingWidth).toBe(1);
+    expect(cdn).toBe('[_1 1,2]');
+  });
+
+  test('{_1 "a": 1} → CBOR b9 0001 ... → decoded toCDN \'{_1 "a":1}\'', () => {
+    const { decoded, cdn } = rt('{_1 "a": 1}');
+    expect((decoded as CborMap).encodingWidth).toBe(1);
+    expect(cdn).toBe('{_1 "a":1}');
+  });
+
+  test('42_1(1) → CBOR d9 002a ... → decoded toCDN "42_1(1)"', () => {
+    // Tag 42 (no built-in handler) with 2-byte header; canonical for 42 is _0
+    const { decoded, cdn } = rt('42_1(1)');
+    expect((decoded as CborTag).encodingWidth).toBe(1);
+    expect(cdn).toBe('42_1(1)');
+  });
+
+  test('1.5_2 → CBOR fa 3fc00000 → decoded toCDN "1.5_2"', () => {
+    // 1.5 fits in half; single-precision is non-canonical
+    const { decoded, cdn } = rt('1.5_2');
+    expect((decoded as CborFloat).precision).toBe('single');
+    expect(cdn).toBe('1.5_2');
+  });
+});
+
 // ─── Comments ─────────────────────────────────────────────────────────────────
 
 describe('parseCDN — CDN comments (always enabled)', () => {
@@ -2015,6 +2330,41 @@ describe('parseCDN — embedded CBOR sequence (§2.5.6)', () => {
   test('trailing comma allowed', () => {
     const n = parseCDN('<<1, 2,>>') as CborEmbeddedCBOR;
     expect(n.items).toHaveLength(2);
+  });
+
+  test('<<1, 2>>_3 → encodingWidth=3, toCBOR uses 8-byte length header', () => {
+    const n = parseCDN('<<1, 2>>_3') as CborEmbeddedCBOR;
+    expect(n).toBeInstanceOf(CborEmbeddedCBOR);
+    expect(n.encodingWidth).toBe(3);
+    // 5b = MT_BYTES | AI_8BYTE; 0000000000000002 = length 2; 01 02 = content
+    expect(toHex(n.toCBOR())).toBe('5b00000000000000020102');
+  });
+
+  test('<<>>_3 → encodingWidth=3, empty content with 8-byte length', () => {
+    const n = parseCDN('<<>>_3') as CborEmbeddedCBOR;
+    expect(n.encodingWidth).toBe(3);
+    expect(toHex(n.toCBOR())).toBe('5b0000000000000000');
+  });
+
+  test('<<1, 2>>_3 toCDN auto round-trips EI', () => {
+    const n = parseCDN('<<1, 2>>_3') as CborEmbeddedCBOR;
+    expect(n.toCDN()).toBe('<<1,2>>_3');
+  });
+
+  test('<<1, 2>>_3 toCDN never suppresses EI', () => {
+    const n = parseCDN('<<1, 2>>_3') as CborEmbeddedCBOR;
+    expect(n.toCDN({ encodingIndicators: 'never' })).toBe('<<1,2>>');
+  });
+
+  test('<<1, 2>> without EI toCDN always emits canonical EI', () => {
+    // Content is 2 bytes (01 02), canonical encoding width is _i (≤ 23)
+    const n = parseCDN('<<1, 2>>') as CborEmbeddedCBOR;
+    expect(n.toCDN({ encodingIndicators: 'always' })).toBe('<<1_i,2_i>>_i');
+  });
+
+  test('<<1, 2>>_1 toCDN always emits stored EI', () => {
+    const n = parseCDN('<<1, 2>>_1') as CborEmbeddedCBOR;
+    expect(n.toCDN({ encodingIndicators: 'always' })).toBe('<<1_i,2_i>>_1');
   });
 });
 

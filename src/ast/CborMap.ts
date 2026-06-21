@@ -25,13 +25,15 @@ import {
   formatLeadingComments,
   hasContainerLayoutComments,
   hasPreservedComments,
+  resolveEiSuffix,
+  canonicalEncodingWidth,
 } from '../cdn/serialize-utils';
 
 /** CBOR Major Type 5 — map (definite- or indefinite-length). */
 export class CborMap extends CborItem {
   readonly entries: [CborItem, CborItem][];
   readonly indefiniteLength: boolean;
-  readonly encodingWidth: EncodingWidth | undefined;
+  encodingWidth: EncodingWidth | undefined;
 
   constructor(
     entries: [CborItem, CborItem][],
@@ -77,10 +79,12 @@ export class CborMap extends CborItem {
       options,
       indentStr === null
     );
-    const eiSuffix =
-      !this.indefiniteLength && this.encodingWidth !== undefined
-        ? `_${this.encodingWidth} `
-        : '';
+    const eiRaw = this.indefiniteLength
+      ? ''
+      : resolveEiSuffix(options, this.encodingWidth, () =>
+          canonicalEncodingWidth(BigInt(this.entries.length))
+        );
+    const eiSuffix = eiRaw ? eiRaw + ' ' : '';
     const open = this.indefiniteLength ? '{_ ' : `{${eiSuffix}`;
 
     if (indentStr === null || (this.entries.length === 0 && !hasComments)) {
