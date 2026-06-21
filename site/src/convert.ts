@@ -41,7 +41,11 @@ export function convertCdn(text: string): Conversion {
       extensions: SITE_EXTENSIONS,
     });
     const bytes = cdnAst.toCBOR();
-    const binAst = CBOR.fromCBOR(bytes, { extensions: SITE_EXTENSIONS });
+    const binAst = CBOR.fromCBOR(bytes, {
+      extensions: SITE_EXTENSIONS,
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    });
     return {
       ok: true,
       empty: false,
