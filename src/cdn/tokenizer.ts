@@ -1303,17 +1303,22 @@ export class Tokenizer {
         };
       case '"': {
         const strVal = this._readStringContent('"');
-        if (strVal === '' && this._ch() === '_') {
+        if (
+          strVal === '' &&
+          this._ch() === '_' &&
+          !/[0-7i]/.test(this.input[this.pos + 1] ?? '')
+        ) {
           this._advance(); // _
           return { type: 'EMPTY_INDEF_TEXT', value: '', line, col };
         }
         return { type: 'TSTR', value: strVal, line, col };
       }
       case "'": {
-        // ''_ → empty indefinite byte string
+        // ''_ → empty indefinite byte string (but ''_N is sqstr + encoding indicator)
         if (
           (this.input[this.pos + 1] ?? '') === "'" &&
-          (this.input[this.pos + 2] ?? '') === '_'
+          (this.input[this.pos + 2] ?? '') === '_' &&
+          !/[0-7i]/.test(this.input[this.pos + 3] ?? '')
         ) {
           this._advance(); // first '
           this._advance(); // second '

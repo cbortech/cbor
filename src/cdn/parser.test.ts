@@ -760,6 +760,18 @@ describe('parseCDN — indefinite byte string', () => {
     expect(n).toBeInstanceOf(CborIndefiniteByteString);
     expect(n.chunks).toHaveLength(0);
   });
+  test("''_i → empty byte string with _i encoding indicator (not indefinite)", () => {
+    const n = parseCDN("''_i") as CborByteString;
+    expect(n).toBeInstanceOf(CborByteString);
+    expect(n.value).toEqual(new Uint8Array(0));
+    expect(n.encodingWidth).toBe('i');
+  });
+  test("''_1 → empty byte string with _1 encoding indicator (not indefinite)", () => {
+    const n = parseCDN("''_1") as CborByteString;
+    expect(n).toBeInstanceOf(CborByteString);
+    expect(n.value).toEqual(new Uint8Array(0));
+    expect(n.encodingWidth).toBe(1);
+  });
   test('(_ ) throws — ambiguous', () => {
     expect(() => parseCDN('(_ )')).toThrow(SyntaxError);
   });
@@ -780,6 +792,18 @@ describe('parseCDN — indefinite text string', () => {
     const n = parseCDN('""_') as CborIndefiniteTextString;
     expect(n).toBeInstanceOf(CborIndefiniteTextString);
     expect(n.chunks).toHaveLength(0);
+  });
+  test('""_i → empty text string with _i encoding indicator (not indefinite)', () => {
+    const n = parseCDN('""_i') as CborTextString;
+    expect(n).toBeInstanceOf(CborTextString);
+    expect(n.value).toBe('');
+    expect(n.encodingWidth).toBe('i');
+  });
+  test('""_1 → empty text string with _1 encoding indicator (not indefinite)', () => {
+    const n = parseCDN('""_1') as CborTextString;
+    expect(n).toBeInstanceOf(CborTextString);
+    expect(n.value).toBe('');
+    expect(n.encodingWidth).toBe(1);
   });
   test('(_ "Hello", h\'20\', "world") — mixed chunk types → SyntaxError', () => {
     expect(() => parseCDN('(_ "Hello", h\'20\', "world")')).toThrow(
