@@ -24,15 +24,24 @@ import {
   readFormatOptions,
 } from './ui/toolbar';
 
+type Debounced<A extends unknown[]> = ((...args: A) => void) & {
+  cancel: () => void;
+};
+
 function debounce<A extends unknown[]>(
   fn: (...args: A) => void,
   ms: number
-): (...args: A) => void {
+): Debounced<A> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  return (...args: A) => {
+  const d = (...args: A): void => {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), ms);
   };
+  d.cancel = (): void => {
+    clearTimeout(timer);
+    timer = undefined;
+  };
+  return d;
 }
 
 const el = <T extends HTMLElement>(id: string): T =>
@@ -47,6 +56,12 @@ const byteCountEl = el<HTMLSpanElement>('byte-count');
 
 let mode: BytesMode = 'annotated';
 let conversion: Conversion = { ok: true, empty: true };
+// Warning message originating from hex/file CBOR input (not the CDN parse).
+// Shown in the status bar when there are no CDN-conversion warnings.
+let hexParseWarning: string | null = null;
+// Set to true while setEditorText is called programmatically from hex input so
+// that onDocChanged does not prematurely clear hexParseWarning.
+let _programmaticEdit = false;
 
 const hexView = new HexView(hexviewEl, {
   onSelectBytes(byteStart) {
@@ -77,6 +92,7 @@ function renderBytesPane(): void {
     return;
   }
   if (conversion.empty) {
+    hexParseWarning = null;
     byteCountEl.textContent = '';
     hexView.renderEmpty('Type CDN on the left to see CBOR bytes.');
     jsViewEl.textContent = '';
@@ -93,6 +109,8 @@ function renderBytesPane(): void {
       'warning',
       `${warnings.length} warning${warnings.length === 1 ? '' : 's'} — ${first.message}`
     );
+  } else if (hexParseWarning !== null) {
+    setStatus('warning', hexParseWarning);
   } else {
     setStatus(null);
   }
@@ -132,11 +150,23 @@ let resetSamples = (): void => {};
 
 const editor = createEditor(el('editor'), initialText, {
   onDocChanged(text) {
+    if (!_programmaticEdit) hexParseWarning = null;
     if (text.trim() === '') resetSamples();
     debouncedUpdate(text);
   },
   onCursorMoved,
 });
+
+/** Set editor text from an external hex/file source, preserving hexParseWarning. */
+function applyHexResult(cdn: string, warnings: string[]): void {
+  hexParseWarning =
+    warnings.length > 0
+      ? `${warnings.length} warning${warnings.length === 1 ? '' : 's'} — ${warnings[0]!}`
+      : null;
+  _programmaticEdit = true;
+  setEditorText(editor, cdn);
+  _programmaticEdit = false;
+}
 
 function initFileDrop(target: HTMLElement, onFile: (file: File) => void): void {
   const hasFiles = (event: DragEvent): boolean =>
@@ -212,10 +242,13 @@ editTextarea.addEventListener(
       return;
     }
     try {
-      setEditorText(editor, bytesToCdnText(text));
-      setStatus(null);
+      const { cdn, warnings } = bytesToCdnText(text);
+      applyHexResult(cdn, warnings);
     } catch (e) {
-      setStatus('error', e instanceof Error ? e.message : String(e));
+      debouncedUpdate.cancel();
+      conversion = { ok: false, error: e };
+      renderBytesPane();
+      updateCopyBytesBtn();
     }
   }, 300)
 );
@@ -226,9 +259,13 @@ hexviewEl.addEventListener('paste', (e) => {
   if (!text) return;
   e.preventDefault();
   try {
-    setEditorText(editor, bytesToCdnText(text));
+    const { cdn, warnings } = bytesToCdnText(text);
+    applyHexResult(cdn, warnings);
   } catch (err) {
-    setStatus('error', err instanceof Error ? err.message : String(err));
+    debouncedUpdate.cancel();
+    conversion = { ok: false, error: err };
+    renderBytesPane();
+    updateCopyBytesBtn();
   }
 });
 
@@ -309,14 +346,20 @@ function importCborFile(file: File): void {
   file
     .arrayBuffer()
     .then((buf) => {
+      const warnings: string[] = [];
       const cdn = CBOR.fromCBOR(new Uint8Array(buf), {
         extensions: SITE_EXTENSIONS,
+        strict: false,
+        onWarning: (w) => warnings.push(w.message),
       }).toCDN({ indent: 2 });
       resetSamples();
-      setEditorText(editor, cdn);
+      applyHexResult(cdn, warnings);
     })
     .catch((e: unknown) => {
-      setStatus('error', e instanceof Error ? e.message : String(e));
+      debouncedUpdate.cancel();
+      conversion = { ok: false, error: e };
+      renderBytesPane();
+      updateCopyBytesBtn();
     });
 }
 
