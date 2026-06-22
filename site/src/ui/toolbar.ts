@@ -108,6 +108,8 @@ export function readFormatOptions(): FromCDNOptions & ToCDNOptions {
     options.textStringFormat = tsfmt.split(
       ','
     ) as ToCDNOptions['textStringFormat'];
+  const encInd = sel('opt-enc-ind') as ToCDNOptions['encodingIndicators'];
+  if (encInd !== 'auto') options.encodingIndicators = encInd;
   if ((document.getElementById('opt-comments') as HTMLInputElement).checked)
     options.preserveComments = true;
   return options;
