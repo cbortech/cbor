@@ -1059,6 +1059,46 @@ describe('parseCDN — offset and trailing input', () => {
   });
 });
 
+// ─── Trailing tokens — strict: false ─────────────────────────────────────────
+
+describe('parseCDN — trailing tokens with strict: false', () => {
+  test('{}, emits warning and returns the map', () => {
+    const warnings: ParseWarning[] = [];
+    const node = parseCDN('{},', {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborMap;
+    expect(node).toBeInstanceOf(CborMap);
+    expect(node.entries).toHaveLength(0);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.message).toMatch(/unexpected token after value/);
+    expect(node.warnings).toHaveLength(1);
+    expect(node.warnings![0]!.message).toMatch(/unexpected token after value/);
+  });
+
+  test('{}, in strict mode (default) still throws', () => {
+    expect(() => parseCDN('{},', { strict: true })).toThrow(SyntaxError);
+    expect(() => parseCDN('{},', {})).toThrow(SyntaxError);
+  });
+
+  test('{}, "unterminated throws even with strict: false', () => {
+    expect(() => parseCDN('{}, "unterminated', { strict: false })).toThrow(
+      SyntaxError
+    );
+  });
+
+  test('{}, 1 emits warning and ignores the trailing integer', () => {
+    const warnings: ParseWarning[] = [];
+    const node = parseCDN('{}, 1', {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborMap;
+    expect(node).toBeInstanceOf(CborMap);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.message).toMatch(/unexpected token after value/);
+  });
+});
+
 // ─── Error cases ──────────────────────────────────────────────────────────────
 
 describe('parseCDN — errors', () => {

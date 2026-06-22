@@ -215,8 +215,11 @@ export interface FromCDNOptions {
    * Allow tokens after the parsed item.
    *
    * When `false`, parsing still requires the item to consume the remaining
-   * input, preserving the historical single-item behaviour. Set this to `true`
-   * when using `CborItem.end` to continue parsing a CDN sequence.
+   * input, preserving the historical single-item behaviour. With `strict: false`
+   * a trailing token becomes a recoverable warning rather than an error, but
+   * hard lexer errors in the trailing content (e.g. unterminated strings) still
+   * throw. Set this to `true` when using `CborItem.end` to continue parsing a
+   * CDN sequence.
    * Top-level comma separators are not skipped by `fromCDN()` itself; handle
    * them in sequence-level code before passing the next `offset`. For example,
    * after parsing `1, 2`, the first item's `end` points just before the comma;
@@ -289,8 +292,10 @@ export interface FromCDNOptions {
    * - `false`: recoverable violations call `onWarning` and parsing continues
    *   with a best-effort interpretation of the input.
    *
-   * Hard syntax errors (e.g. unterminated strings, unexpected tokens) always
-   * throw regardless of this setting.
+   * Hard syntax errors (e.g. unterminated strings, unexpected tokens that
+   * prevent parsing a value) always throw regardless of this setting.
+   * A trailing token after a successfully-parsed value is a recoverable
+   * violation and is therefore controlled by this flag.
    *
    * @default true
    */
