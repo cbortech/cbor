@@ -133,8 +133,10 @@ export interface FromCBOROptions {
    * Allow bytes after the decoded item.
    *
    * When `false`, decoding still requires the item to consume the remaining
-   * input, preserving the historical single-item behaviour. Set this to `true`
-   * when using `CborItem.end` to continue decoding a CBOR Sequence.
+   * input, preserving the historical single-item behaviour. With `strict: false`
+   * a trailing byte becomes a recoverable warning rather than an error, but
+   * truly malformed trailing data (e.g. truncated items) still throws. Set this
+   * to `true` when using `CborItem.end` to continue decoding a CBOR Sequence.
    *
    * @example
    * // Read two items from a CBOR Sequence, validating that the second is last.
@@ -162,7 +164,9 @@ export interface FromCBOROptions {
    *   with a best-effort interpretation of the data.
    *
    * Truly malformed data (e.g. truncated input, reserved AI values) always
-   * throws regardless of this setting.
+   * throws regardless of this setting. Trailing bytes after a successfully
+   * decoded item are a recoverable violation and are therefore controlled by
+   * this flag.
    *
    * @default true
    */
@@ -200,6 +204,30 @@ export interface FromHexDumpOptions {
    * returning a non-`undefined` value replaces the default `CborTag` node.
    */
   extensions?: CborExtension[];
+
+  /**
+   * Controls how CBOR validity violations are handled during hex-dump decoding.
+   * Mirrors `FromCBOROptions.strict`. With `strict: false`, trailing bytes after
+   * the first decoded item (i.e. a CBOR Sequence) emit a warning instead of
+   * throwing, allowing the first item to be returned.
+   *
+   * @default true
+   */
+  strict?: boolean;
+
+  /**
+   * Callback invoked when a CBOR validity violation is detected.
+   * Mirrors `FromCBOROptions.onWarning`.
+   */
+  onWarning?: (warning: DecodeWarning) => void;
+
+  /**
+   * When `true`, suppresses the default `console.warn` output for violations.
+   * Mirrors `FromCBOROptions.silent`.
+   *
+   * @default false
+   */
+  silent?: boolean;
 }
 
 export interface FromCDNOptions {
