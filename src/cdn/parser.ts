@@ -404,6 +404,13 @@ class CDNParser {
   parseValue(): CborItem {
     const start = this.t.peek().offset;
     const node = this._parseValueNode();
+    if (this.t.peek().type === 'UNDERSCORE') {
+      const tok = this.t.consume();
+      this._warnOrFail(
+        'bare _ is not a valid encoding indicator; use _0, _1, _2, _3, or _i',
+        tok
+      );
+    }
     if (this._pendingWarnings.length > 0) {
       node.warnings ??= [];
       for (const w of this._pendingWarnings) node.warnings.push(w);

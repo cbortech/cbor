@@ -3337,6 +3337,53 @@ describe('strict mode', () => {
     });
   });
 
+  describe('bare _ after a value (non-standard encoding indicator)', () => {
+    test('1_: strict: true throws', () => {
+      expect(() => parseCDN('1_')).toThrow(SyntaxError);
+    });
+
+    test('1_: strict: false warns and drops _', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('1_', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborUint);
+      expect((result as CborUint).value).toBe(1n);
+      expect((result as CborUint).encodingWidth).toBeUndefined();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].message).toMatch(/bare _/);
+    });
+
+    test('1.0_: strict: true throws', () => {
+      expect(() => parseCDN('1.0_')).toThrow(SyntaxError);
+    });
+
+    test('1.0_: strict: false warns and drops _', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('1.0_', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborFloat);
+      expect((result as CborFloat).value).toBe(1.0);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].message).toMatch(/bare _/);
+    });
+
+    test('"text"_: strict: false warns and drops _', () => {
+      const warnings: ParseWarning[] = [];
+      const result = parseCDN('"text"_', {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      });
+      expect(result).toBeInstanceOf(CborTextString);
+      expect((result as CborTextString).value).toBe('text');
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].message).toMatch(/bare _/);
+    });
+  });
+
   describe('warning attribution — setup warnings belong to the container node', () => {
     test('[_4 1] warning on array node, not on item 1', () => {
       const result = parseCDN('[_4 1]', { strict: false, silent: true });
