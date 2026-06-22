@@ -85,7 +85,14 @@ export class CborMap extends CborItem {
           canonicalEncodingWidth(BigInt(this.entries.length))
         );
     const eiSuffix = eiRaw ? eiRaw + ' ' : '';
-    const open = this.indefiniteLength ? '{_ ' : `{${eiSuffix}`;
+    const showIndef =
+      this.indefiniteLength &&
+      (options?.encodingIndicators ?? 'auto') !== 'never';
+    const open = this.indefiniteLength
+      ? showIndef
+        ? '{_ '
+        : '{'
+      : `{${eiSuffix}`;
 
     if (indentStr === null || (this.entries.length === 0 && !hasComments)) {
       // single-line
@@ -96,7 +103,11 @@ export class CborMap extends CborItem {
         )
         .join(inlineSep);
       if (this.indefiniteLength) {
-        return this.entries.length === 0 ? '{_ }' : `{_ ${inner}}`;
+        return showIndef
+          ? this.entries.length === 0
+            ? '{_ }'
+            : `{_ ${inner}}`
+          : `{${inner}}`;
       }
       return `{${eiSuffix}${inner}}`;
     }

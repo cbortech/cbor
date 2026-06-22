@@ -63,11 +63,20 @@ export function convertCdn(text: string): Conversion {
 
 /**
  * Parse pasted bytes (plain hex or an annotated hex dump) back to CDN text.
- * Throws on invalid input.
+ * Uses strict:false so a CBOR Sequence returns the first item with warnings
+ * instead of throwing. Throws only on truly malformed input.
  */
-export function bytesToCdnText(hexDumpText: string): string {
-  const item = CBOR.fromHexDump(hexDumpText, { extensions: SITE_EXTENSIONS });
-  return item.toCDN({ indent: 2 });
+export function bytesToCdnText(hexDumpText: string): {
+  cdn: string;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+  const item = CBOR.fromHexDump(hexDumpText, {
+    extensions: SITE_EXTENSIONS,
+    strict: false,
+    onWarning: (w) => warnings.push(w.message),
+  });
+  return { cdn: item.toCDN({ indent: 2 }), warnings };
 }
 
 export function bytesToHexString(bytes: Uint8Array): string {

@@ -393,10 +393,22 @@ class CDNParser {
     if (this._options.allowTrailing) return value;
     const next = this.t.peek();
     if (next.type !== 'EOF') {
-      this._fail(
+      this._warnOrFail(
         `unexpected token after value: ${JSON.stringify(next.value)}`,
         next
       );
+      // Reached only in non-strict mode (_warnOrFail throws in strict mode).
+      // Drain the pending warning into the returned value's AST node so it
+      // is visible to callers that inspect node.warnings directly.
+      if (this._pendingWarnings.length > 0) {
+        value.warnings ??= [];
+        value.warnings.push(...this._pendingWarnings);
+        this._pendingWarnings = [];
+      }
+      // Scan the rest of the input so that hard lexer errors in the trailing
+      // content (e.g. unterminated strings) still throw regardless of the
+      // strict setting.
+      while (this.t.peek().type !== 'EOF') this.t.consume();
     }
     return value;
   }
@@ -404,6 +416,13 @@ class CDNParser {
   parseValue(): CborItem {
     const start = this.t.peek().offset;
     const node = this._parseValueNode();
+    if (this.t.peek().type === 'UNDERSCORE') {
+      const tok = this.t.consume();
+      this._warnOrFail(
+        'bare _ is not a valid encoding indicator; use _0, _1, _2, _3, or _i',
+        tok
+      );
+    }
     if (this._pendingWarnings.length > 0) {
       node.warnings ??= [];
       for (const w of this._pendingWarnings) node.warnings.push(w);

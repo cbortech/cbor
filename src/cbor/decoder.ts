@@ -665,9 +665,21 @@ export function decodeCBOR(
   ].filter((ext) => ext.parseTag !== undefined);
   const { value, nextOffset } = decodeItem(view, offset, options, tagExts);
   if (!options?.allowTrailing && nextOffset !== view.byteLength) {
-    decodeError(
-      `${view.byteLength - nextOffset} trailing byte(s) after end of CBOR item`
+    const w = strictViolation(
+      `${view.byteLength - nextOffset} trailing byte(s) after end of CBOR item`,
+      nextOffset,
+      options
     );
+    // Only reached in non-strict mode (strictViolation throws in strict mode).
+    addWarning(value, w);
+    // Scan the trailing bytes so that truly malformed trailing items
+    // (e.g. truncated input, reserved additional-info values) still throw,
+    // even though the leading item decoded successfully.
+    const scanOpts: FromCBOROptions = { strict: false, silent: true };
+    let pos = nextOffset;
+    while (pos < view.byteLength) {
+      ({ nextOffset: pos } = decodeItem(view, pos, scanOpts, tagExts));
+    }
   }
   return value;
 }

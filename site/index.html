@@ -134,7 +134,7 @@
     <main class="playground">
       <section class="pane pane-cdn" aria-label="CDN editor">
         <div class="pane-toolbar">
-          <span class="pane-title">CDN (CBOR-EDN, draft-25)</span>
+          <span class="pane-title">CDN (CBOR-EDN)</span>
           <select id="samples" class="ctl" title="Load a sample">
             <option value="" disabled selected>Samples…</option>
           </select>
@@ -264,6 +264,14 @@
               <option value="newline">Newline</option>
               <option value="cdn">CDN</option>
               <option value="newline,cdn">Newline + CDN</option>
+            </select>
+          </label>
+          <label
+            >Enc. indicators
+            <select id="opt-enc-ind">
+              <option value="auto" selected>Auto</option>
+              <option value="always">Always</option>
+              <option value="never">Never</option>
             </select>
           </label>
           <label class="check">

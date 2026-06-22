@@ -69,6 +69,9 @@ export class CborArray extends CborItem {
           canonicalEncodingWidth(BigInt(this.items.length))
         );
     const eiSuffix = eiRaw ? eiRaw + ' ' : '';
+    const showIndef =
+      this.indefiniteLength &&
+      (options?.encodingIndicators ?? 'auto') !== 'never';
 
     if (indentStr === null || (this.items.length === 0 && !hasComments)) {
       // single-line
@@ -76,7 +79,11 @@ export class CborArray extends CborItem {
         .map((item) => item._toCDN(options, depth + 1))
         .join(inlineSep);
       if (this.indefiniteLength) {
-        return this.items.length === 0 ? '[_ ]' : `[_ ${inner}]`;
+        return showIndef
+          ? this.items.length === 0
+            ? '[_ ]'
+            : `[_ ${inner}]`
+          : `[${inner}]`;
       }
       return `[${eiSuffix}${inner}]`;
     }
@@ -84,7 +91,11 @@ export class CborArray extends CborItem {
     // multi-line
     const childIndent = indentOf(indentStr, depth + 1);
     const closeIndent = indentOf(indentStr, depth);
-    const open = this.indefiniteLength ? '[_ ' : `[${eiSuffix}`;
+    const open = this.indefiniteLength
+      ? showIndef
+        ? '[_ '
+        : '['
+      : `[${eiSuffix}`;
     const lines: string[] = [];
     for (let i = 0; i < this.items.length; i++) {
       const item = this.items[i];

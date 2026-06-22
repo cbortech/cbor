@@ -1,7 +1,7 @@
 import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import type { AnnotatedLine } from './CborItem';
-import type { CborTextString } from './CborTextString';
+import { CborTextString } from './CborTextString';
 import { MT_TEXT, AI_INDEFINITE, BREAK_CODE } from '../cbor/constants';
 import type { CborWriter } from '../cbor/encode';
 
@@ -21,7 +21,11 @@ export class CborIndefiniteTextString extends CborItem {
     writer.writeByte(BREAK_CODE);
   }
 
-  _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
+  _toCDN(options: ToCDNOptions | undefined, depth: number): string {
+    if ((options?.encodingIndicators ?? 'auto') === 'never') {
+      const merged = this.chunks.map((c) => c.value).join('');
+      return new CborTextString(merged)._toCDN(options, depth);
+    }
     if (this.chunks.length === 0) return '""_';
     const chunkStrs = this.chunks.map((c) => c._toCDN(options, 0));
     return `(_ ${chunkStrs.join(', ')})`;

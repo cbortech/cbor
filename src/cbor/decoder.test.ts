@@ -456,6 +456,58 @@ describe('offset and trailing input', () => {
   });
 });
 
+// ─── Trailing bytes — strict: false (CBOR Sequence lenient mode) ─────────────
+
+describe('trailing bytes — strict: false', () => {
+  test('valid sequence: returns first item with warning', () => {
+    const warnings: { message: string }[] = [];
+    const node = decodeCBOR(hex('01 f4'), {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborUint;
+    expect(node.value).toBe(1n);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.message).toMatch(/1 trailing byte/);
+  });
+
+  test('warning is attached to the returned AST node', () => {
+    const node = decodeCBOR(hex('01 f4'), {
+      strict: false,
+      silent: true,
+    }) as CborUint;
+    expect(node.warnings).toHaveLength(1);
+    expect(node.warnings![0]!.message).toMatch(/1 trailing byte/);
+  });
+
+  test('truncated trailing item throws even with strict: false', () => {
+    // 0x01 = 1 (valid), 0x18 = uint needing one more byte (truncated)
+    expect(() =>
+      decodeCBOR(hex('01 18'), { strict: false, silent: true })
+    ).toThrow('CBOR decode error');
+  });
+
+  test('strict mode (default) still throws for trailing bytes', () => {
+    expect(() => decodeCBOR(hex('01 02'), { strict: true })).toThrow(
+      'CBOR decode error: 1 trailing byte(s) after end of CBOR item'
+    );
+    expect(() => decodeCBOR(hex('01 02'), {})).toThrow(
+      'CBOR decode error: 1 trailing byte(s) after end of CBOR item'
+    );
+  });
+
+  test('multi-item sequence: all trailing items validated', () => {
+    // 01 02 03 = three integers; strict:false returns 1 with warning
+    const warnings: { message: string }[] = [];
+    const node = decodeCBOR(hex('01 02 03'), {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborUint;
+    expect(node.value).toBe(1n);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.message).toMatch(/2 trailing byte/);
+  });
+});
+
 // ─── Error handling ───────────────────────────────────────────────────────────
 
 describe('error handling', () => {

@@ -1,7 +1,7 @@
 import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import type { AnnotatedLine } from './CborItem';
-import type { CborByteString } from './CborByteString';
+import { CborByteString } from './CborByteString';
 import { MT_BYTES, AI_INDEFINITE, BREAK_CODE } from '../cbor/constants';
 import type { CborWriter } from '../cbor/encode';
 
@@ -22,6 +22,16 @@ export class CborIndefiniteByteString extends CborItem {
   }
 
   _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
+    if ((options?.encodingIndicators ?? 'auto') === 'never') {
+      const totalLen = this.chunks.reduce((sum, c) => sum + c.value.length, 0);
+      const merged = new Uint8Array(totalLen);
+      let offset = 0;
+      for (const chunk of this.chunks) {
+        merged.set(chunk.value, offset);
+        offset += chunk.value.length;
+      }
+      return new CborByteString(merged)._toCDN(options, 0);
+    }
     if (this.chunks.length === 0) return "''_";
     const chunkStrs = this.chunks.map((c) => c._toCDN(options, 0));
     return `(_ ${chunkStrs.join(', ')})`;
