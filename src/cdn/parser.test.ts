@@ -1751,6 +1751,89 @@ describe('toCDN — encodingIndicators option', () => {
       expect(n.toCDN({ encodingIndicators: 'always' })).toBe('<<1_i,2_i>>_i');
     });
   });
+
+  // ── indefinite-length array ────────────────────────────────────────────────
+  describe('indefinite-length array', () => {
+    test('auto → [_ ...], never → [...]', () => {
+      const n = new CborArray([new CborUint(1n), new CborUint(2n)], {
+        indefiniteLength: true,
+      });
+      expect(n.toCDN()).toBe('[_ 1,2]');
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe('[1,2]');
+    });
+    test('empty: auto → [_ ], never → []', () => {
+      const n = new CborArray([], { indefiniteLength: true });
+      expect(n.toCDN()).toBe('[_ ]');
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe('[]');
+    });
+    test('always still emits [_ with indicators on items', () => {
+      const n = new CborArray([new CborUint(1n)], { indefiniteLength: true });
+      expect(n.toCDN({ encodingIndicators: 'always' })).toBe('[_ 1_i]');
+    });
+  });
+
+  // ── indefinite-length map ──────────────────────────────────────────────────
+  describe('indefinite-length map', () => {
+    test('auto → {_ ...}, never → {...}', () => {
+      const n = new CborMap([[new CborTextString('a'), new CborUint(1n)]], {
+        indefiniteLength: true,
+      });
+      expect(n.toCDN()).toBe('{_ "a":1}');
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe('{"a":1}');
+    });
+    test('empty: auto → {_ }, never → {}', () => {
+      const n = new CborMap([], { indefiniteLength: true });
+      expect(n.toCDN()).toBe('{_ }');
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe('{}');
+    });
+    test('always still emits {_ with indicators on items', () => {
+      const n = new CborMap([[new CborTextString('a'), new CborUint(1n)]], {
+        indefiniteLength: true,
+      });
+      expect(n.toCDN({ encodingIndicators: 'always' })).toBe('{_ "a"_i:1_i}');
+    });
+  });
+
+  // ── indefinite-length byte string ──────────────────────────────────────────
+  describe('indefinite-length byte string', () => {
+    test("auto → (_ h'aa', h'bb'), never → h'aabb'", () => {
+      const n = new CborIndefiniteByteString([
+        new CborByteString(new Uint8Array([0xaa])),
+        new CborByteString(new Uint8Array([0xbb])),
+      ]);
+      expect(n.toCDN()).toBe("(_ h'aa', h'bb')");
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe("h'aabb'");
+    });
+    test("empty: auto → ''_, never → '' (sqstr applies to empty bytes)", () => {
+      const n = new CborIndefiniteByteString([]);
+      expect(n.toCDN()).toBe("''_");
+      // empty Uint8Array is valid UTF-8 with no non-printable chars → sqstr form
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe("''");
+    });
+    test("empty with bstrEncoding:hex: never → h''", () => {
+      const n = new CborIndefiniteByteString([]);
+      expect(n.toCDN({ encodingIndicators: 'never', sqstr: 'none' })).toBe(
+        "h''"
+      );
+    });
+  });
+
+  // ── indefinite-length text string ──────────────────────────────────────────
+  describe('indefinite-length text string', () => {
+    test('auto → (_ "hello", " world"), never → "hello world"', () => {
+      const n = new CborIndefiniteTextString([
+        new CborTextString('hello'),
+        new CborTextString(' world'),
+      ]);
+      expect(n.toCDN()).toBe('(_ "hello", " world")');
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe('"hello world"');
+    });
+    test('empty: auto → ""_, never → ""', () => {
+      const n = new CborIndefiniteTextString([]);
+      expect(n.toCDN()).toBe('""_');
+      expect(n.toCDN({ encodingIndicators: 'never' })).toBe('""');
+    });
+  });
 });
 
 // ─── encodingWidth value-overflow validation ──────────────────────────────────
