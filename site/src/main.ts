@@ -24,15 +24,24 @@ import {
   readFormatOptions,
 } from './ui/toolbar';
 
+type Debounced<A extends unknown[]> = ((...args: A) => void) & {
+  cancel: () => void;
+};
+
 function debounce<A extends unknown[]>(
   fn: (...args: A) => void,
   ms: number
-): (...args: A) => void {
+): Debounced<A> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  return (...args: A) => {
+  const d = (...args: A): void => {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), ms);
   };
+  d.cancel = (): void => {
+    clearTimeout(timer);
+    timer = undefined;
+  };
+  return d;
 }
 
 const el = <T extends HTMLElement>(id: string): T =>
@@ -236,7 +245,10 @@ editTextarea.addEventListener(
       const { cdn, warnings } = bytesToCdnText(text);
       applyHexResult(cdn, warnings);
     } catch (e) {
-      setStatus('error', e instanceof Error ? e.message : String(e));
+      debouncedUpdate.cancel();
+      conversion = { ok: false, error: e };
+      renderBytesPane();
+      updateCopyBytesBtn();
     }
   }, 300)
 );
@@ -250,7 +262,10 @@ hexviewEl.addEventListener('paste', (e) => {
     const { cdn, warnings } = bytesToCdnText(text);
     applyHexResult(cdn, warnings);
   } catch (err) {
-    setStatus('error', err instanceof Error ? err.message : String(err));
+    debouncedUpdate.cancel();
+    conversion = { ok: false, error: err };
+    renderBytesPane();
+    updateCopyBytesBtn();
   }
 });
 
@@ -341,7 +356,10 @@ function importCborFile(file: File): void {
       applyHexResult(cdn, warnings);
     })
     .catch((e: unknown) => {
-      setStatus('error', e instanceof Error ? e.message : String(e));
+      debouncedUpdate.cancel();
+      conversion = { ok: false, error: e };
+      renderBytesPane();
+      updateCopyBytesBtn();
     });
 }
 
