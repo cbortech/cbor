@@ -10,6 +10,7 @@ import type {
   ParseWarning,
   ToCBOROptions,
   ToCDNOptions,
+  ToHexDumpOptions,
   ToJSOptions,
 } from './types';
 import { CBOR_OMIT } from './types';
@@ -181,6 +182,20 @@ export class CBOR {
     options?: FromCBORSeqOptions & ToCDNOptions
   ): string {
     return CBOR.decompile(input, this.#merge(options));
+  }
+
+  toHex(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBORSeqOptions & ToHexDumpOptions
+  ): string {
+    return CBOR.toHex(input, this.#merge(options));
+  }
+
+  fromHex(
+    text: string,
+    options?: FromHexDumpOptions & ToCBOROptions
+  ): Uint8Array {
+    return CBOR.fromHex(text, this.#merge(options));
   }
 
   /** @deprecated Use `decompile()` instead. */
@@ -516,6 +531,40 @@ export class CBOR {
     return [...CBOR.fromCBORSeq(input, options)]
       .map((item) => item.toCDN(options))
       .join('\n');
+  }
+
+  /**
+   * Convert CBOR binary data to an annotated hex dump string.
+   * CBOR Sequences (RFC 8742) produce one dump per item, separated by newlines.
+   */
+  static toHex(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBORSeqOptions & ToHexDumpOptions
+  ): string {
+    return [...CBOR.fromCBORSeq(input, options)]
+      .map((item) => item.toHexDump(options))
+      .join('\n');
+  }
+
+  /**
+   * Parse an annotated hex dump string to CBOR binary data.
+   * Multi-item dumps produce a CBOR Sequence (RFC 8742): concatenated items.
+   */
+  static fromHex(
+    text: string,
+    options?: FromHexDumpOptions & ToCBOROptions
+  ): Uint8Array {
+    const byteArrays = [...CBOR.fromHexDumpSeq(text, options)].map((item) =>
+      item.toCBOR(options)
+    );
+    const total = byteArrays.reduce((s, b) => s + b.length, 0);
+    const result = new Uint8Array(total);
+    let off = 0;
+    for (const b of byteArrays) {
+      result.set(b, off);
+      off += b.length;
+    }
+    return result;
   }
 
   /**

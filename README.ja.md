@@ -106,6 +106,38 @@ console.log([...CBOR.decodeSeq(seq)]);
 // [{ id: 1 }, { id: 2 }]
 ```
 
+### CBOR バイト列から hex dump へ
+
+`toHex` は CBOR バイト列をアノテーション付き hex dump テキストに変換します。CBOR Sequence には自動対応しており、各 item が改行区切りで出力されます。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const bytes = CBOR.encode([1, 2, 3]);
+console.log(CBOR.toHex(bytes));
+// 83        -- Array of length 3
+//    01     -- 1
+//    02     -- 2
+//    03     -- 3
+```
+
+### hex dump から CBOR バイト列へ
+
+`fromHex` はアノテーション付き hex dump を CBOR バイト列に変換します。複数 item のダンプは CBOR Sequence (RFC 8742) として連結されたバイト列を出力します。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const bytes = CBOR.fromHex(`
+83        -- Array of length 3
+   01     -- 1
+   02     -- 2
+   03     -- 3
+`);
+console.log([...CBOR.decodeSeq(bytes)]);
+// [[1, 2, 3]]
+```
+
 ### JavaScript から CDN へ
 
 ```ts
@@ -591,7 +623,8 @@ console.log(CBOR.stringify(entries));
 
 ## Hex Dump
 
-CBOR item は注釈付き hex dump の生成とパースに対応しています。
+`CBOR.toHex()` / `CBOR.fromHex()` がショートカット入口です（[クイック例](#cbor-バイト列から-hex-dump-へ) 参照）。
+バイト範囲の取得や再エンコードなど AST レベルの操作が必要な場合は、`item.toHexDump()` / `CBOR.fromHexDump()` を直接使います。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';

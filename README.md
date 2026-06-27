@@ -108,6 +108,38 @@ console.log([...CBOR.decodeSeq(seq)]);
 // [{ id: 1 }, { id: 2 }]
 ```
 
+### CBOR bytes to hex dump
+
+`toHex` converts CBOR binary data to an annotated hex dump string. CBOR Sequences are handled automatically: each item produces its own dump, separated by newlines.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const bytes = CBOR.encode([1, 2, 3]);
+console.log(CBOR.toHex(bytes));
+// 83        -- Array of length 3
+//    01     -- 1
+//    02     -- 2
+//    03     -- 3
+```
+
+### Hex dump to CBOR bytes
+
+`fromHex` parses an annotated hex dump back to CBOR binary data. Multi-item dumps produce a CBOR Sequence (RFC 8742): concatenated items.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const bytes = CBOR.fromHex(`
+83        -- Array of length 3
+   01     -- 1
+   02     -- 2
+   03     -- 3
+`);
+console.log([...CBOR.decodeSeq(bytes)]);
+// [[1, 2, 3]]
+```
+
 ### JavaScript to CDN
 
 ```ts
@@ -598,7 +630,8 @@ console.log(CBOR.stringify(entries));
 
 ## Hex Dumps
 
-CBOR items can produce and parse annotated hex dumps.
+`CBOR.toHex()` and `CBOR.fromHex()` are the shortcut entry points (see [Quick Examples](#cbor-bytes-to-hex-dump)).
+For full AST access — byte ranges, re-encoding, selective inspection — use `item.toHexDump()` and `CBOR.fromHexDump()` directly:
 
 ```ts
 import { CBOR } from '@cbortech/cbor';

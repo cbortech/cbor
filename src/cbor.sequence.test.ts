@@ -603,3 +603,69 @@ describe('CBOR.decompile', () => {
     expect(cbor.decompile(bytes)).toContain('\n');
   });
 });
+
+describe('CBOR.toHex', () => {
+  test('empty input returns empty string', () => {
+    expect(CBOR.toHex(new Uint8Array())).toBe('');
+  });
+
+  test('single item produces same output as fromCBOR().toHexDump()', () => {
+    const bytes = CBOR.encode([1, 2, 3]);
+    expect(CBOR.toHex(bytes)).toBe(CBOR.fromCBOR(bytes).toHexDump());
+  });
+
+  test('CBOR Sequence produces newline-joined hex dumps', () => {
+    const seq = new Uint8Array([...CBOR.encode(1), ...CBOR.encode(2)]);
+    const result = CBOR.toHex(seq);
+    const parts = result.split('\n');
+    expect(parts).toHaveLength(2);
+    expect(parts[0]).toContain('01');
+    expect(parts[1]).toContain('02');
+  });
+
+  test('ToHexDumpOptions are forwarded', () => {
+    const bytes = CBOR.encode(1);
+    const withHash = CBOR.toHex(bytes, { commentStyle: '#' });
+    expect(withHash).toContain('#');
+  });
+
+  test('instance toHex merges defaults', () => {
+    const cbor = new CBOR({ commentStyle: '#' });
+    const bytes = CBOR.encode(1);
+    expect(cbor.toHex(bytes)).toContain('#');
+  });
+});
+
+describe('CBOR.fromHex', () => {
+  test('empty string returns empty Uint8Array', () => {
+    expect(CBOR.fromHex('')).toEqual(new Uint8Array());
+  });
+
+  test('single item round-trips through toHex', () => {
+    const original = CBOR.encode([1, 2, 3]);
+    expect(CBOR.fromHex(CBOR.toHex(original))).toEqual(original);
+  });
+
+  test('CBOR Sequence dump round-trips through toHex', () => {
+    const original = new Uint8Array([...CBOR.encode(1), ...CBOR.encode('two')]);
+    expect(CBOR.fromHex(CBOR.toHex(original))).toEqual(original);
+  });
+
+  test('output round-trips through decodeSeq', () => {
+    const dump = CBOR.toHex(
+      new Uint8Array([...CBOR.encode({ a: 1 }), ...CBOR.encode({ b: 2 })])
+    );
+    const bytes = CBOR.fromHex(dump);
+    expect([...CBOR.decodeSeq(bytes)]).toEqual([{ a: 1 }, { b: 2 }]);
+  });
+
+  test('instance fromHex merges defaults', () => {
+    const cbor = new CBOR({ extensions: [CBOR.dt_as_Date] });
+    const bytes = CBOR.fromCDN("DT'2024-01-01T00:00:00Z'", {
+      extensions: [CBOR.dt_as_Date],
+    }).toCBOR();
+    const dump = CBOR.toHex(bytes);
+    expect(CBOR.fromHex(dump)).toEqual(bytes);
+    expect(cbor.fromHex(dump)).toEqual(bytes);
+  });
+});
