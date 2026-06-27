@@ -62,6 +62,8 @@ export interface Token {
 export interface TokenizerOptions {
   /** Character offset at which tokenization starts. */
   offset?: number;
+  /** When true, RS (U+001E, RFC 7464 record separator) is treated as whitespace. */
+  skipRS?: boolean;
 }
 
 export interface EdnComment {
@@ -130,6 +132,7 @@ export class Tokenizer {
   private col: number;
   private _peeked: Token | null = null;
   private _lastConsumedEndOffset: number;
+  private readonly skipRS: boolean;
   /** Comments encountered while scanning, appended in source order. */
   readonly comments: EdnComment[] = [];
   /**
@@ -148,6 +151,7 @@ export class Tokenizer {
     options?: TokenizerOptions
   ) {
     const offset = options?.offset ?? 0;
+    this.skipRS = options?.skipRS ?? false;
     if (!Number.isInteger(offset) || offset < 0 || offset > input.length)
       throw new RangeError(
         `EDN parse offset must be an integer between 0 and ${input.length}`
@@ -217,7 +221,7 @@ export class Tokenizer {
       for (;;) {
         const ws = this.input[this.pos];
         if (ws === undefined) return;
-        if (ws === ' ' || ws === '\n' || ws === '\t' || ws === '\r') {
+        if (ws === ' ' || ws === '\n' || ws === '\t' || ws === '\r' || (this.skipRS && ws === '\x1e')) {
           this._advance();
           continue;
         }

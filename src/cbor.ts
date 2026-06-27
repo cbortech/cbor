@@ -2,9 +2,12 @@ import type { CborItem } from './ast/CborItem';
 import type {
   CBOROptions,
   FromCBOROptions,
+  FromCBORSeqOptions,
   FromCDNOptions,
+  FromCDNSeqOptions,
   FromHexDumpOptions,
   FromJSOptions,
+  ParseWarning,
   ToCBOROptions,
   ToCDNOptions,
   ToJSOptions,
@@ -112,6 +115,36 @@ export class CBOR {
     const node = CBOR.fromHexDump(text, this.#merge(options));
     node._defaults = this.#defaults;
     return node;
+  }
+
+  *fromCBORSeq(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBORSeqOptions
+  ): Generator<CborItem> {
+    for (const item of CBOR.fromCBORSeq(input, this.#merge(options))) {
+      item._defaults = this.#defaults;
+      yield item;
+    }
+  }
+
+  *fromCDNSeq(
+    text: string,
+    options?: FromCDNSeqOptions
+  ): Generator<CborItem> {
+    for (const item of CBOR.fromCDNSeq(text, this.#merge(options))) {
+      item._defaults = this.#defaults;
+      yield item;
+    }
+  }
+
+  *fromHexDumpSeq(
+    text: string,
+    options?: FromHexDumpOptions
+  ): Generator<CborItem> {
+    for (const item of CBOR.fromHexDumpSeq(text, this.#merge(options))) {
+      item._defaults = this.#defaults;
+      yield item;
+    }
   }
 
   decode(
@@ -244,6 +277,98 @@ export class CBOR {
    */
   static fromEDN(text: string, options?: FromCDNOptions): CborItem {
     return CBOR.fromCDN(text, options);
+  }
+
+  /** アノテーション付き hex dump テキストから CBOR Sequence を item ごとにデコードするジェネレータ。 */
+  static *fromHexDumpSeq(
+    text: string,
+    options?: FromHexDumpOptions
+  ): Generator<CborItem> {
+    const bytes: number[] = [];
+    const uncommented = stripHexDumpComments(text);
+    const tokens = uncommented.trim().split(/\s+/).filter(Boolean);
+    for (const token of tokens) {
+      if (/^[0-9A-Fa-f]{2}$/.test(token)) {
+        bytes.push(parseInt(token, 16));
+      } else if (/^[0-9A-Fa-f]+$/.test(token) && token.length % 2 === 0) {
+        for (let i = 0; i < token.length; i += 2)
+          bytes.push(parseInt(token.slice(i, i + 2), 16));
+      } else {
+        throw new SyntaxError(
+          `Invalid hex token in dump: ${JSON.stringify(token)}`
+        );
+      }
+    }
+    yield* CBOR.fromCBORSeq(new Uint8Array(bytes), options);
+  }
+
+  /** CBOR Sequence (RFC 8742) を item ごとにデコードするジェネレータ。 */
+  static *fromCBORSeq(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBORSeqOptions
+  ): Generator<CborItem> {
+    const bytes =
+      input instanceof ArrayBuffer ||
+      (typeof SharedArrayBuffer !== 'undefined' &&
+        input instanceof SharedArrayBuffer)
+        ? new Uint8Array(input)
+        : new Uint8Array(
+            (input as ArrayBufferView).buffer,
+            (input as ArrayBufferView).byteOffset,
+            (input as ArrayBufferView).byteLength
+          );
+    let offset = 0;
+    while (offset < bytes.byteLength) {
+      const item = decodeCBOR(input, { ...options, offset, allowTrailing: true });
+      yield item;
+      offset = item.end!;
+    }
+  }
+
+  /** CDN テキストの複数 item を 1 つずつパースするジェネレータ。 */
+  static *fromCDNSeq(
+    text: string,
+    options?: FromCDNSeqOptions
+  ): Generator<CborItem> {
+    let offset = 0;
+    let isFirst = true;
+    while (true) {
+      const { offset: next, hadSeparator, commaOffset } = skipCDNSeparator(text, offset, options);
+      // Leading comma: comma before the first item (including comma-only input).
+      // Checked before the EOF break so that "," alone is also caught.
+      // Trailing comma is valid per ABNF SOC = S ["," S] and is silently accepted.
+      if (isFirst && commaOffset >= 0) {
+        const msg = 'leading comma in CDN sequence';
+        if (options?.strict !== false) throw new SyntaxError(msg);
+        emitCDNSeqWarning(msg, commaOffset, options);
+      }
+      if (next >= text.length) break;
+      if (!isFirst && !hadSeparator) {
+        const msg = 'CDN sequence items must be separated by whitespace, comma, or comment';
+        if (options?.strict !== false) throw new SyntaxError(msg);
+        emitCDNSeqWarning(msg, next, options);
+      }
+      offset = next;
+      let item: CborItem;
+      try {
+        // _skipRS: true causes the tokenizer to treat RS (U+001E, RFC 7464) as
+        // whitespace, preventing it from corrupting string-literal contents via
+        // a global text replacement.
+        item = parseCDN(text, {
+          ...options,
+          offset,
+          allowTrailing: true,
+          _skipRS: true,
+        } as FromCDNOptions);
+      } catch (e) {
+        if (options?.strict !== false) throw e;
+        emitCDNSeqWarning(e instanceof Error ? e.message : String(e), offset, options);
+        break;
+      }
+      yield item;
+      offset = item.end!;
+      isFirst = false;
+    }
   }
 
   /** Convert a JavaScript value into an AST node. */
@@ -523,6 +648,88 @@ function whitespaceLike(text: string): string {
 }
 
 // ─── Module-scope helper ─────────────────────────────────────────────────────
+
+function emitCDNSeqWarning(
+  msg: string,
+  offset: number,
+  options: FromCDNSeqOptions | undefined
+): void {
+  const w: ParseWarning = { message: msg, offset };
+  if (options?.onWarning) options.onWarning(w);
+  else if (!options?.silent) console.warn(`CDN sequence warning at offset ${offset}: ${msg}`);
+}
+
+/**
+ * CDN sequence の item 間にある空白・コメント・省略可能なカンマを読み飛ばし、
+ * 次の item が始まる文字位置と、何らかの separator が存在したかどうかを返す。
+ * 未終端のブロックコメントは strict モードでは throw し、
+ * strict: false の場合は警告を emit して末尾まで読み飛ばす。
+ */
+function skipCDNSeparator(
+  text: string,
+  from: number,
+  options: FromCDNSeqOptions | undefined
+): { offset: number; hadSeparator: boolean; commaOffset: number } {
+  let i = from;
+  let hadSeparator = false;
+  let seenComma = false;
+  let commaOffset = -1;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === ' ' || ch === '\t' || ch === '\r' || ch === '\n' || ch === '\x1e') {
+      hadSeparator = true;
+      i++;
+      continue;
+    }
+    if (ch === '#') {
+      hadSeparator = true;
+      const nl = text.indexOf('\n', i + 1);
+      i = nl < 0 ? text.length : nl + 1;
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '/') {
+      hadSeparator = true;
+      const nl = text.indexOf('\n', i + 2);
+      i = nl < 0 ? text.length : nl + 1;
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      hadSeparator = true;
+      const end = text.indexOf('*/', i + 2);
+      if (end < 0) {
+        const msg = 'unterminated /* comment in CDN sequence';
+        if (options?.strict !== false) throw new SyntaxError(msg);
+        emitCDNSeqWarning(msg, i, options);
+        i = text.length;
+      } else {
+        i = end + 2;
+      }
+      continue;
+    }
+    if (ch === '/' && text[i + 1] !== '/') {
+      hadSeparator = true;
+      const end = text.indexOf('/', i + 1);
+      if (end < 0) {
+        const msg = 'unterminated / comment in CDN sequence';
+        if (options?.strict !== false) throw new SyntaxError(msg);
+        emitCDNSeqWarning(msg, i, options);
+        i = text.length;
+      } else {
+        i = end + 1;
+      }
+      continue;
+    }
+    if (ch === ',' && !seenComma) {
+      hadSeparator = true;
+      seenComma = true;
+      commaOffset = i;
+      i++;
+      continue;
+    }
+    break;
+  }
+  return { offset: i, hadSeparator, commaOffset };
+}
 
 /** Map JSON.stringify `space` argument to ToCDNOptions.indent. */
 function resolveSpace(
