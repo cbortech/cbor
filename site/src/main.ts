@@ -53,6 +53,7 @@ const editWrapEl = el<HTMLDivElement>('bytes-edit-wrap');
 const editTextarea = el<HTMLTextAreaElement>('bytes-edit');
 const statusEl = el<HTMLDivElement>('bytes-status');
 const byteCountEl = el<HTMLSpanElement>('byte-count');
+const exportBtnEl = el<HTMLButtonElement>('export-btn');
 
 let mode: BytesMode = 'annotated';
 let conversion: Conversion = { ok: true, empty: true };
@@ -85,6 +86,7 @@ function renderBytesPane(): void {
   if (!conversion.ok) {
     const e = conversion.error;
     byteCountEl.textContent = '';
+    exportBtnEl.title = 'Save as a .cbor file';
     setStatus('error', e instanceof Error ? e.message : String(e));
     hexView.renderEmpty('');
     jsViewEl.textContent = '';
@@ -94,6 +96,7 @@ function renderBytesPane(): void {
   if (conversion.empty) {
     hexParseWarning = null;
     byteCountEl.textContent = '';
+    exportBtnEl.title = 'Save as a .cbor file';
     hexView.renderEmpty('Type CDN on the left to see CBOR bytes.');
     jsViewEl.textContent = '';
     if (document.activeElement !== editTextarea) editTextarea.value = '';
@@ -105,6 +108,8 @@ function renderBytesPane(): void {
   byteCountEl.textContent =
     `· ${bytes.length} byte${bytes.length === 1 ? '' : 's'}` +
     (seqLength > 1 ? ` (${seqLength} items)` : '');
+  exportBtnEl.title =
+    seqLength > 1 ? 'Save as a .cborseq file' : 'Save as a .cbor file';
   if (warnings.length > 0) {
     const first = warnings[0]!;
     setStatus(
@@ -387,13 +392,14 @@ importInput.addEventListener('change', () => {
 
 el('export-btn').addEventListener('click', () => {
   if (!conversion.ok || conversion.empty) return;
+  const isSeq = conversion.seqLength > 1;
   const blob = new Blob([conversion.bytes.buffer as ArrayBuffer], {
-    type: 'application/cbor',
+    type: isSeq ? 'application/cbor-seq' : 'application/cbor',
   });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'data.cbor';
+  a.download = isSeq ? 'data.cborseq' : 'data.cbor';
   a.click();
   URL.revokeObjectURL(url);
 });
