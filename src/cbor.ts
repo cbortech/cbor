@@ -127,10 +127,7 @@ export class CBOR {
     }
   }
 
-  *fromCDNSeq(
-    text: string,
-    options?: FromCDNSeqOptions
-  ): Generator<CborItem> {
+  *fromCDNSeq(text: string, options?: FromCDNSeqOptions): Generator<CborItem> {
     for (const item of CBOR.fromCDNSeq(text, this.#merge(options))) {
       item._defaults = this.#defaults;
       yield item;
@@ -319,7 +316,11 @@ export class CBOR {
           );
     let offset = 0;
     while (offset < bytes.byteLength) {
-      const item = decodeCBOR(input, { ...options, offset, allowTrailing: true });
+      const item = decodeCBOR(input, {
+        ...options,
+        offset,
+        allowTrailing: true,
+      });
       yield item;
       offset = item.end!;
     }
@@ -333,7 +334,11 @@ export class CBOR {
     let offset = 0;
     let isFirst = true;
     while (true) {
-      const { offset: next, hadSeparator, commaOffset } = skipCDNSeparator(text, offset, options);
+      const {
+        offset: next,
+        hadSeparator,
+        commaOffset,
+      } = skipCDNSeparator(text, offset, options);
       // Leading comma: comma before the first item (including comma-only input).
       // Checked before the EOF break so that "," alone is also caught.
       // Trailing comma is valid per ABNF SOC = S ["," S] and is silently accepted.
@@ -344,7 +349,8 @@ export class CBOR {
       }
       if (next >= text.length) break;
       if (!isFirst && !hadSeparator) {
-        const msg = 'CDN sequence items must be separated by whitespace, comma, or comment';
+        const msg =
+          'CDN sequence items must be separated by whitespace, comma, or comment';
         if (options?.strict !== false) throw new SyntaxError(msg);
         emitCDNSeqWarning(msg, next, options);
       }
@@ -362,7 +368,11 @@ export class CBOR {
         } as FromCDNOptions);
       } catch (e) {
         if (options?.strict !== false) throw e;
-        emitCDNSeqWarning(e instanceof Error ? e.message : String(e), offset, options);
+        emitCDNSeqWarning(
+          e instanceof Error ? e.message : String(e),
+          offset,
+          options
+        );
         break;
       }
       yield item;
@@ -656,7 +666,8 @@ function emitCDNSeqWarning(
 ): void {
   const w: ParseWarning = { message: msg, offset };
   if (options?.onWarning) options.onWarning(w);
-  else if (!options?.silent) console.warn(`CDN sequence warning at offset ${offset}: ${msg}`);
+  else if (!options?.silent)
+    console.warn(`CDN sequence warning at offset ${offset}: ${msg}`);
 }
 
 /**
@@ -676,7 +687,13 @@ function skipCDNSeparator(
   let commaOffset = -1;
   while (i < text.length) {
     const ch = text[i];
-    if (ch === ' ' || ch === '\t' || ch === '\r' || ch === '\n' || ch === '\x1e') {
+    if (
+      ch === ' ' ||
+      ch === '\t' ||
+      ch === '\r' ||
+      ch === '\n' ||
+      ch === '\x1e'
+    ) {
       hadSeparator = true;
       i++;
       continue;

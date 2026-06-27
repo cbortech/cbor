@@ -133,7 +133,9 @@ describe('CBOR.fromCDN()', () => {
   });
 
   test('adjacent map entries without separator throw in strict mode', () => {
-    expect(() => CBOR.fromCDN('{[]:[][]:[]}', { allowTrailing: true })).toThrow(SyntaxError);
+    expect(() => CBOR.fromCDN('{[]:[][]:[]}', { allowTrailing: true })).toThrow(
+      SyntaxError
+    );
     expect(() => CBOR.fromCDN('{"a":1 "b":2}')).not.toThrow(); // space is valid
   });
 
@@ -159,8 +161,8 @@ describe('CBOR.fromCDN()', () => {
   test('indefinite string chunks with separator are valid', () => {
     expect(() => CBOR.fromCDN("(_ h'01' h'02')")).not.toThrow(); // space
     expect(() => CBOR.fromCDN("(_ h'01',h'02')")).not.toThrow(); // comma
-    expect(() => CBOR.fromCDN('(_ "" "")')).not.toThrow();       // space
-    expect(() => CBOR.fromCDN('(_ "", "")')).not.toThrow();      // comma
+    expect(() => CBOR.fromCDN('(_ "" "")')).not.toThrow(); // space
+    expect(() => CBOR.fromCDN('(_ "", "")')).not.toThrow(); // comma
   });
 
   test('supports offset and allowTrailing', () => {

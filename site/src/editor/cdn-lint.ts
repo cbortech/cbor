@@ -1,6 +1,9 @@
 /**
  * Inline diagnostics from the real parser: syntax errors as error squiggles,
- * strict-mode (preferred serialization) violations as warnings.
+ * strict-mode (preferred serialisation) violations as warnings.
+ *
+ * Multi-item CDN Sequences are handled by fromCDNSeq so that valid sequences
+ * produce no spurious "unexpected trailing content" diagnostic.
  */
 import { linter, type Diagnostic } from '@codemirror/lint';
 import { CBOR, CdnSyntaxError } from '@cbortech/cbor';
@@ -12,7 +15,8 @@ export const cdnLinter = linter((view) => {
   const clamp = (n: number) => Math.max(0, Math.min(n, text.length));
   const diagnostics: Diagnostic[] = [];
   try {
-    CBOR.fromCDN(text, {
+    // Exhaust the generator so every item is parsed and every warning collected.
+    for (const _item of CBOR.fromCDNSeq(text, {
       strict: false,
       extensions: SITE_EXTENSIONS,
       onWarning: (w) => {
@@ -24,13 +28,13 @@ export const cdnLinter = linter((view) => {
           message: w.message,
         });
       },
-    });
+    })) {
+      /* consume */
+    }
   } catch (e) {
     if (e instanceof CdnSyntaxError) {
       let from = clamp(e.offset ?? 0);
       let to = clamp(e.endOffset ?? from + 1);
-      // An error at end-of-input would produce an invisible empty range;
-      // widen it to cover the last character instead.
       if (to <= from) {
         from = Math.max(0, from - 1);
         to = from + 1;

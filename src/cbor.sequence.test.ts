@@ -72,10 +72,12 @@ describe('CBOR.fromCBORSeq', () => {
   test('options are forwarded to each item decode', () => {
     const bytes = hex('01 02');
     const warnings: unknown[] = [];
-    const items = [...CBOR.fromCBORSeq(bytes, {
-      onWarning: (w) => warnings.push(w),
-      silent: true,
-    })];
+    const items = [
+      ...CBOR.fromCBORSeq(bytes, {
+        onWarning: (w) => warnings.push(w),
+        silent: true,
+      }),
+    ];
     expect(items).toHaveLength(2);
   });
 });
@@ -188,11 +190,13 @@ describe('CBOR.fromCDNSeq', () => {
 
   test('adjacent items without separator warn in non-strict mode', () => {
     const warnings: string[] = [];
-    const items = [...CBOR.fromCDNSeq('1true', {
-      strict: false,
-      onWarning: (w) => warnings.push(w.message),
-      silent: true,
-    })];
+    const items = [
+      ...CBOR.fromCDNSeq('1true', {
+        strict: false,
+        onWarning: (w) => warnings.push(w.message),
+        silent: true,
+      }),
+    ];
     expect(items).toHaveLength(2);
     expect(items[0]!.toJS()).toBe(1);
     expect(items[1]!.toJS()).toBe(true);
@@ -203,7 +207,9 @@ describe('CBOR.fromCDNSeq', () => {
   // ── Unterminated comments ──────────────────────────────────────────────────
 
   test('unterminated /* comment after item throws in strict mode', () => {
-    expect(() => [...CBOR.fromCDNSeq('1 /* unterminated')]).toThrow(SyntaxError);
+    expect(() => [...CBOR.fromCDNSeq('1 /* unterminated')]).toThrow(
+      SyntaxError
+    );
   });
 
   test('unterminated / comment after item throws in strict mode', () => {
@@ -212,18 +218,22 @@ describe('CBOR.fromCDNSeq', () => {
 
   test('unterminated /* between items throws in strict mode', () => {
     // comment is in separator position (after comma), detected by skipCDNSeparator
-    expect(() => [...CBOR.fromCDNSeq('1, /* unterminated')]).toThrow(SyntaxError);
+    expect(() => [...CBOR.fromCDNSeq('1, /* unterminated')]).toThrow(
+      SyntaxError
+    );
   });
 
   test('unterminated /* comment warns and stops in non-strict mode', () => {
     // Unterminated comment immediately after item: parseCDN throws during
     // encoding-indicator peek; we catch it, warn, and stop — no items after the error.
     const warnings: string[] = [];
-    const items = [...CBOR.fromCDNSeq('1 /* unterminated', {
-      strict: false,
-      onWarning: (w) => warnings.push(w.message),
-      silent: true,
-    })];
+    const items = [
+      ...CBOR.fromCDNSeq('1 /* unterminated', {
+        strict: false,
+        onWarning: (w) => warnings.push(w.message),
+        silent: true,
+      }),
+    ];
     expect(items).toHaveLength(0);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('unterminated');
@@ -233,11 +243,13 @@ describe('CBOR.fromCDNSeq', () => {
     // Comment is in separator position: skipCDNSeparator detects it.
     // Items successfully parsed before the separator are yielded.
     const warnings: string[] = [];
-    const items = [...CBOR.fromCDNSeq('1, /* unterminated', {
-      strict: false,
-      onWarning: (w) => warnings.push(w.message),
-      silent: true,
-    })];
+    const items = [
+      ...CBOR.fromCDNSeq('1, /* unterminated', {
+        strict: false,
+        onWarning: (w) => warnings.push(w.message),
+        silent: true,
+      }),
+    ];
     expect(items).toHaveLength(1);
     expect(items[0]!.toJS()).toBe(1);
     expect(warnings).toHaveLength(1);
@@ -246,11 +258,13 @@ describe('CBOR.fromCDNSeq', () => {
 
   test('unterminated / comment warns and stops in non-strict mode', () => {
     const warnings: string[] = [];
-    const items = [...CBOR.fromCDNSeq('1 / unterminated', {
-      strict: false,
-      onWarning: (w) => warnings.push(w.message),
-      silent: true,
-    })];
+    const items = [
+      ...CBOR.fromCDNSeq('1 / unterminated', {
+        strict: false,
+        onWarning: (w) => warnings.push(w.message),
+        silent: true,
+      }),
+    ];
     expect(items).toHaveLength(0);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('unterminated');
@@ -263,7 +277,9 @@ describe('CBOR.fromCDNSeq', () => {
     // {} + SOC(",") — all valid
     expect([...CBOR.fromCDNSeq('1,')].map((i) => i.toJS())).toEqual([1]);
     expect([...CBOR.fromCDNSeq('1, ')].map((i) => i.toJS())).toEqual([1]);
-    expect([...CBOR.fromCDNSeq('1, 2, 3,')].map((i) => i.toJS())).toEqual([1, 2, 3]);
+    expect([...CBOR.fromCDNSeq('1, 2, 3,')].map((i) => i.toJS())).toEqual([
+      1, 2, 3,
+    ]);
   });
 
   test('leading comma throws in strict mode', () => {
@@ -277,11 +293,13 @@ describe('CBOR.fromCDNSeq', () => {
 
   test('leading comma warns and still yields items in non-strict mode', () => {
     const warnings: string[] = [];
-    const items = [...CBOR.fromCDNSeq(',1', {
-      strict: false,
-      onWarning: (w) => warnings.push(w.message),
-      silent: true,
-    })];
+    const items = [
+      ...CBOR.fromCDNSeq(',1', {
+        strict: false,
+        onWarning: (w) => warnings.push(w.message),
+        silent: true,
+      }),
+    ];
     expect(items).toHaveLength(1);
     expect(items[0]!.toJS()).toBe(1);
     expect(warnings).toHaveLength(1);
@@ -348,7 +366,9 @@ describe('CBOR.fromHexDumpSeq', () => {
   test('longer tokens (multi-byte items)', () => {
     // {"a":1} in CBOR = a1 61 61 01
     const single = CBOR.fromJS({ a: 1 }).toCBOR();
-    const hexStr = Array.from(single).map((b) => b.toString(16).padStart(2, '0')).join(' ');
+    const hexStr = Array.from(single)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join(' ');
     const dump = `${hexStr}\n${hexStr}`;
     const items = [...CBOR.fromHexDumpSeq(dump)];
     expect(items).toHaveLength(2);

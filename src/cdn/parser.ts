@@ -49,7 +49,8 @@ const utf8Lenient = new TextDecoder('utf-8', { fatal: false });
 export function parseCDN(text: string, options?: FromCDNOptions): CborItem {
   const tokenizer = new Tokenizer(text, {
     offset: options?.offset,
-    skipRS: (options as (FromCDNOptions & { _skipRS?: boolean }) | undefined)?._skipRS,
+    skipRS: (options as (FromCDNOptions & { _skipRS?: boolean }) | undefined)
+      ?._skipRS,
   });
   const parser = new CDNParser(tokenizer, options ?? {});
   const node = parser.parse();

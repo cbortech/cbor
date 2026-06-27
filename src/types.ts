@@ -565,10 +565,16 @@ export interface CborComments {
 }
 
 /** `fromCBORSeq()` の options（`offset`/`allowTrailing` はジェネレータが管理するため除外）。 */
-export type FromCBORSeqOptions = Omit<FromCBOROptions, 'offset' | 'allowTrailing'>;
+export type FromCBORSeqOptions = Omit<
+  FromCBOROptions,
+  'offset' | 'allowTrailing'
+>;
 
 /** `fromCDNSeq()` の options（`offset`/`allowTrailing` はジェネレータが管理するため除外）。 */
-export type FromCDNSeqOptions = Omit<FromCDNOptions, 'offset' | 'allowTrailing'>;
+export type FromCDNSeqOptions = Omit<
+  FromCDNOptions,
+  'offset' | 'allowTrailing'
+>;
 
 /**
  * Combined options for the `CBOR` constructor.

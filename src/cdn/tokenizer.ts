@@ -221,7 +221,13 @@ export class Tokenizer {
       for (;;) {
         const ws = this.input[this.pos];
         if (ws === undefined) return;
-        if (ws === ' ' || ws === '\n' || ws === '\t' || ws === '\r' || (this.skipRS && ws === '\x1e')) {
+        if (
+          ws === ' ' ||
+          ws === '\n' ||
+          ws === '\t' ||
+          ws === '\r' ||
+          (this.skipRS && ws === '\x1e')
+        ) {
           this._advance();
           continue;
         }

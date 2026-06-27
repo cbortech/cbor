@@ -101,8 +101,10 @@ function renderBytesPane(): void {
     return;
   }
 
-  const { bytes, binAst, rows, warnings } = conversion;
-  byteCountEl.textContent = `· ${bytes.length} byte${bytes.length === 1 ? '' : 's'}`;
+  const { bytes, binAst, rows, warnings, seqLength, binAsts } = conversion;
+  byteCountEl.textContent =
+    `· ${bytes.length} byte${bytes.length === 1 ? '' : 's'}` +
+    (seqLength > 1 ? ` (${seqLength} items)` : '');
   if (warnings.length > 0) {
     const first = warnings[0]!;
     setStatus(
@@ -119,7 +121,10 @@ function renderBytesPane(): void {
     hexView.render(rows, bytes, mode);
   } else if (mode === 'js') {
     try {
-      jsViewEl.textContent = inspectJS(binAst.toJS());
+      jsViewEl.textContent =
+        seqLength > 1
+          ? binAsts.map((ast) => inspectJS(ast.toJS())).join('\n─────\n')
+          : inspectJS(binAst.toJS());
     } catch (e) {
       jsViewEl.textContent = e instanceof Error ? e.message : String(e);
     }
@@ -284,10 +289,9 @@ el('format-btn').addEventListener('click', () => {
   const text = editor.state.doc.toString();
   if (text.trim() === '') return;
   try {
-    setEditorText(
-      editor,
-      CBOR.format(text, { ...readFormatOptions(), extensions: SITE_EXTENSIONS })
-    );
+    const opts = { ...readFormatOptions(), extensions: SITE_EXTENSIONS };
+    const items = [...CBOR.fromCDNSeq(text, opts)];
+    setEditorText(editor, items.map((item) => item.toCDN(opts)).join('\n'));
   } catch {
     // Invalid CDN: the lint squiggle already explains the problem.
   }
@@ -347,11 +351,14 @@ function importCborFile(file: File): void {
     .arrayBuffer()
     .then((buf) => {
       const warnings: string[] = [];
-      const cdn = CBOR.fromCBOR(new Uint8Array(buf), {
-        extensions: SITE_EXTENSIONS,
-        strict: false,
-        onWarning: (w) => warnings.push(w.message),
-      }).toCDN({ indent: 2 });
+      const items = [
+        ...CBOR.fromCBORSeq(new Uint8Array(buf), {
+          extensions: SITE_EXTENSIONS,
+          strict: false,
+          onWarning: (w) => warnings.push(w.message),
+        }),
+      ];
+      const cdn = items.map((item) => item.toCDN({ indent: 2 })).join('\n');
       resetSamples();
       applyHexResult(cdn, warnings);
     })
@@ -403,10 +410,15 @@ function updateCopyBytesBtn(): void {
 
 copyBytesBtn.addEventListener('click', (e) => {
   if (!conversion.ok || conversion.empty) return;
-  const text =
-    mode === 'annotated'
-      ? conversion.binAst.toHexDump()
-      : bytesToHexString(conversion.bytes);
+  let text: string;
+  if (mode === 'annotated') {
+    text =
+      conversion.seqLength > 1
+        ? conversion.binAsts.map((ast) => ast.toHexDump()).join('\n')
+        : conversion.binAst.toHexDump();
+  } else {
+    text = bytesToHexString(conversion.bytes);
+  }
   void copyWithFeedback(e.currentTarget as HTMLElement, text);
 });
 
