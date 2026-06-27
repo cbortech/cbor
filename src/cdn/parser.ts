@@ -47,7 +47,11 @@ const utf8Lenient = new TextDecoder('utf-8', { fatal: false });
  * Throws SyntaxError on invalid input.
  */
 export function parseCDN(text: string, options?: FromCDNOptions): CborItem {
-  const tokenizer = new Tokenizer(text, { offset: options?.offset });
+  const tokenizer = new Tokenizer(text, {
+    offset: options?.offset,
+    skipRS: (options as (FromCDNOptions & { _skipRS?: boolean }) | undefined)
+      ?._skipRS,
+  });
   const parser = new CDNParser(tokenizer, options ?? {});
   const node = parser.parse();
   if (options?.preserveComments) attachComments(node, tokenizer.comments, text);
@@ -547,9 +551,16 @@ class CDNParser {
         while (this.t.peek().type !== 'GT_GT') {
           if (this.t.peek().type === 'EOF')
             this._fail(`unterminated ${tok.appPrefix!}<<...>>`, tok);
-          if (items.length > 0 && this.t.peek().type === 'COMMA') {
-            this.t.consume();
-            if (this.t.peek().type === 'GT_GT') break; // trailing comma
+          if (items.length > 0) {
+            if (this.t.peek().type === 'COMMA') {
+              this.t.consume();
+              if (this.t.peek().type === 'GT_GT') break; // trailing comma
+            } else if (this.t.peek().offset === this.t.lastEndOffset) {
+              this._warnOrFail(
+                '<<...>> items must be separated by "," or whitespace',
+                this.t.peek()
+              );
+            }
           }
           items.push(this.parseValue());
         }
@@ -1035,9 +1046,16 @@ class CDNParser {
     this.t.consume(); // <<
     const items: CborItem[] = [];
     while (this.t.peek().type !== 'GT_GT') {
-      if (items.length > 0 && this.t.peek().type === 'COMMA') {
-        this.t.consume();
-        if (this.t.peek().type === 'GT_GT') break; // trailing comma
+      if (items.length > 0) {
+        if (this.t.peek().type === 'COMMA') {
+          this.t.consume();
+          if (this.t.peek().type === 'GT_GT') break; // trailing comma
+        } else if (this.t.peek().offset === this.t.lastEndOffset) {
+          this._warnOrFail(
+            '<<...>> items must be separated by "," or whitespace',
+            this.t.peek()
+          );
+        }
       }
       items.push(this.parseValue());
     }
@@ -1074,9 +1092,16 @@ class CDNParser {
     const setupWarnings = this._pendingWarnings.splice(0);
     const items: CborItem[] = [];
     while (this.t.peek().type !== 'RBRACKET') {
-      if (items.length > 0 && this.t.peek().type === 'COMMA') {
-        this.t.consume();
-        if (this.t.peek().type === 'RBRACKET') break; // trailing comma
+      if (items.length > 0) {
+        if (this.t.peek().type === 'COMMA') {
+          this.t.consume();
+          if (this.t.peek().type === 'RBRACKET') break; // trailing comma
+        } else if (this.t.peek().offset === this.t.lastEndOffset) {
+          this._warnOrFail(
+            'array items must be separated by "," or whitespace',
+            this.t.peek()
+          );
+        }
       }
       items.push(this.parseValue());
     }
@@ -1124,9 +1149,16 @@ class CDNParser {
     const setupWarnings = this._pendingWarnings.splice(0);
     const entries: [CborItem, CborItem][] = [];
     while (this.t.peek().type !== 'RBRACE') {
-      if (entries.length > 0 && this.t.peek().type === 'COMMA') {
-        this.t.consume();
-        if (this.t.peek().type === 'RBRACE') break; // trailing comma
+      if (entries.length > 0) {
+        if (this.t.peek().type === 'COMMA') {
+          this.t.consume();
+          if (this.t.peek().type === 'RBRACE') break; // trailing comma
+        } else if (this.t.peek().offset === this.t.lastEndOffset) {
+          this._warnOrFail(
+            'map entries must be separated by "," or whitespace',
+            this.t.peek()
+          );
+        }
       }
       const key = this.parseValue();
       this.expect('COLON');
@@ -1181,9 +1213,16 @@ class CDNParser {
 
     const chunks: CborItem[] = [];
     while (this.t.peek().type !== 'RPAREN') {
-      if (chunks.length > 0 && this.t.peek().type === 'COMMA') {
-        this.t.consume();
-        if (this.t.peek().type === 'RPAREN') break; // trailing comma
+      if (chunks.length > 0) {
+        if (this.t.peek().type === 'COMMA') {
+          this.t.consume();
+          if (this.t.peek().type === 'RPAREN') break; // trailing comma
+        } else if (this.t.peek().offset === this.t.lastEndOffset) {
+          this._warnOrFail(
+            'indefinite string chunks must be separated by "," or whitespace',
+            this.t.peek()
+          );
+        }
       }
       chunks.push(this.parseValue());
     }

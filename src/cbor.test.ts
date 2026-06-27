@@ -124,6 +124,47 @@ describe('CBOR.fromCDN()', () => {
     expect((CBOR.fromCDN('null') as CborSimple).value).toBe(22);
   });
 
+  // ── Adjacent items without separator ──────────────────────────────────────
+
+  test('adjacent array items without separator throw in strict mode', () => {
+    expect(() => CBOR.fromCDN('[{}{}]')).toThrow(SyntaxError);
+    expect(() => CBOR.fromCDN('[1 2]')).not.toThrow(); // space is valid
+    expect(() => CBOR.fromCDN('[1,2]')).not.toThrow(); // comma is valid
+  });
+
+  test('adjacent map entries without separator throw in strict mode', () => {
+    expect(() => CBOR.fromCDN('{[]:[][]:[]}', { allowTrailing: true })).toThrow(
+      SyntaxError
+    );
+    expect(() => CBOR.fromCDN('{"a":1 "b":2}')).not.toThrow(); // space is valid
+  });
+
+  test('adjacent items without separator warn in non-strict mode', () => {
+    const warnings: string[] = [];
+    const node = CBOR.fromCDN('[{}{}]', {
+      strict: false,
+      onWarning: (w) => warnings.push(w.message),
+      silent: true,
+    });
+    expect((node as CborArray).items).toHaveLength(2);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('separated');
+  });
+
+  // ── Indefinite string group adjacent chunks ────────────────────────────────
+
+  test('adjacent indefinite string chunks without separator throw in strict mode', () => {
+    expect(() => CBOR.fromCDN("(_ h'01'h'02')")).toThrow(SyntaxError);
+    expect(() => CBOR.fromCDN('(_ """")')).toThrow(SyntaxError);
+  });
+
+  test('indefinite string chunks with separator are valid', () => {
+    expect(() => CBOR.fromCDN("(_ h'01' h'02')")).not.toThrow(); // space
+    expect(() => CBOR.fromCDN("(_ h'01',h'02')")).not.toThrow(); // comma
+    expect(() => CBOR.fromCDN('(_ "" "")')).not.toThrow(); // space
+    expect(() => CBOR.fromCDN('(_ "", "")')).not.toThrow(); // comma
+  });
+
   test('supports offset and allowTrailing', () => {
     const first = CBOR.fromCDN('1 2', {
       allowTrailing: true,
