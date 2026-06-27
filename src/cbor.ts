@@ -10,6 +10,7 @@ import type {
   ParseWarning,
   ToCBOROptions,
   ToCDNOptions,
+  ToHexDumpOptions,
   ToJSOptions,
 } from './types';
 import { CBOR_OMIT } from './types';
@@ -151,13 +152,53 @@ export class CBOR {
     return CBOR.decode(input, this.#merge(options));
   }
 
+  *decodeSeq(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBORSeqOptions & ToJSOptions
+  ): Generator<unknown> {
+    yield* CBOR.decodeSeq(input, this.#merge(options));
+  }
+
+  *parseSeq(
+    text: string,
+    options?: FromCDNSeqOptions & ToJSOptions
+  ): Generator<unknown> {
+    yield* CBOR.parseSeq(text, this.#merge(options));
+  }
+
   encode(value: unknown, options?: FromJSOptions & ToCBOROptions): Uint8Array {
     return CBOR.encode(value, this.#merge(options));
   }
 
-  /**
-   * @deprecated Use `cborToCdn()` or `fromCBOR(input, options).toCDN(options)` instead.
-   */
+  compile(
+    text: string,
+    options?: FromCDNSeqOptions & ToCBOROptions
+  ): Uint8Array {
+    return CBOR.compile(text, this.#merge(options));
+  }
+
+  decompile(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBORSeqOptions & ToCDNOptions
+  ): string {
+    return CBOR.decompile(input, this.#merge(options));
+  }
+
+  toHex(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBORSeqOptions & ToHexDumpOptions
+  ): string {
+    return CBOR.toHex(input, this.#merge(options));
+  }
+
+  fromHex(
+    text: string,
+    options?: FromHexDumpOptions & ToCBOROptions
+  ): Uint8Array {
+    return CBOR.fromHex(text, this.#merge(options));
+  }
+
+  /** @deprecated Use `decompile()` instead. */
   cborToCborEdn(
     input: ArrayBufferView | ArrayBufferLike,
     options?: FromCBOROptions & ToCDNOptions
@@ -165,16 +206,18 @@ export class CBOR {
     return this.cborToCdn(input, options);
   }
 
+  /** @deprecated Use `decompile()` instead. */
   cborToCdn(
     input: ArrayBufferView | ArrayBufferLike,
     options?: FromCBOROptions & ToCDNOptions
   ): string {
-    return CBOR.cborToCdn(input, this.#merge(options));
+    const merged = this.#merge(options);
+    const node = CBOR.fromCBOR(input, merged);
+    node._defaults = this.#defaults;
+    return node.toCDN(merged);
   }
 
-  /**
-   * @deprecated Use `cdnToCbor()` or `fromCDN(text, options).toCBOR(options)` instead.
-   */
+  /** @deprecated Use `compile()` instead. */
   cborEdnToCbor(
     text: string,
     options?: FromCDNOptions & ToCBOROptions
@@ -182,11 +225,13 @@ export class CBOR {
     return this.cdnToCbor(text, options);
   }
 
+  /** @deprecated Use `compile()` instead. */
   cdnToCbor(
     text: string,
     options?: FromCDNOptions & ToCBOROptions
   ): Uint8Array {
-    return CBOR.cdnToCbor(text, this.#merge(options));
+    const merged = this.#merge(options);
+    return CBOR.fromCDN(text, merged).toCBOR(merged);
   }
 
   parse(text: string): unknown;
@@ -426,6 +471,26 @@ export class CBOR {
     return CBOR.fromCBOR(input, options).toJS(options);
   }
 
+  /** Decode a CBOR Sequence (RFC 8742), yielding each item as a JavaScript value. */
+  static *decodeSeq(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBORSeqOptions & ToJSOptions
+  ): Generator<unknown> {
+    for (const item of CBOR.fromCBORSeq(input, options)) {
+      yield item.toJS(options);
+    }
+  }
+
+  /** Parse a CDN Sequence text string, yielding each item as a JavaScript value. */
+  static *parseSeq(
+    text: string,
+    options?: FromCDNSeqOptions & ToJSOptions
+  ): Generator<unknown> {
+    for (const item of CBOR.fromCDNSeq(text, options)) {
+      yield item.toJS(options);
+    }
+  }
+
   /** Encode a JavaScript value directly to CBOR binary data. */
   static encode(
     value: unknown,
@@ -435,7 +500,77 @@ export class CBOR {
   }
 
   /**
+   * Compile a CDN text string to CBOR binary data.
+   * Multi-item CDN Sequences produce a CBOR Sequence (RFC 8742): concatenated items.
+   */
+  static compile(
+    text: string,
+    options?: FromCDNSeqOptions & ToCBOROptions
+  ): Uint8Array {
+    const byteArrays = [...CBOR.fromCDNSeq(text, options)].map((item) =>
+      item.toCBOR(options)
+    );
+    const total = byteArrays.reduce((s, b) => s + b.length, 0);
+    const result = new Uint8Array(total);
+    let off = 0;
+    for (const b of byteArrays) {
+      result.set(b, off);
+      off += b.length;
+    }
+    return result;
+  }
+
+  /**
+   * Decompile CBOR binary data to a CDN text string.
+   * CBOR Sequences (RFC 8742) produce multi-item CDN output, with items separated by newlines.
+   */
+  static decompile(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBORSeqOptions & ToCDNOptions
+  ): string {
+    return [...CBOR.fromCBORSeq(input, options)]
+      .map((item) => item.toCDN(options))
+      .join('\n');
+  }
+
+  /**
+   * Convert CBOR binary data to an annotated hex dump string.
+   * CBOR Sequences (RFC 8742) produce one dump per item, separated by newlines.
+   */
+  static toHex(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBORSeqOptions & ToHexDumpOptions
+  ): string {
+    return [...CBOR.fromCBORSeq(input, options)]
+      .map((item) => item.toHexDump(options))
+      .join('\n');
+  }
+
+  /**
+   * Parse an annotated hex dump string to CBOR binary data.
+   * Multi-item dumps produce a CBOR Sequence (RFC 8742): concatenated items.
+   */
+  static fromHex(
+    text: string,
+    options?: FromHexDumpOptions & ToCBOROptions
+  ): Uint8Array {
+    const byteArrays = [...CBOR.fromHexDumpSeq(text, options)].map((item) =>
+      item.toCBOR(options)
+    );
+    const total = byteArrays.reduce((s, b) => s + b.length, 0);
+    const result = new Uint8Array(total);
+    let off = 0;
+    for (const b of byteArrays) {
+      result.set(b, off);
+      off += b.length;
+    }
+    return result;
+  }
+
+  /**
    * Convert CBOR binary data directly to a CDN text string.
+   *
+   * @deprecated Use `CBOR.decompile()` instead.
    */
   static cborToCdn(
     input: ArrayBufferView | ArrayBufferLike,
@@ -444,20 +579,18 @@ export class CBOR {
     return CBOR.fromCBOR(input, options).toCDN(options);
   }
 
-  /**
-   * Convert CBOR binary data directly to a CDN text string.
-   *
-   * @deprecated Use `CBOR.cborToCdn()` or `CBOR.fromCBOR(input, options).toCDN(options)` instead.
-   */
+  /** @deprecated Use `CBOR.decompile()` instead. */
   static cborToCborEdn(
     input: ArrayBufferView | ArrayBufferLike,
     options?: FromCBOROptions & ToCDNOptions
   ): string {
-    return CBOR.cborToCdn(input, options);
+    return CBOR.fromCBOR(input, options).toCDN(options);
   }
 
   /**
    * Convert a CDN text string directly to CBOR binary data.
+   *
+   * @deprecated Use `CBOR.compile()` instead.
    */
   static cdnToCbor(
     text: string,
@@ -466,16 +599,12 @@ export class CBOR {
     return CBOR.fromCDN(text, options).toCBOR(options);
   }
 
-  /**
-   * Convert a CDN text string directly to CBOR binary data.
-   *
-   * @deprecated Use `CBOR.cdnToCbor()` or `CBOR.fromCDN(text, options).toCBOR(options)` instead.
-   */
+  /** @deprecated Use `CBOR.compile()` instead. */
   static cborEdnToCbor(
     text: string,
     options?: FromCDNOptions & ToCBOROptions
   ): Uint8Array {
-    return CBOR.cdnToCbor(text, options);
+    return CBOR.fromCDN(text, options).toCBOR(options);
   }
 
   /**
