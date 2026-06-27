@@ -128,6 +128,21 @@ export const SAMPLES: Sample[] = [
   hash'SHA-256;base64url:47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU',
 ]`,
   },
+  {
+    name: 'CDN Sequence',
+    cdn: `# CDN Sequence — multiple items separated by whitespace, comma, or comment.
+# Output is a CBOR Sequence (RFC 8742): concatenated CBOR items.
+
+{ "event": "start", "ts": DT'2026-06-01T00:00:00Z' }
+{ "event": "data",  "value": 42 }
+{ "event": "end",   "ts": DT'2026-06-01T00:01:00Z' }`,
+  },
+  {
+    name: 'JSONL / NDJSON',
+    cdn: `{"id": 1, "name": "Alice", "score": 98.5}
+{"id": 2, "name": "Bob",   "score": 72.0}
+{"id": 3, "name": "Carol", "score": 85.3}`,
+  },
 ];
 
 export const DEFAULT_SAMPLE = SAMPLES[0]!.cdn;

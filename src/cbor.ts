@@ -2,11 +2,15 @@ import type { CborItem } from './ast/CborItem';
 import type {
   CBOROptions,
   FromCBOROptions,
+  FromCBORSeqOptions,
   FromCDNOptions,
+  FromCDNSeqOptions,
   FromHexDumpOptions,
   FromJSOptions,
+  ParseWarning,
   ToCBOROptions,
   ToCDNOptions,
+  ToHexDumpOptions,
   ToJSOptions,
 } from './types';
 import { CBOR_OMIT } from './types';
@@ -114,6 +118,33 @@ export class CBOR {
     return node;
   }
 
+  *fromCBORSeq(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBORSeqOptions
+  ): Generator<CborItem> {
+    for (const item of CBOR.fromCBORSeq(input, this.#merge(options))) {
+      item._defaults = this.#defaults;
+      yield item;
+    }
+  }
+
+  *fromCDNSeq(text: string, options?: FromCDNSeqOptions): Generator<CborItem> {
+    for (const item of CBOR.fromCDNSeq(text, this.#merge(options))) {
+      item._defaults = this.#defaults;
+      yield item;
+    }
+  }
+
+  *fromHexDumpSeq(
+    text: string,
+    options?: FromHexDumpOptions
+  ): Generator<CborItem> {
+    for (const item of CBOR.fromHexDumpSeq(text, this.#merge(options))) {
+      item._defaults = this.#defaults;
+      yield item;
+    }
+  }
+
   decode(
     input: ArrayBufferView | ArrayBufferLike,
     options?: FromCBOROptions & ToJSOptions
@@ -121,13 +152,53 @@ export class CBOR {
     return CBOR.decode(input, this.#merge(options));
   }
 
+  *decodeSeq(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBORSeqOptions & ToJSOptions
+  ): Generator<unknown> {
+    yield* CBOR.decodeSeq(input, this.#merge(options));
+  }
+
+  *parseSeq(
+    text: string,
+    options?: FromCDNSeqOptions & ToJSOptions
+  ): Generator<unknown> {
+    yield* CBOR.parseSeq(text, this.#merge(options));
+  }
+
   encode(value: unknown, options?: FromJSOptions & ToCBOROptions): Uint8Array {
     return CBOR.encode(value, this.#merge(options));
   }
 
-  /**
-   * @deprecated Use `cborToCdn()` or `fromCBOR(input, options).toCDN(options)` instead.
-   */
+  compile(
+    text: string,
+    options?: FromCDNSeqOptions & ToCBOROptions
+  ): Uint8Array {
+    return CBOR.compile(text, this.#merge(options));
+  }
+
+  decompile(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBORSeqOptions & ToCDNOptions
+  ): string {
+    return CBOR.decompile(input, this.#merge(options));
+  }
+
+  toHex(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBORSeqOptions & ToHexDumpOptions
+  ): string {
+    return CBOR.toHex(input, this.#merge(options));
+  }
+
+  fromHex(
+    text: string,
+    options?: FromHexDumpOptions & ToCBOROptions
+  ): Uint8Array {
+    return CBOR.fromHex(text, this.#merge(options));
+  }
+
+  /** @deprecated Use `decompile()` instead. */
   cborToCborEdn(
     input: ArrayBufferView | ArrayBufferLike,
     options?: FromCBOROptions & ToCDNOptions
@@ -135,16 +206,18 @@ export class CBOR {
     return this.cborToCdn(input, options);
   }
 
+  /** @deprecated Use `decompile()` instead. */
   cborToCdn(
     input: ArrayBufferView | ArrayBufferLike,
     options?: FromCBOROptions & ToCDNOptions
   ): string {
-    return CBOR.cborToCdn(input, this.#merge(options));
+    const merged = this.#merge(options);
+    const node = CBOR.fromCBOR(input, merged);
+    node._defaults = this.#defaults;
+    return node.toCDN(merged);
   }
 
-  /**
-   * @deprecated Use `cdnToCbor()` or `fromCDN(text, options).toCBOR(options)` instead.
-   */
+  /** @deprecated Use `compile()` instead. */
   cborEdnToCbor(
     text: string,
     options?: FromCDNOptions & ToCBOROptions
@@ -152,11 +225,13 @@ export class CBOR {
     return this.cdnToCbor(text, options);
   }
 
+  /** @deprecated Use `compile()` instead. */
   cdnToCbor(
     text: string,
     options?: FromCDNOptions & ToCBOROptions
   ): Uint8Array {
-    return CBOR.cdnToCbor(text, this.#merge(options));
+    const merged = this.#merge(options);
+    return CBOR.fromCDN(text, merged).toCBOR(merged);
   }
 
   parse(text: string): unknown;
@@ -246,6 +321,111 @@ export class CBOR {
     return CBOR.fromCDN(text, options);
   }
 
+  /** アノテーション付き hex dump テキストから CBOR Sequence を item ごとにデコードするジェネレータ。 */
+  static *fromHexDumpSeq(
+    text: string,
+    options?: FromHexDumpOptions
+  ): Generator<CborItem> {
+    const bytes: number[] = [];
+    const uncommented = stripHexDumpComments(text);
+    const tokens = uncommented.trim().split(/\s+/).filter(Boolean);
+    for (const token of tokens) {
+      if (/^[0-9A-Fa-f]{2}$/.test(token)) {
+        bytes.push(parseInt(token, 16));
+      } else if (/^[0-9A-Fa-f]+$/.test(token) && token.length % 2 === 0) {
+        for (let i = 0; i < token.length; i += 2)
+          bytes.push(parseInt(token.slice(i, i + 2), 16));
+      } else {
+        throw new SyntaxError(
+          `Invalid hex token in dump: ${JSON.stringify(token)}`
+        );
+      }
+    }
+    yield* CBOR.fromCBORSeq(new Uint8Array(bytes), options);
+  }
+
+  /** CBOR Sequence (RFC 8742) を item ごとにデコードするジェネレータ。 */
+  static *fromCBORSeq(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBORSeqOptions
+  ): Generator<CborItem> {
+    const bytes =
+      input instanceof ArrayBuffer ||
+      (typeof SharedArrayBuffer !== 'undefined' &&
+        input instanceof SharedArrayBuffer)
+        ? new Uint8Array(input)
+        : new Uint8Array(
+            (input as ArrayBufferView).buffer,
+            (input as ArrayBufferView).byteOffset,
+            (input as ArrayBufferView).byteLength
+          );
+    let offset = 0;
+    while (offset < bytes.byteLength) {
+      const item = decodeCBOR(input, {
+        ...options,
+        offset,
+        allowTrailing: true,
+      });
+      yield item;
+      offset = item.end!;
+    }
+  }
+
+  /** CDN テキストの複数 item を 1 つずつパースするジェネレータ。 */
+  static *fromCDNSeq(
+    text: string,
+    options?: FromCDNSeqOptions
+  ): Generator<CborItem> {
+    let offset = 0;
+    let isFirst = true;
+    while (true) {
+      const {
+        offset: next,
+        hadSeparator,
+        commaOffset,
+      } = skipCDNSeparator(text, offset, options);
+      // Leading comma: comma before the first item (including comma-only input).
+      // Checked before the EOF break so that "," alone is also caught.
+      // Trailing comma is valid per ABNF SOC = S ["," S] and is silently accepted.
+      if (isFirst && commaOffset >= 0) {
+        const msg = 'leading comma in CDN sequence';
+        if (options?.strict !== false) throw new SyntaxError(msg);
+        emitCDNSeqWarning(msg, commaOffset, options);
+      }
+      if (next >= text.length) break;
+      if (!isFirst && !hadSeparator) {
+        const msg =
+          'CDN sequence items must be separated by whitespace, comma, or comment';
+        if (options?.strict !== false) throw new SyntaxError(msg);
+        emitCDNSeqWarning(msg, next, options);
+      }
+      offset = next;
+      let item: CborItem;
+      try {
+        // _skipRS: true causes the tokenizer to treat RS (U+001E, RFC 7464) as
+        // whitespace, preventing it from corrupting string-literal contents via
+        // a global text replacement.
+        item = parseCDN(text, {
+          ...options,
+          offset,
+          allowTrailing: true,
+          _skipRS: true,
+        } as FromCDNOptions);
+      } catch (e) {
+        if (options?.strict !== false) throw e;
+        emitCDNSeqWarning(
+          e instanceof Error ? e.message : String(e),
+          offset,
+          options
+        );
+        break;
+      }
+      yield item;
+      offset = item.end!;
+      isFirst = false;
+    }
+  }
+
   /** Convert a JavaScript value into an AST node. */
   static fromJS(value: unknown, options?: FromJSOptions): CborItem {
     return _fromJS(value, options);
@@ -291,6 +471,26 @@ export class CBOR {
     return CBOR.fromCBOR(input, options).toJS(options);
   }
 
+  /** Decode a CBOR Sequence (RFC 8742), yielding each item as a JavaScript value. */
+  static *decodeSeq(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBORSeqOptions & ToJSOptions
+  ): Generator<unknown> {
+    for (const item of CBOR.fromCBORSeq(input, options)) {
+      yield item.toJS(options);
+    }
+  }
+
+  /** Parse a CDN Sequence text string, yielding each item as a JavaScript value. */
+  static *parseSeq(
+    text: string,
+    options?: FromCDNSeqOptions & ToJSOptions
+  ): Generator<unknown> {
+    for (const item of CBOR.fromCDNSeq(text, options)) {
+      yield item.toJS(options);
+    }
+  }
+
   /** Encode a JavaScript value directly to CBOR binary data. */
   static encode(
     value: unknown,
@@ -300,7 +500,77 @@ export class CBOR {
   }
 
   /**
+   * Compile a CDN text string to CBOR binary data.
+   * Multi-item CDN Sequences produce a CBOR Sequence (RFC 8742): concatenated items.
+   */
+  static compile(
+    text: string,
+    options?: FromCDNSeqOptions & ToCBOROptions
+  ): Uint8Array {
+    const byteArrays = [...CBOR.fromCDNSeq(text, options)].map((item) =>
+      item.toCBOR(options)
+    );
+    const total = byteArrays.reduce((s, b) => s + b.length, 0);
+    const result = new Uint8Array(total);
+    let off = 0;
+    for (const b of byteArrays) {
+      result.set(b, off);
+      off += b.length;
+    }
+    return result;
+  }
+
+  /**
+   * Decompile CBOR binary data to a CDN text string.
+   * CBOR Sequences (RFC 8742) produce multi-item CDN output, with items separated by newlines.
+   */
+  static decompile(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBORSeqOptions & ToCDNOptions
+  ): string {
+    return [...CBOR.fromCBORSeq(input, options)]
+      .map((item) => item.toCDN(options))
+      .join('\n');
+  }
+
+  /**
+   * Convert CBOR binary data to an annotated hex dump string.
+   * CBOR Sequences (RFC 8742) produce one dump per item, separated by newlines.
+   */
+  static toHex(
+    input: ArrayBufferView | ArrayBufferLike,
+    options?: FromCBORSeqOptions & ToHexDumpOptions
+  ): string {
+    return [...CBOR.fromCBORSeq(input, options)]
+      .map((item) => item.toHexDump(options))
+      .join('\n');
+  }
+
+  /**
+   * Parse an annotated hex dump string to CBOR binary data.
+   * Multi-item dumps produce a CBOR Sequence (RFC 8742): concatenated items.
+   */
+  static fromHex(
+    text: string,
+    options?: FromHexDumpOptions & ToCBOROptions
+  ): Uint8Array {
+    const byteArrays = [...CBOR.fromHexDumpSeq(text, options)].map((item) =>
+      item.toCBOR(options)
+    );
+    const total = byteArrays.reduce((s, b) => s + b.length, 0);
+    const result = new Uint8Array(total);
+    let off = 0;
+    for (const b of byteArrays) {
+      result.set(b, off);
+      off += b.length;
+    }
+    return result;
+  }
+
+  /**
    * Convert CBOR binary data directly to a CDN text string.
+   *
+   * @deprecated Use `CBOR.decompile()` instead.
    */
   static cborToCdn(
     input: ArrayBufferView | ArrayBufferLike,
@@ -309,20 +579,18 @@ export class CBOR {
     return CBOR.fromCBOR(input, options).toCDN(options);
   }
 
-  /**
-   * Convert CBOR binary data directly to a CDN text string.
-   *
-   * @deprecated Use `CBOR.cborToCdn()` or `CBOR.fromCBOR(input, options).toCDN(options)` instead.
-   */
+  /** @deprecated Use `CBOR.decompile()` instead. */
   static cborToCborEdn(
     input: ArrayBufferView | ArrayBufferLike,
     options?: FromCBOROptions & ToCDNOptions
   ): string {
-    return CBOR.cborToCdn(input, options);
+    return CBOR.fromCBOR(input, options).toCDN(options);
   }
 
   /**
    * Convert a CDN text string directly to CBOR binary data.
+   *
+   * @deprecated Use `CBOR.compile()` instead.
    */
   static cdnToCbor(
     text: string,
@@ -331,16 +599,12 @@ export class CBOR {
     return CBOR.fromCDN(text, options).toCBOR(options);
   }
 
-  /**
-   * Convert a CDN text string directly to CBOR binary data.
-   *
-   * @deprecated Use `CBOR.cdnToCbor()` or `CBOR.fromCDN(text, options).toCBOR(options)` instead.
-   */
+  /** @deprecated Use `CBOR.compile()` instead. */
   static cborEdnToCbor(
     text: string,
     options?: FromCDNOptions & ToCBOROptions
   ): Uint8Array {
-    return CBOR.cdnToCbor(text, options);
+    return CBOR.fromCDN(text, options).toCBOR(options);
   }
 
   /**
@@ -523,6 +787,95 @@ function whitespaceLike(text: string): string {
 }
 
 // ─── Module-scope helper ─────────────────────────────────────────────────────
+
+function emitCDNSeqWarning(
+  msg: string,
+  offset: number,
+  options: FromCDNSeqOptions | undefined
+): void {
+  const w: ParseWarning = { message: msg, offset };
+  if (options?.onWarning) options.onWarning(w);
+  else if (!options?.silent)
+    console.warn(`CDN sequence warning at offset ${offset}: ${msg}`);
+}
+
+/**
+ * CDN sequence の item 間にある空白・コメント・省略可能なカンマを読み飛ばし、
+ * 次の item が始まる文字位置と、何らかの separator が存在したかどうかを返す。
+ * 未終端のブロックコメントは strict モードでは throw し、
+ * strict: false の場合は警告を emit して末尾まで読み飛ばす。
+ */
+function skipCDNSeparator(
+  text: string,
+  from: number,
+  options: FromCDNSeqOptions | undefined
+): { offset: number; hadSeparator: boolean; commaOffset: number } {
+  let i = from;
+  let hadSeparator = false;
+  let seenComma = false;
+  let commaOffset = -1;
+  while (i < text.length) {
+    const ch = text[i];
+    if (
+      ch === ' ' ||
+      ch === '\t' ||
+      ch === '\r' ||
+      ch === '\n' ||
+      ch === '\x1e'
+    ) {
+      hadSeparator = true;
+      i++;
+      continue;
+    }
+    if (ch === '#') {
+      hadSeparator = true;
+      const nl = text.indexOf('\n', i + 1);
+      i = nl < 0 ? text.length : nl + 1;
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '/') {
+      hadSeparator = true;
+      const nl = text.indexOf('\n', i + 2);
+      i = nl < 0 ? text.length : nl + 1;
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      hadSeparator = true;
+      const end = text.indexOf('*/', i + 2);
+      if (end < 0) {
+        const msg = 'unterminated /* comment in CDN sequence';
+        if (options?.strict !== false) throw new SyntaxError(msg);
+        emitCDNSeqWarning(msg, i, options);
+        i = text.length;
+      } else {
+        i = end + 2;
+      }
+      continue;
+    }
+    if (ch === '/' && text[i + 1] !== '/') {
+      hadSeparator = true;
+      const end = text.indexOf('/', i + 1);
+      if (end < 0) {
+        const msg = 'unterminated / comment in CDN sequence';
+        if (options?.strict !== false) throw new SyntaxError(msg);
+        emitCDNSeqWarning(msg, i, options);
+        i = text.length;
+      } else {
+        i = end + 1;
+      }
+      continue;
+    }
+    if (ch === ',' && !seenComma) {
+      hadSeparator = true;
+      seenComma = true;
+      commaOffset = i;
+      i++;
+      continue;
+    }
+    break;
+  }
+  return { offset: i, hadSeparator, commaOffset };
+}
 
 /** Map JSON.stringify `space` argument to ToCDNOptions.indent. */
 function resolveSpace(
