@@ -54,26 +54,56 @@ console.log(value);
 // { hello: 'world', n: 42 }
 ```
 
-### CBOR バイト列から CDN へ
+### CBOR Sequence から JavaScript へ
+
+`decodeSeq` は連結された CBOR item を CBOR Sequence として読み取り、各 item を JavaScript 値として yield します。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
-const text = CBOR.fromCBOR(new Uint8Array([0x83, 0x01, 0x02, 0x03])).toCDN();
+const a = CBOR.encode({ id: 1 });
+const b = CBOR.encode({ id: 2 });
+const seq = new Uint8Array([...a, ...b]);
 
+const values = [...CBOR.decodeSeq(seq)];
+// [{ id: 1 }, { id: 2 }]
+```
+
+### CBOR バイト列から CDN へ
+
+`decompile` は CBOR バイト列を CDN テキスト文字列に変換します。CBOR Sequence には自動対応しており、複数 item が連結されている場合は改行区切りの CDN 出力になります。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+// 単一 item
+const text = CBOR.decompile(new Uint8Array([0x83, 0x01, 0x02, 0x03]));
 console.log(text);
 // [1,2,3]
+
+// CBOR Sequence — item ごとに 1 行
+const seq = new Uint8Array([...CBOR.encode(1), ...CBOR.encode('two')]);
+console.log(CBOR.decompile(seq));
+// 1
+// "two"
 ```
 
 ### CDN から CBOR バイト列へ
 
+`compile` は CDN テキスト文字列を CBOR バイト列に変換します。CDN Sequence（複数 item）を入力すると、CBOR Sequence (RFC 8742) として連結されたバイト列を自動的に出力します。
+
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
-const bytes = CBOR.fromCDN('[1, 2, 3]').toCBOR();
-
+// 単一 item
+const bytes = CBOR.compile('[1, 2, 3]');
 console.log(bytes);
 // Uint8Array([0x83, 0x01, 0x02, 0x03])
+
+// CDN Sequence — 出力は CBOR Sequence
+const seq = CBOR.compile('{"id":1}\n{"id":2}');
+console.log([...CBOR.decodeSeq(seq)]);
+// [{ id: 1 }, { id: 2 }]
 ```
 
 ### JavaScript から CDN へ
@@ -114,6 +144,21 @@ const value = CBOR.parse("[1, h'deadbeef', true, null]");
 
 console.log(value);
 // [1, Uint8Array(...), true, null]
+```
+
+### CDN Sequence から JavaScript へ
+
+`parseSeq` は複数 item を含む CDN テキスト文字列（空白・カンマ・コメント区切り）をパースし、各 item を JavaScript 値として yield します。JSONL / NDJSON もそのまま扱えます。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const values = [...CBOR.parseSeq('1  "two"  [3]')];
+// [1, 'two', [3]]
+
+const jsonl = '{"id":1}\n{"id":2}\n{"id":3}';
+const rows = [...CBOR.parseSeq(jsonl)];
+// [{ id: 1 }, { id: 2 }, { id: 3 }]
 ```
 
 ### CDN を正規化する

@@ -416,3 +416,190 @@ describe('CBOR instance fromCBORSeq / fromCDNSeq', () => {
     expect(items[1]!.toJS()).toBe(42);
   });
 });
+
+describe('CBOR.decodeSeq', () => {
+  test('empty input yields no values', () => {
+    expect([...CBOR.decodeSeq(new Uint8Array())]).toEqual([]);
+  });
+
+  test('single item yields one JS value', () => {
+    const bytes = CBOR.encode(42);
+    expect([...CBOR.decodeSeq(bytes)]).toEqual([42]);
+  });
+
+  test('multiple concatenated items yield JS values in order', () => {
+    const a = CBOR.encode({ x: 1 });
+    const b = CBOR.encode([2, 3]);
+    const c = CBOR.encode('hello');
+    const seq = new Uint8Array([...a, ...b, ...c]);
+    expect([...CBOR.decodeSeq(seq)]).toEqual([{ x: 1 }, [2, 3], 'hello']);
+  });
+
+  test('ToJSOptions are forwarded', () => {
+    const bytes = CBOR.encode(42n);
+    const [val] = [...CBOR.decodeSeq(bytes, { integerAs: 'number' })];
+    expect(val).toBe(42);
+  });
+
+  test('instance decodeSeq merges defaults', () => {
+    const cbor = new CBOR({ integerAs: 'number' });
+    const bytes = CBOR.encode(99n);
+    const [val] = [...cbor.decodeSeq(bytes)];
+    expect(val).toBe(99);
+  });
+
+  test('reviver is called once at root per sequence item', () => {
+    const a = CBOR.encode({ x: 1 });
+    const b = CBOR.encode({ x: 2 });
+    const c = CBOR.encode({ x: 3 });
+    const roots: unknown[] = [];
+    const values = [
+      ...CBOR.decodeSeq(new Uint8Array([...a, ...b, ...c]), {
+        reviver(key, value) {
+          if (key === '') roots.push(value);
+          return value;
+        },
+      }),
+    ];
+    expect(values).toEqual([{ x: 1 }, { x: 2 }, { x: 3 }]);
+    expect(roots).toEqual([{ x: 1 }, { x: 2 }, { x: 3 }]);
+  });
+});
+
+describe('CBOR.parseSeq', () => {
+  test('empty string yields no values', () => {
+    expect([...CBOR.parseSeq('')]).toEqual([]);
+    expect([...CBOR.parseSeq('  ')]).toEqual([]);
+  });
+
+  test('single item yields one JS value', () => {
+    expect([...CBOR.parseSeq('42')]).toEqual([42]);
+  });
+
+  test('comma-separated items yield JS values in order', () => {
+    expect([...CBOR.parseSeq('1, "two", [3]')]).toEqual([1, 'two', [3]]);
+  });
+
+  test('newline-separated items (JSONL style)', () => {
+    const text = '{"a":1}\n{"b":2}\n{"c":3}';
+    expect([...CBOR.parseSeq(text)]).toEqual([{ a: 1 }, { b: 2 }, { c: 3 }]);
+  });
+
+  test('ToJSOptions are forwarded', () => {
+    const cbor = new CBOR({ extensions: [CBOR.dt_as_Date] });
+    const [val] = [...cbor.parseSeq("DT'2024-01-01T00:00:00Z'")];
+    expect(val).toBeInstanceOf(Date);
+  });
+
+  test('instance parseSeq merges defaults', () => {
+    const cbor = new CBOR({ extensions: [CBOR.dt_as_Date] });
+    const values = [...cbor.parseSeq("DT'2024-01-01T00:00:00Z', 42")];
+    expect(values).toHaveLength(2);
+    expect(values[0]).toBeInstanceOf(Date);
+    expect(values[1]).toBe(42);
+  });
+
+  test('reviver is called once at root per sequence item', () => {
+    const roots: unknown[] = [];
+    const values = [
+      ...CBOR.parseSeq('{"x":1}, {"x":2}, {"x":3}', {
+        reviver(key, value) {
+          if (key === '') roots.push(value);
+          return value;
+        },
+      }),
+    ];
+    expect(values).toEqual([{ x: 1 }, { x: 2 }, { x: 3 }]);
+    expect(roots).toEqual([{ x: 1 }, { x: 2 }, { x: 3 }]);
+  });
+});
+
+describe('CBOR.compile', () => {
+  test('empty string returns empty Uint8Array', () => {
+    expect(CBOR.compile('')).toEqual(new Uint8Array());
+    expect(CBOR.compile('  ')).toEqual(new Uint8Array());
+  });
+
+  test('single item produces the same bytes as encode', () => {
+    expect(CBOR.compile('[1, 2, 3]')).toEqual(CBOR.encode([1, 2, 3]));
+  });
+
+  test('CDN Sequence produces concatenated CBOR Sequence bytes', () => {
+    const result = CBOR.compile('1, "two", [3]');
+    const expected = new Uint8Array([
+      ...CBOR.encode(1),
+      ...CBOR.encode('two'),
+      ...CBOR.encode([3]),
+    ]);
+    expect(result).toEqual(expected);
+  });
+
+  test('output round-trips through decodeSeq', () => {
+    const bytes = CBOR.compile('{"a":1}\n{"b":2}\n{"c":3}');
+    expect([...CBOR.decodeSeq(bytes)]).toEqual([{ a: 1 }, { b: 2 }, { c: 3 }]);
+  });
+
+  test('strict:false and onWarning are forwarded', () => {
+    const warnings: string[] = [];
+    const bytes = CBOR.compile('1true', {
+      strict: false,
+      onWarning: (w) => warnings.push(w.message),
+    });
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(warnings[0]).toContain('separated');
+    expect(bytes).toEqual(
+      new Uint8Array([...CBOR.encode(1), ...CBOR.encode(true)])
+    );
+  });
+
+  test('instance compile merges defaults', () => {
+    const cbor = new CBOR({ extensions: [CBOR.dt_as_Date] });
+    const bytes = cbor.compile("DT'2024-01-01T00:00:00Z'");
+    expect(bytes).toEqual(
+      CBOR.fromCDN("DT'2024-01-01T00:00:00Z'", {
+        extensions: [CBOR.dt_as_Date],
+      }).toCBOR()
+    );
+  });
+});
+
+describe('CBOR.decompile', () => {
+  test('empty input returns empty string', () => {
+    expect(CBOR.decompile(new Uint8Array())).toBe('');
+  });
+
+  test('single item produces the same CDN as fromCBOR().toCDN()', () => {
+    const bytes = CBOR.encode([1, 2, 3]);
+    expect(CBOR.decompile(bytes)).toBe(CBOR.fromCBOR(bytes).toCDN());
+  });
+
+  test('CBOR Sequence produces newline-joined CDN items', () => {
+    const seq = new Uint8Array([
+      ...CBOR.encode(1),
+      ...CBOR.encode('two'),
+      ...CBOR.encode([3]),
+    ]);
+    expect(CBOR.decompile(seq)).toBe('1\n"two"\n[3]');
+  });
+
+  test('output round-trips through compile', () => {
+    const original = new Uint8Array([
+      ...CBOR.encode({ a: 1 }),
+      ...CBOR.encode({ b: 2 }),
+    ]);
+    const cdn = CBOR.decompile(original);
+    expect(CBOR.compile(cdn)).toEqual(original);
+  });
+
+  test('toCDN options are forwarded', () => {
+    const bytes = CBOR.encode({ x: 1 });
+    const result = CBOR.decompile(bytes, { indent: 2 });
+    expect(result).toContain('\n');
+  });
+
+  test('instance decompile merges defaults', () => {
+    const cbor = new CBOR({ indent: 2 });
+    const bytes = CBOR.encode({ x: 1 });
+    expect(cbor.decompile(bytes)).toContain('\n');
+  });
+});

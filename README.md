@@ -56,26 +56,56 @@ console.log(value);
 // { hello: 'world', n: 42 }
 ```
 
-### CBOR bytes to CDN
+### CBOR Sequence to JavaScript values
+
+`decodeSeq` reads concatenated CBOR items as a CBOR Sequence and yields each item as a JavaScript value.
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
-const text = CBOR.fromCBOR(new Uint8Array([0x83, 0x01, 0x02, 0x03])).toCDN();
+const a = CBOR.encode({ id: 1 });
+const b = CBOR.encode({ id: 2 });
+const seq = new Uint8Array([...a, ...b]);
 
+const values = [...CBOR.decodeSeq(seq)];
+// [{ id: 1 }, { id: 2 }]
+```
+
+### CBOR bytes to CDN
+
+`decompile` converts CBOR binary data to a CDN text string. It handles CBOR Sequences automatically: multiple concatenated items produce newline-separated CDN output.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+// Single item
+const text = CBOR.decompile(new Uint8Array([0x83, 0x01, 0x02, 0x03]));
 console.log(text);
 // [1,2,3]
+
+// CBOR Sequence — each item on its own line
+const seq = new Uint8Array([...CBOR.encode(1), ...CBOR.encode('two')]);
+console.log(CBOR.decompile(seq));
+// 1
+// "two"
 ```
 
 ### CDN to CBOR bytes
 
+`compile` converts a CDN text string to CBOR binary data. Multi-item CDN Sequences automatically produce a CBOR Sequence (RFC 8742): concatenated items.
+
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
-const bytes = CBOR.fromCDN('[1, 2, 3]').toCBOR();
-
+// Single item
+const bytes = CBOR.compile('[1, 2, 3]');
 console.log(bytes);
 // Uint8Array([0x83, 0x01, 0x02, 0x03])
+
+// CDN Sequence — output is a CBOR Sequence
+const seq = CBOR.compile('{"id":1}\n{"id":2}');
+console.log([...CBOR.decodeSeq(seq)]);
+// [{ id: 1 }, { id: 2 }]
 ```
 
 ### JavaScript to CDN
@@ -116,6 +146,21 @@ const value = CBOR.parse("[1, h'deadbeef', true, null]");
 
 console.log(value);
 // [1, Uint8Array(...), true, null]
+```
+
+### CDN Sequence to JavaScript values
+
+`parseSeq` parses multiple CDN items separated by whitespace, commas, or comments, and also accepts JSONL / NDJSON input.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const values = [...CBOR.parseSeq('1  "two"  [3]')];
+// [1, 'two', [3]]
+
+const jsonl = '{"id":1}\n{"id":2}\n{"id":3}';
+const rows = [...CBOR.parseSeq(jsonl)];
+// [{ id: 1 }, { id: 2 }, { id: 3 }]
 ```
 
 ### Normalize CDN
