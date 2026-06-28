@@ -195,6 +195,20 @@ function fingerprintKey(key: CborItem): string {
 }
 
 /**
+ * Decode a short (< 64 byte) pure-ASCII UTF-8 sequence without invoking
+ * TextDecoder. Returns undefined if any byte is >= 0x80 (non-ASCII).
+ * Only called for length < 64; longer strings use TextDecoder directly to
+ * avoid the double-scan cost of failing mid-way through a large buffer.
+ */
+function tryDecodeAscii(bytes: Uint8Array, length: number): string | undefined {
+  for (let i = 0; i < length; i++) {
+    if (bytes[i] >= 0x80) return undefined;
+  }
+  // eslint-disable-next-line prefer-spread
+  return String.fromCharCode.apply(null, bytes as unknown as number[]);
+}
+
+/**
  * Read the CBOR "argument" that follows the initial byte.
  * For ai 0–23 the argument is inline; for 24–27 it occupies 1/2/4/8 bytes.
  */
@@ -397,16 +411,24 @@ function decodeItemInner(
       );
       let text: string;
       let utf8Warning: DecodeWarning | undefined;
-      try {
-        text = textDecoderStrict.decode(bytes);
-      } catch {
-        utf8Warning = strictViolation(
-          'invalid UTF-8 sequence in text string',
-          dataOffset,
-          options
-        );
-        // Only reached in non-strict mode — decode with replacement characters
-        text = textDecoderLenient.decode(bytes);
+      // Fast path: short pure-ASCII strings (map keys, identifiers) avoid
+      // TextDecoder overhead. Capped at 64 bytes to prevent double-scanning
+      // long buffers that turn out to contain non-ASCII bytes.
+      const asciiText = length < 64 ? tryDecodeAscii(bytes, length) : undefined;
+      if (asciiText !== undefined) {
+        text = asciiText;
+      } else {
+        try {
+          text = textDecoderStrict.decode(bytes);
+        } catch {
+          utf8Warning = strictViolation(
+            'invalid UTF-8 sequence in text string',
+            dataOffset,
+            options
+          );
+          // Only reached in non-strict mode — decode with replacement characters
+          text = textDecoderLenient.decode(bytes);
+        }
       }
       const textNode = new CborTextString(text, { encodingWidth });
       if (utf8Warning) addWarning(textNode, utf8Warning);

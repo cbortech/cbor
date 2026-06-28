@@ -46,3 +46,35 @@ export function stringHeavyCDN(count: number): string {
   }
   return `[${parts.join(', ')}]`;
 }
+
+/**
+ * CDN map whose keys are short ASCII strings (≤ 16 bytes) and whose values
+ * are small integers.  Targets the tryDecodeAscii fast path directly: a
+ * real-world payload of e.g. JSON-like objects with short property names.
+ */
+export function shortAsciiKeysCDN(entries: number): string {
+  // Keys cycle through a handful of realistic short names so the map is
+  // plausible, but each entry gets a unique index suffix to keep them distinct.
+  const prefixes = ['id', 'type', 'name', 'val', 'ok', 'ts', 'src', 'dst'];
+  const parts: string[] = [];
+  for (let i = 0; i < entries; i++) {
+    const key = `"${prefixes[i % prefixes.length]}${i}"`;
+    parts.push(`${key}: ${i}`);
+  }
+  return `{${parts.join(', ')}}`;
+}
+
+/**
+ * CDN map whose keys are long (> 64 byte) ASCII strings.  Exercises the
+ * TextDecoder path so we can confirm tryDecodeAscii is correctly skipped
+ * and long-ASCII performance is not regressed.
+ */
+export function longAsciiKeysCDN(entries: number): string {
+  const parts: string[] = [];
+  for (let i = 0; i < entries; i++) {
+    // 68-character key — just above the 64-byte threshold
+    const key = `"long-ascii-key-that-exceeds-sixty-four-bytes-threshold-${String(i).padStart(8, '0')}"`;
+    parts.push(`${key}: ${i}`);
+  }
+  return `{${parts.join(', ')}}`;
+}
