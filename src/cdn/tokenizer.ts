@@ -937,6 +937,11 @@ export class Tokenizer {
         if (m >= n) {
           // Closing delimiter found; excess backticks become content
           out += '`'.repeat(m - n);
+          // For N≥2, strip one leading and one trailing space (§2.5.3).
+          if (n >= 2) {
+            if (out.startsWith(' ')) out = out.slice(1);
+            if (out.endsWith(' ')) out = out.slice(0, -1);
+          }
           if (out === '')
             this._fail(
               'raw string must not be empty (§2.5.3)',
