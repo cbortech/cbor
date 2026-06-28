@@ -527,6 +527,21 @@ describe('parseCDN — raw string literals (backtick)', () => {
     expect(n.value).toBe('a');
   });
 
+  test('double-backtick delimiter strips one leading and trailing space', () => {
+    const n = parseCDN('`` x ``') as CborTextString;
+    expect(n.value).toBe('x');
+  });
+
+  test('triple-backtick delimiter strips spaces while preserving embedded backticks', () => {
+    const n = parseCDN('``` x`` ```') as CborTextString;
+    expect(n.value).toBe('x``');
+  });
+
+  test('multi-backtick delimiter strips at most one space on each side', () => {
+    const n = parseCDN('``  x  ``') as CborTextString;
+    expect(n.value).toBe(' x ');
+  });
+
   // ── Encoding indicator and concatenation ─────────────────────────────────
 
   test('encoding indicator `hello`_1', () => {
