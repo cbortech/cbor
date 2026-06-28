@@ -361,7 +361,7 @@ export class CBOR {
           );
     let offset = 0;
     while (offset < bytes.byteLength) {
-      const item = decodeCBOR(input, {
+      const item = decodeCBOR(bytes, {
         ...options,
         offset,
         allowTrailing: true,

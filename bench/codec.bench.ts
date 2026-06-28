@@ -3,10 +3,17 @@ import { parseCDN } from '../src/cdn/parser';
 import { decodeCBOR } from '../src/cbor/decoder';
 import { CborArray } from '../src/ast/CborArray';
 import { CborUint } from '../src/ast/CborUint';
-import { mixedDocumentCDN } from './fixtures';
+import {
+  mixedDocumentCDN,
+  shortAsciiKeysCDN,
+  longAsciiKeysCDN,
+} from './fixtures';
 
 const mixedItem = parseCDN(mixedDocumentCDN(2000));
 const mixedBytes = mixedItem.toCBOR();
+
+const shortAsciiBytes = parseCDN(shortAsciiKeysCDN(500)).toCBOR();
+const longAsciiBytes = parseCDN(longAsciiKeysCDN(500)).toCBOR();
 
 /** Nested arrays: `depth` levels, each holding `width` uints plus the next level. */
 function deepArray(depth: number, width: number): CborArray {
@@ -28,6 +35,17 @@ const wide = new CborArray(
 describe('decodeCBOR', () => {
   bench(`mixed document (${mixedBytes.length} bytes)`, () => {
     decodeCBOR(mixedBytes);
+  });
+
+  bench(
+    `short ASCII keys, 500 entries (${shortAsciiBytes.length} bytes)`,
+    () => {
+      decodeCBOR(shortAsciiBytes);
+    }
+  );
+
+  bench(`long ASCII keys, 500 entries (${longAsciiBytes.length} bytes)`, () => {
+    decodeCBOR(longAsciiBytes);
   });
 });
 

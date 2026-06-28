@@ -195,6 +195,41 @@ function fingerprintKey(key: CborItem): string {
 }
 
 /**
+ * Pre-computed BigInt values for CBOR inline arguments 0–23.
+ * readArgument() is called for every data item header; avoiding BigInt()
+ * construction for the common small-integer case saves measurable time.
+ */
+const SMALL_BIGINTS: readonly bigint[] = Array.from({ length: 24 }, (_, i) =>
+  BigInt(i)
+);
+
+/**
+ * BUILTIN_EXTENSIONS filtered to those with a parseTag hook, cached after
+ * first use. Lazy (not module-level) because cbordata.ts imports decoder.ts,
+ * forming a cycle that leaves BUILTIN_EXTENSIONS undefined at module init time.
+ */
+let _builtinTagExts: readonly CborExtension[] | undefined;
+function getBuiltinTagExts(): readonly CborExtension[] {
+  return (_builtinTagExts ??= BUILTIN_EXTENSIONS.filter(
+    (ext) => ext.parseTag !== undefined
+  ));
+}
+
+/**
+ * Decode a short (< 64 byte) pure-ASCII UTF-8 sequence without invoking
+ * TextDecoder. Returns undefined if any byte is >= 0x80 (non-ASCII).
+ * Only called for length < 64; longer strings use TextDecoder directly to
+ * avoid the double-scan cost of failing mid-way through a large buffer.
+ */
+function tryDecodeAscii(bytes: Uint8Array, length: number): string | undefined {
+  for (let i = 0; i < length; i++) {
+    if (bytes[i] >= 0x80) return undefined;
+  }
+  // eslint-disable-next-line prefer-spread
+  return String.fromCharCode.apply(null, bytes as unknown as number[]);
+}
+
+/**
  * Read the CBOR "argument" that follows the initial byte.
  * For ai 0–23 the argument is inline; for 24–27 it occupies 1/2/4/8 bytes.
  */
@@ -204,7 +239,7 @@ function readArgument(
   ai: number
 ): { value: bigint; nextOffset: number } {
   if (ai <= 23) {
-    return { value: BigInt(ai), nextOffset: offset };
+    return { value: SMALL_BIGINTS[ai], nextOffset: offset };
   }
   switch (ai) {
     case AI_1BYTE:
@@ -397,16 +432,24 @@ function decodeItemInner(
       );
       let text: string;
       let utf8Warning: DecodeWarning | undefined;
-      try {
-        text = textDecoderStrict.decode(bytes);
-      } catch {
-        utf8Warning = strictViolation(
-          'invalid UTF-8 sequence in text string',
-          dataOffset,
-          options
-        );
-        // Only reached in non-strict mode — decode with replacement characters
-        text = textDecoderLenient.decode(bytes);
+      // Fast path: short pure-ASCII strings (map keys, identifiers) avoid
+      // TextDecoder overhead. Capped at 64 bytes to prevent double-scanning
+      // long buffers that turn out to contain non-ASCII bytes.
+      const asciiText = length < 64 ? tryDecodeAscii(bytes, length) : undefined;
+      if (asciiText !== undefined) {
+        text = asciiText;
+      } else {
+        try {
+          text = textDecoderStrict.decode(bytes);
+        } catch {
+          utf8Warning = strictViolation(
+            'invalid UTF-8 sequence in text string',
+            dataOffset,
+            options
+          );
+          // Only reached in non-strict mode — decode with replacement characters
+          text = textDecoderLenient.decode(bytes);
+        }
       }
       const textNode = new CborTextString(text, { encodingWidth });
       if (utf8Warning) addWarning(textNode, utf8Warning);
@@ -657,12 +700,15 @@ export function decodeCBOR(
       `CBOR decode offset must be an integer between 0 and ${view.byteLength}`
     );
   }
-  // Build the tag-extension list once per decode call; the previous
-  // per-tag spread of user + builtin extensions showed up in profiles.
-  const tagExts = [
-    ...(options?.extensions ?? []),
-    ...BUILTIN_EXTENSIONS,
-  ].filter((ext) => ext.parseTag !== undefined);
+  // Build the tag-extension list once per decode call.
+  // For the common case (no user extensions) reuse the pre-filtered module-level
+  // constant to avoid a spread + filter allocation on every decode call.
+  const tagExts = options?.extensions?.length
+    ? [
+        ...options.extensions.filter((e) => e.parseTag !== undefined),
+        ...getBuiltinTagExts(),
+      ]
+    : getBuiltinTagExts();
   const { value, nextOffset } = decodeItem(view, offset, options, tagExts);
   if (!options?.allowTrailing && nextOffset !== view.byteLength) {
     const w = strictViolation(
