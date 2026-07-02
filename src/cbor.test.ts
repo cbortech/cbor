@@ -844,6 +844,13 @@ describe('CBOR.fromCBOR → toCBOR byte-exact round-trip (RFC 8949 Appendix A)',
     '9fff',
     '9f01820203820405ff',
     'bf61610161629f0203ffff',
+    // NaN payloads (preserved via CborFloat.rawBits)
+    'f97ef0',
+    'f9fe00',
+    'fa7fc00001',
+    'fa7f800001',
+    'fb7ff8000000000001',
+    'fb7ff0000000000001',
   ];
 
   for (const h of vectors) {
@@ -852,6 +859,29 @@ describe('CBOR.fromCBOR → toCBOR byte-exact round-trip (RFC 8949 Appendix A)',
       expect(toHex(CBOR.fromCBOR(original).toCBOR())).toBe(h);
     });
   }
+
+  test('NaN payload appears in toHexDump output', () => {
+    expect(CBOR.fromCBOR(hex('f97ef0')).toHexDump()).toContain('F9 7E F0');
+  });
+
+  test('canonical NaN still encodes canonically from CDN', () => {
+    expect(toHex(CBOR.fromCDN('NaN').toCBOR())).toBe('f97e00');
+  });
+
+  test('rawBits is ignored when value is not NaN', () => {
+    const f = new CborFloat(1.5, {
+      precision: 'half',
+      rawBits: new Uint8Array([0x7e, 0x01]),
+    });
+    expect(toHex(f.toCBOR())).toBe('f93e00');
+  });
+
+  test('rawBits with mismatched length falls back to canonical encoding', () => {
+    // half-precision rawBits left over after precision is changed to double
+    const f = CBOR.fromCBOR(hex('f97ef0')) as CborFloat;
+    f.precision = 'double';
+    expect(toHex(f.toCBOR())).toBe('fb7ff8000000000000');
+  });
 });
 
 // ─── Complete 4-way round-trip: fromCDN → toCBOR → fromCBOR → toCDN ──────────
