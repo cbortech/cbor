@@ -1237,62 +1237,117 @@ export class Tokenizer {
 
   // ── Token reader ─────────────────────────────────────────────────────────
 
+  /** Start offset of the token currently being read (set by _readNext). */
+  private _tokStart = 0;
+
   private _readNext(): Token {
     this._skipWS();
-    const offset = this.pos;
-    const tok = this._readNextCore();
-    return {
-      ...tok,
+    this._tokStart = this.pos;
+    return this._readNextCore();
+  }
+
+  /**
+   * Build a complete Token for the source range [_tokStart, pos).
+   * Every token is constructed exactly once here — the previous two-step
+   * "partial object, then spread in raw/offsets" cost an extra object and a
+   * property-copy pass per token on the parse hot path.
+   *
+   * `appPrefix` is added only for app-string/app-sequence tokens so that
+   * ordinary tokens keep `'appPrefix' in tok === false`, matching the public
+   * tokenize() API shape documented on the Token interface.
+   *
+   * `raw` stays an eagerly-sliced own data property: Token is public API, and
+   * a getter would vanish under the consumer's own `{ ...token }` spread or
+   * JSON.stringify. The slice cost is minor next to the removed extra object.
+   */
+  private _tok(
+    type: TokenType,
+    value: string,
+    line: number,
+    col: number,
+    appPrefix?: string
+  ): Token {
+    const offset = this._tokStart;
+    const tok: Token = {
+      type,
+      value,
       raw: this.input.slice(offset, this.pos),
+      line,
+      col,
       offset,
+      endOffset: this.pos,
+    };
+    if (appPrefix !== undefined) tok.appPrefix = appPrefix;
+    return tok;
+  }
+
+  /**
+   * {@link _tok} variant for tokens whose processed `value` IS the raw source
+   * text — punctuation, keywords, and numbers without a leading `+`.  Reuses
+   * `value` as `raw`, skipping a per-token slice on the densest token kinds.
+   * Callers must guarantee `value === input.slice(_tokStart, pos)`.
+   */
+  private _tokV(
+    type: TokenType,
+    value: string,
+    line: number,
+    col: number
+  ): Token {
+    return {
+      type,
+      value,
+      raw: value,
+      line,
+      col,
+      offset: this._tokStart,
       endOffset: this.pos,
     };
   }
 
-  private _readNextCore(): Omit<Token, 'raw' | 'offset' | 'endOffset'> {
+  private _readNextCore(): Token {
     const line = this.line,
       col = this.col;
-    if (this._eof()) return { type: 'EOF', value: '', line, col };
+    if (this._eof()) return this._tokV('EOF', '', line, col);
 
     const c = this._ch();
 
     switch (c) {
       case '[':
         this._advance();
-        return { type: 'LBRACKET', value: '[', line, col };
+        return this._tokV('LBRACKET', '[', line, col);
       case ']':
         this._advance();
-        return { type: 'RBRACKET', value: ']', line, col };
+        return this._tokV('RBRACKET', ']', line, col);
       case '{':
         this._advance();
-        return { type: 'LBRACE', value: '{', line, col };
+        return this._tokV('LBRACE', '{', line, col);
       case '}':
         this._advance();
-        return { type: 'RBRACE', value: '}', line, col };
+        return this._tokV('RBRACE', '}', line, col);
       case '(':
         this._advance();
-        return { type: 'LPAREN', value: '(', line, col };
+        return this._tokV('LPAREN', '(', line, col);
       case ')':
         this._advance();
-        return { type: 'RPAREN', value: ')', line, col };
+        return this._tokV('RPAREN', ')', line, col);
       case ':':
         this._advance();
-        return { type: 'COLON', value: ':', line, col };
+        return this._tokV('COLON', ':', line, col);
       case ',':
         this._advance();
-        return { type: 'COMMA', value: ',', line, col };
+        return this._tokV('COMMA', ',', line, col);
       case '<':
         if ((this.input[this.pos + 1] ?? '') === '<') {
           this._advance();
           this._advance();
-          return { type: 'LT_LT', value: '<<', line, col };
+          return this._tokV('LT_LT', '<<', line, col);
         }
         this._fail(`unexpected character '<'`, line, col);
       case '>':
         if ((this.input[this.pos + 1] ?? '') === '>') {
           this._advance();
           this._advance();
-          return { type: 'GT_GT', value: '>>', line, col };
+          return this._tokV('GT_GT', '>>', line, col);
         }
         this._fail(`unexpected character '>'`, line, col);
       case '+': {
@@ -1307,15 +1362,10 @@ export class Tokenizer {
         }
         // String concatenation operator
         this._advance();
-        return { type: 'PLUS', value: '+', line, col };
+        return this._tokV('PLUS', '+', line, col);
       }
       case '`':
-        return {
-          type: 'RAWSTRING',
-          value: this._readRawStringContent(),
-          line,
-          col,
-        };
+        return this._tok('RAWSTRING', this._readRawStringContent(), line, col);
       case '"': {
         const strVal = this._readStringContent('"');
         if (
@@ -1324,9 +1374,9 @@ export class Tokenizer {
           !/[0-7i]/.test(this.input[this.pos + 1] ?? '')
         ) {
           this._advance(); // _
-          return { type: 'EMPTY_INDEF_TEXT', value: '', line, col };
+          return this._tok('EMPTY_INDEF_TEXT', '', line, col);
         }
-        return { type: 'TSTR', value: strVal, line, col };
+        return this._tok('TSTR', strVal, line, col);
       }
       case "'": {
         // ''_ → empty indefinite byte string (but ''_N is sqstr + encoding indicator)
@@ -1338,7 +1388,7 @@ export class Tokenizer {
           this._advance(); // first '
           this._advance(); // second '
           this._advance(); // _
-          return { type: 'EMPTY_INDEF_BYTES', value: '', line, col };
+          return this._tok('EMPTY_INDEF_BYTES', '', line, col);
         }
         // 'text' → UTF-8 encoded byte string (major type 2)
         const strVal = this._readStringContent("'");
@@ -1346,7 +1396,7 @@ export class Tokenizer {
         const hex = Array.from(utf8, (b) =>
           b.toString(16).padStart(2, '0')
         ).join('');
-        return { type: 'SQSTR', value: hex, line, col };
+        return this._tok('SQSTR', hex, line, col);
       }
     }
 
@@ -1373,7 +1423,7 @@ export class Tokenizer {
         this._advance();
         this._advance();
         while (!this._eof() && this._ch() === '.') this._advance();
-        return { type: 'ELLIPSIS', value: '...', line, col };
+        return this._tok('ELLIPSIS', '...', line, col);
       }
       this._fail(`unexpected character '.'`, line, col);
     }
@@ -1398,7 +1448,7 @@ export class Tokenizer {
     sign: '+' | '-',
     line: number,
     col: number
-  ): Omit<Token, 'raw' | 'offset' | 'endOffset'> | null {
+  ): Token | null {
     if (!this.input.startsWith('Infinity', this.pos + 1)) return null;
     const after = this.input[this.pos + 9] ?? '';
     const hasSuffix =
@@ -1410,7 +1460,7 @@ export class Tokenizer {
     for (let i = 0; i < 8; i++) this._advance(); // Infinity
     let value = sign === '-' ? '-Infinity' : 'Infinity';
     if (hasSuffix) value += this._advance() + this._advance(); // _N
-    return { type: 'FLOAT', value, line, col };
+    return this._tok('FLOAT', value, line, col);
   }
 
   /** Advance past a run of hex digits.  Digits contain no newlines, so a
@@ -1450,14 +1500,17 @@ export class Tokenizer {
     }
   }
 
-  private _readNumber(
-    line: number,
-    col: number
-  ): Omit<Token, 'raw' | 'offset' | 'endOffset'> {
+  private _readNumber(line: number, col: number): Token {
     // The token value is the raw consumed text; it is collected with a single
     // slice at the end instead of per-character string concatenation.
     const start = this.pos;
     const consumed = () => this.input.slice(start, this.pos);
+    // consumed() is the exact source range unless a leading '+' was eaten
+    // by the caller before _readNumber; only then does raw need its own slice.
+    const numTok = (type: TokenType): Token =>
+      start === this._tokStart
+        ? this._tokV(type, consumed(), line, col)
+        : this._tok(type, consumed(), line, col);
     if (this._ch() === '-') this._advance();
 
     // Alternative bases: 0x 0o 0b
@@ -1511,23 +1564,23 @@ export class Tokenizer {
         if (isHexFloat) {
           // Encoding-indicator suffix _0/_1/_2/_3/_4/_5/_6/_7/_i for hex floats
           this._tryConsumeEncodingSuffix();
-          return { type: 'FLOAT', value: consumed(), line, col };
+          return numTok('FLOAT');
         }
-        return { type: 'INTEGER', value: consumed(), line, col };
+        return numTok('INTEGER');
       }
       if (next === 'o' || next === 'O') {
         this._advance();
         this._advance();
         while (!this._eof() && this._ch() >= '0' && this._ch() <= '7')
           this._advance();
-        return { type: 'INTEGER', value: consumed(), line, col };
+        return numTok('INTEGER');
       }
       if (next === 'b' || next === 'B') {
         this._advance();
         this._advance();
         while (!this._eof() && (this._ch() === '0' || this._ch() === '1'))
           this._advance();
-        return { type: 'INTEGER', value: consumed(), line, col };
+        return numTok('INTEGER');
       }
     }
 
@@ -1561,18 +1614,10 @@ export class Tokenizer {
     // '.' or 'e'/'E'.  The parser extracts encoding width from the suffix.
     this._tryConsumeEncodingSuffix();
 
-    return {
-      type: isFloat ? 'FLOAT' : 'INTEGER',
-      value: consumed(),
-      line,
-      col,
-    };
+    return numTok(isFloat ? 'FLOAT' : 'INTEGER');
   }
 
-  private _readIdent(
-    line: number,
-    col: number
-  ): Omit<Token, 'raw' | 'offset' | 'endOffset'> {
+  private _readIdent(line: number, col: number): Token {
     // Idents contain no newlines, so a plain column update is safe.
     const identStart = this.pos;
     {
@@ -1596,13 +1641,13 @@ export class Tokenizer {
     // Known keywords — checked first so they are never shadowed by app-strings.
     switch (ident) {
       case 'true':
-        return { type: 'TRUE', value: ident, line, col };
+        return this._tokV('TRUE', ident, line, col);
       case 'false':
-        return { type: 'FALSE', value: ident, line, col };
+        return this._tokV('FALSE', ident, line, col);
       case 'null':
-        return { type: 'NULL', value: ident, line, col };
+        return this._tokV('NULL', ident, line, col);
       case 'undefined':
-        return { type: 'UNDEFINED', value: ident, line, col };
+        return this._tokV('UNDEFINED', ident, line, col);
       case 'NaN':
       case 'NaN_0':
       case 'NaN_1':
@@ -1623,32 +1668,32 @@ export class Tokenizer {
       case 'Infinity_6':
       case 'Infinity_7':
       case 'Infinity_i':
-        return { type: 'FLOAT', value: ident, line, col };
+        return this._tokV('FLOAT', ident, line, col);
       case 'simple':
-        return { type: 'SIMPLE', value: ident, line, col };
+        return this._tokV('SIMPLE', ident, line, col);
       case '_':
-        return { type: 'UNDERSCORE', value: '_', line, col };
+        return this._tokV('UNDERSCORE', '_', line, col);
       // Encoding indicators used in array/map/string/bytes contexts
       case '_0':
-        return { type: 'ENCODING_INDICATOR', value: '0', line, col };
+        return this._tok('ENCODING_INDICATOR', '0', line, col);
       case '_1':
-        return { type: 'ENCODING_INDICATOR', value: '1', line, col };
+        return this._tok('ENCODING_INDICATOR', '1', line, col);
       case '_2':
-        return { type: 'ENCODING_INDICATOR', value: '2', line, col };
+        return this._tok('ENCODING_INDICATOR', '2', line, col);
       case '_3':
-        return { type: 'ENCODING_INDICATOR', value: '3', line, col };
+        return this._tok('ENCODING_INDICATOR', '3', line, col);
       case '_4':
-        return { type: 'ENCODING_INDICATOR', value: '4', line, col };
+        return this._tok('ENCODING_INDICATOR', '4', line, col);
       case '_5':
-        return { type: 'ENCODING_INDICATOR', value: '5', line, col };
+        return this._tok('ENCODING_INDICATOR', '5', line, col);
       case '_6':
-        return { type: 'ENCODING_INDICATOR', value: '6', line, col };
+        return this._tok('ENCODING_INDICATOR', '6', line, col);
       case '_7':
         // _7 = AI 31 = indefinite-length; kept as ENCODING_INDICATOR so that
         // bare `_` (UNDERSCORE) and explicit `_7` stay distinguishable.
-        return { type: 'ENCODING_INDICATOR', value: '7', line, col };
+        return this._tok('ENCODING_INDICATOR', '7', line, col);
       case '_i':
-        return { type: 'ENCODING_INDICATOR', value: 'i', line, col };
+        return this._tok('ENCODING_INDICATOR', 'i', line, col);
     }
 
     // Byte-string prefixes or app-string extensions.
@@ -1701,28 +1746,28 @@ export class Tokenizer {
             case 'h': {
               const { value: hexVal, elided } =
                 this._readHexByteContentElisionAware(q);
-              return {
-                type: elided ? 'BYTES_HEX_ELIDED' : 'BYTES_HEX',
-                value: hexVal,
+              return this._tok(
+                elided ? 'BYTES_HEX_ELIDED' : 'BYTES_HEX',
+                hexVal,
                 line,
-                col,
-              };
+                col
+              );
             }
             case 'b64':
-              return {
-                type: 'BYTES_B64',
-                value: this._readByteContent(q),
+              return this._tok(
+                'BYTES_B64',
+                this._readByteContent(q),
                 line,
-                col,
-              };
+                col
+              );
             default:
-              return {
-                type: 'APP_STRING',
-                appPrefix: ident,
-                value: this._readStringContent(q),
+              return this._tok(
+                'APP_STRING',
+                this._readStringContent(q),
                 line,
                 col,
-              };
+                ident
+              );
           }
         }
 
@@ -1737,29 +1782,23 @@ export class Tokenizer {
                 line,
                 col
               );
-              return {
-                type: elided ? 'BYTES_HEX_ELIDED' : 'BYTES_HEX',
-                value: hexVal,
+              return this._tok(
+                elided ? 'BYTES_HEX_ELIDED' : 'BYTES_HEX',
+                hexVal,
                 line,
-                col,
-              };
+                col
+              );
             }
             case 'b64':
               // §5.3.4: lblank + # line comments
-              return {
-                type: 'BYTES_B64',
-                value: this._processRawB64Content(raw, line, col),
+              return this._tok(
+                'BYTES_B64',
+                this._processRawB64Content(raw, line, col),
                 line,
-                col,
-              };
+                col
+              );
             default:
-              return {
-                type: 'APP_STRING',
-                appPrefix: ident,
-                value: raw,
-                line,
-                col,
-              };
+              return this._tok('APP_STRING', raw, line, col, ident);
           }
         }
 
@@ -1768,13 +1807,7 @@ export class Tokenizer {
         if (q === '<' && (this.input[this.pos + 1] ?? '') === '<') {
           this._advance();
           this._advance(); // <<
-          return {
-            type: 'APP_SEQUENCE',
-            appPrefix: ident,
-            value: '',
-            line,
-            col,
-          };
+          return this._tok('APP_SEQUENCE', '', line, col, ident);
         }
       }
     }
