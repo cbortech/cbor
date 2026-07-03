@@ -237,11 +237,37 @@ function attachComments(
   const nodes = collectNodes(root);
   const lineAt = buildLineAt(source);
 
-  for (const raw of comments) {
+  // Two sorted views over the pre-order node list, so each comment resolves
+  // its neighbours in O(log N) instead of re-filtering and re-sorting the
+  // whole list per comment.  Both sorts are stable, so nodes with equal keys
+  // keep their pre-order (parent before child) relative order.
+  const byStart = [...nodes].sort((a, b) => a.start - b.start || b.end - a.end);
+  const byEnd = [...nodes].sort((a, b) => a.end - b.end || a.start - b.start);
+
+  // The tokenizer appends comments in source order; sort defensively so the
+  // container sweep below stays correct for out-of-order callers.
+  const ordered = [...comments].sort((a, b) => a.start - b.start);
+
+  // Container-sweep state shared across comments (comments are processed in
+  // ascending start order, so pushes and pops are monotone).
+  const enclosing: NodeInfo[] = [];
+  let nextToPush = 0;
+
+  for (const raw of ordered) {
     const comment: CborComment = { ...raw };
-    const prev = [...nodes]
-      .filter((n) => n.end <= raw.start)
-      .sort((a, b) => b.end - a.end || b.start - a.start)[0];
+
+    // prev: node with the largest end <= comment start (ties: largest start).
+    // byEnd is (end asc, start asc), so this is the last index with
+    // end <= raw.start, found by upper-bound binary search.
+    let lo = 0;
+    let hi = byEnd.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (byEnd[mid].end <= raw.start) lo = mid + 1;
+      else hi = mid;
+    }
+    const prev = lo > 0 ? byEnd[lo - 1] : undefined;
+
     const separatorBeforeComment = prev
       ? source.slice(prev.end, raw.start)
       : '';
@@ -254,12 +280,40 @@ function attachComments(
       continue;
     }
 
-    const container = [...nodes]
-      .filter((n) => n.start < raw.start && raw.end < n.end)
-      .sort((a, b) => b.start - a.start || a.end - b.end)[0];
-    const next = [...nodes]
-      .filter((n) => n.start >= raw.end)
-      .sort((a, b) => a.start - b.start || b.end - a.end)[0];
+    // container: innermost node with start < comment start and comment end
+    // < node end.  Node spans nest properly and a comment never straddles a
+    // node boundary (it is whitespace between tokens), so an interval-stack
+    // sweep over byStart works: push nodes starting before the comment,
+    // pop nodes that ended before it — the stack top is the container.
+    while (nextToPush < byStart.length && byStart[nextToPush].start < raw.start) {
+      const n = byStart[nextToPush++];
+      while (
+        enclosing.length > 0 &&
+        enclosing[enclosing.length - 1].end <= n.start
+      )
+        enclosing.pop();
+      enclosing.push(n);
+    }
+    while (
+      enclosing.length > 0 &&
+      enclosing[enclosing.length - 1].end <= raw.start
+    )
+      enclosing.pop();
+    const container =
+      enclosing.length > 0 ? enclosing[enclosing.length - 1] : undefined;
+
+    // next: node with the smallest start >= comment end (ties: largest end).
+    // byStart is (start asc, end desc), so this is the first index with
+    // start >= raw.end, found by lower-bound binary search.
+    lo = 0;
+    hi = byStart.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (byStart[mid].start < raw.end) lo = mid + 1;
+      else hi = mid;
+    }
+    const next = lo < byStart.length ? byStart[lo] : undefined;
+
     if (!container || (next && next.end <= container.end)) {
       if (next) {
         addComment(next.node, 'leading', comment);
