@@ -133,9 +133,13 @@ export abstract class CborItem {
     const indentStr = typeof raw === 'string' ? raw : ' '.repeat(raw);
     const marker = (merged?.commentStyle ?? '--') + ' ';
     const lines = this._toHexDump(0, merged);
-    const maxPrefixLen = Math.max(
-      ...lines.map((l) => l.depth * indentStr.length + l.hex.length)
-    );
+    // A plain loop, not Math.max(...spread): spreading one argument per line
+    // overflows the call stack for items with hundreds of thousands of lines.
+    let maxPrefixLen = 0;
+    for (const l of lines) {
+      const prefixLen = l.depth * indentStr.length + l.hex.length;
+      if (prefixLen > maxPrefixLen) maxPrefixLen = prefixLen;
+    }
     const col = maxPrefixLen + 2;
     return lines
       .map((l) => {
