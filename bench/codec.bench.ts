@@ -7,10 +7,13 @@ import {
   mixedDocumentCDN,
   shortAsciiKeysCDN,
   longAsciiKeysCDN,
+  stringHeavyCDN,
 } from './fixtures';
 
 const mixedItem = parseCDN(mixedDocumentCDN(2000));
 const mixedBytes = mixedItem.toCBOR();
+
+const stringHeavyItem = parseCDN(stringHeavyCDN(2000));
 
 const shortAsciiBytes = parseCDN(shortAsciiKeysCDN(500)).toCBOR();
 const longAsciiBytes = parseCDN(longAsciiKeysCDN(500)).toCBOR();
@@ -56,6 +59,10 @@ describe('toCBOR', () => {
 
   bench('wide array (10000 uints)', () => {
     wide.toCBOR();
+  });
+
+  bench('string-heavy (2000 strings)', () => {
+    stringHeavyItem.toCBOR();
   });
 });
 
