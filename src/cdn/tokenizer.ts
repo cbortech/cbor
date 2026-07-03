@@ -138,13 +138,15 @@ export class Tokenizer {
   /**
    * When set, non-standard-but-JS-valid escape sequences are accepted instead
    * of throwing.  The callback receives a message and the position of the `\`
-   * (offset, line, column) so the parser can forward it as a ParseWarning.
+   * (offset, line, column) plus the offset just past the escape sequence, so
+   * the parser can forward it as a range-carrying ParseWarning.
    */
   onEscapeWarning?: (
     msg: string,
     offset: number,
     line: number,
-    col: number
+    col: number,
+    endOffset: number
   ) => void;
   constructor(
     private readonly input: string,
@@ -210,7 +212,14 @@ export class Tokenizer {
       line === this.line && col === this.col
         ? this.pos
         : offsetAt(this.input, line, col);
-    throw new CdnSyntaxError(msg, { offset, line, column: col });
+    // The scan position sits at the end of the offending construct when the
+    // failure was reported against an earlier start position; cover at least
+    // one character so tooling can underline a range (zero-width only at EOF).
+    const endOffset = Math.min(
+      Math.max(this.pos, offset + 1),
+      this.input.length
+    );
+    throw new CdnSyntaxError(msg, { offset, line, column: col, endOffset });
   }
 
   private _skipWS(): void {
@@ -645,7 +654,8 @@ export class Tokenizer {
                   '\\0 is a non-standard escape sequence; use \\u0000 instead',
                   eOffset,
                   eLine,
-                  eCol
+                  eCol,
+                  this.pos
                 );
                 out += '\0';
                 break;
@@ -655,7 +665,8 @@ export class Tokenizer {
                   '\\v is a non-standard escape sequence; use \\u000b instead',
                   eOffset,
                   eLine,
-                  eCol
+                  eCol,
+                  this.pos
                 );
                 out += '\v';
                 break;
@@ -678,7 +689,8 @@ export class Tokenizer {
                   `\\x${h1}${h2} is a non-standard escape sequence; use \\u00${h1}${h2} instead`,
                   eOffset,
                   eLine,
-                  eCol
+                  eCol,
+                  this.pos
                 );
                 out += String.fromCharCode(codePoint);
                 break;
@@ -689,7 +701,8 @@ export class Tokenizer {
                   `\\${e} inside ${quote === '"' ? 'double' : 'single'}-quoted string is non-standard`,
                   eOffset,
                   eLine,
-                  eCol
+                  eCol,
+                  this.pos
                 );
                 out += e;
                 break;
@@ -701,7 +714,8 @@ export class Tokenizer {
                   'line continuation (\\<newline>) is non-standard; the newline is ignored',
                   eOffset,
                   eLine,
-                  eCol
+                  eCol,
+                  this.pos
                 );
                 break;
               }
@@ -710,7 +724,8 @@ export class Tokenizer {
                 `\\${e} is an unknown escape sequence; interpreted as '${e}'`,
                 eOffset,
                 eLine,
-                eCol
+                eCol,
+                this.pos
               );
               out += e;
               break;
@@ -767,7 +782,8 @@ export class Tokenizer {
             msg,
             bsOffset ?? this.pos,
             bsLine ?? line,
-            bsCol ?? col
+            bsCol ?? col,
+            this.pos
           );
           return;
         }
