@@ -1,6 +1,7 @@
 import {
   Tokenizer,
   type EdnComment,
+  type SqstrToken,
   type Token,
   type TokenType,
 } from './tokenizer';
@@ -897,8 +898,14 @@ class CDNParser {
   private _decodeBytesToken(tok: Token): Uint8Array {
     const onRecoverableError = (msg: string) => this._warnOrFail(msg, tok);
     switch (tok.type) {
+      case 'SQSTR': {
+        // The tokenizer attaches the UTF-8 payload it already encoded;
+        // decoding the hex `value` again would just rebuild the same bytes.
+        const bytes = (tok as SqstrToken)._sqstrBytes;
+        if (bytes !== undefined) return bytes;
+        return this._hexToBytes(tok.value, tok);
+      }
       case 'BYTES_HEX':
-      case 'SQSTR':
         return this._hexToBytes(tok.value, tok);
       case 'BYTES_B64':
         try {

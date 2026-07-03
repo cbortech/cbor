@@ -51,6 +51,32 @@ describe('tokenize', () => {
     expect(JSON.parse(JSON.stringify(appTok)).appPrefix).toBe('dt');
   });
 
+  test('SQSTR value is UTF-8 hex and the public token shape has no extras', () => {
+    const { tokens } = tokenize("'abü'");
+    const tok = tokens[0]!;
+    expect(tok.type).toBe('SQSTR');
+    expect(tok.value).toBe('6162c3bc'); // UTF-8 of "abü" as lowercase hex
+    // The internal payload fast path must not leak into the public shape.
+    expect(Object.keys(tok)).toEqual([
+      'type',
+      'value',
+      'raw',
+      'line',
+      'col',
+      'offset',
+      'endOffset',
+    ]);
+    expect(JSON.parse(JSON.stringify(tok))).toEqual({
+      type: 'SQSTR',
+      value: '6162c3bc',
+      raw: "'abü'",
+      line: 1,
+      col: 1,
+      offset: 0,
+      endOffset: 5,
+    });
+  });
+
   test('raw always equals the exact source range [offset, endOffset)', () => {
     // Covers the raw === value reuse paths (punctuation, keywords, numbers)
     // and the paths where raw must differ from value: +5 (sign eaten before
