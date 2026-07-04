@@ -34,6 +34,36 @@ describe('tokenize', () => {
     expect(comments[1]).toMatchObject({ kind: 'block', start: 9, end: 20 });
   });
 
+  test('appPrefix is an own property only on app-string/app-sequence tokens', () => {
+    const { tokens } = tokenize(
+      `[1, "a", dt'2024-01-01T00:00:00Z', same<<1>>]`
+    );
+    for (const tok of tokens) {
+      const isApp = tok.type === 'APP_STRING' || tok.type === 'APP_SEQUENCE';
+      expect('appPrefix' in tok).toBe(isApp);
+    }
+    const appTok = tokens.find((t) => t.type === 'APP_STRING')!;
+    expect(appTok.appPrefix).toBe('dt');
+    const seqTok = tokens.find((t) => t.type === 'APP_SEQUENCE')!;
+    expect(seqTok.appPrefix).toBe('same');
+    // Shape survives the consumer's own spread / JSON round-trip
+    expect('appPrefix' in { ...tokens[0] }).toBe(false);
+    expect(JSON.parse(JSON.stringify(appTok)).appPrefix).toBe('dt');
+  });
+
+  test('raw always equals the exact source range [offset, endOffset)', () => {
+    // Covers the raw === value reuse paths (punctuation, keywords, numbers)
+    // and the paths where raw must differ from value: +5 (sign eaten before
+    // the number), .... (extra ellipsis dots), _1 (indicator), strings.
+    const source = `{_ "k": [1, -2.5e3, +5, 0x1f_1, true, NaN_3, simple(9),
+      h'00ff', 'sq', "t\\n", ....], "d": dt'2024-01-01T00:00:00Z'} + b64'AAE'`;
+    const { tokens } = tokenize(source);
+    expect(tokens.length).toBeGreaterThan(20);
+    for (const tok of tokens) {
+      expect(tok.raw).toBe(source.slice(tok.offset, tok.endOffset));
+    }
+  });
+
   test('throws CdnSyntaxError with position on invalid input', () => {
     let caught: unknown;
     try {
