@@ -21,6 +21,7 @@ import {
   resolveEiSuffix,
   canonicalEncodingWidth,
 } from '../cdn/serialize-utils';
+import { byteToHexUpper, bytesToSpacedHexUpper } from '../utils/hex';
 
 /** CBOR Major Type 4 — array (definite- or indefinite-length). */
 export class CborArray extends CborItem {
@@ -113,30 +114,27 @@ export class CborArray extends CborItem {
   }
 
   override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
-    const byteHex = (b: number) =>
-      b.toString(16).toUpperCase().padStart(2, '0');
-    const toHex = (bytes: Uint8Array) =>
-      Array.from(bytes, (b) =>
-        b.toString(16).toUpperCase().padStart(2, '0')
-      ).join(' ');
-
     if (this.indefiniteLength) {
       const lines: AnnotatedLine[] = [
         {
           depth,
-          hex: byteHex((MT_ARRAY << 5) | AI_INDEFINITE),
+          hex: byteToHexUpper((MT_ARRAY << 5) | AI_INDEFINITE),
           comment: 'Start indefinite-length array',
         },
       ];
       for (const item of this.items)
         lines.push(...item._toHexDump(depth + 1, options));
-      lines.push({ depth, hex: byteHex(BREAK_CODE), comment: '"break"' });
+      lines.push({
+        depth,
+        hex: byteToHexUpper(BREAK_CODE),
+        comment: '"break"',
+      });
       return lines;
     }
     const lines: AnnotatedLine[] = [
       {
         depth,
-        hex: toHex(
+        hex: bytesToSpacedHexUpper(
           writeHead(MT_ARRAY, BigInt(this.items.length), this.encodingWidth)
         ),
         comment: `Array of length ${this.items.length}`,
