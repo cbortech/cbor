@@ -31,26 +31,45 @@ export class CborFloat extends CborItem {
    */
   ednSource?: string;
 
-  constructor(value: number, options?: { precision?: FloatPrecision }) {
+  /**
+   * Original encoded payload bytes (big-endian, without the initial byte),
+   * set by the decoder when the value is NaN so that NaN payloads survive a
+   * decode → encode round-trip (a JS `number` cannot carry them).
+   * Used by the encoder only when `value` is NaN and the length matches the
+   * byte size of the encoded `precision`; ignored otherwise.
+   */
+  rawBits?: Uint8Array;
+
+  constructor(
+    value: number,
+    options?: { precision?: FloatPrecision; rawBits?: Uint8Array }
+  ) {
     super();
     this.value = value;
     this.precision = options?.precision;
+    this.rawBits = options?.rawBits;
   }
 
   override _encodeTo(writer: CborWriter, _options?: ToCBOROptions): void {
     const precision = this.precision ?? autoSelectFloatPrecision(this.value);
     const initial = MT_SIMPLE << 5;
+    // rawBits carries a NaN payload only; for any other value it would let
+    // the encoded bytes contradict `value`, so it is ignored.
+    const rawBits = Number.isNaN(this.value) ? this.rawBits : undefined;
 
     if (precision === 'half') {
       writer.writeByte(initial | AI_2BYTE); // 0xf9
-      writer.writeFloat16(this.value);
+      if (rawBits?.length === 2) writer.writeBytes(rawBits);
+      else writer.writeFloat16(this.value);
     } else if (precision === 'single') {
       writer.writeByte(initial | AI_4BYTE); // 0xfa
-      writer.writeFloat32(this.value);
+      if (rawBits?.length === 4) writer.writeBytes(rawBits);
+      else writer.writeFloat32(this.value);
     } else {
       // double
       writer.writeByte(initial | AI_8BYTE); // 0xfb
-      writer.writeFloat64(this.value);
+      if (rawBits?.length === 8) writer.writeBytes(rawBits);
+      else writer.writeFloat64(this.value);
     }
   }
 

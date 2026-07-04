@@ -329,6 +329,18 @@ function decodeItem(
   return result;
 }
 
+/**
+ * Copy a float's encoded payload bytes out of the input, so NaN payloads
+ * survive a decode → encode round-trip (see `CborFloat.rawBits`).
+ */
+function floatPayloadBytes(
+  view: DataView,
+  offset: number,
+  length: number
+): Uint8Array {
+  return new Uint8Array(view.buffer, view.byteOffset + offset, length).slice();
+}
+
 function decodeItemInner(
   view: DataView,
   offset: number,
@@ -607,9 +619,13 @@ function decodeItemInner(
         if (offset + 2 > view.byteLength)
           decodeError('unexpected end of input');
         const bits = view.getUint16(offset, false);
+        const value = float16BitsToFloat64(bits);
         return {
-          value: new CborFloat(float16BitsToFloat64(bits), {
+          value: new CborFloat(value, {
             precision: 'half',
+            rawBits: Number.isNaN(value)
+              ? floatPayloadBytes(view, offset, 2)
+              : undefined,
           }),
           nextOffset: offset + 2,
         };
@@ -619,9 +635,13 @@ function decodeItemInner(
       if (ai === AI_4BYTE) {
         if (offset + 4 > view.byteLength)
           decodeError('unexpected end of input');
+        const value = view.getFloat32(offset, false);
         return {
-          value: new CborFloat(view.getFloat32(offset, false), {
+          value: new CborFloat(value, {
             precision: 'single',
+            rawBits: Number.isNaN(value)
+              ? floatPayloadBytes(view, offset, 4)
+              : undefined,
           }),
           nextOffset: offset + 4,
         };
@@ -631,9 +651,13 @@ function decodeItemInner(
       if (ai === AI_8BYTE) {
         if (offset + 8 > view.byteLength)
           decodeError('unexpected end of input');
+        const value = view.getFloat64(offset, false);
         return {
-          value: new CborFloat(view.getFloat64(offset, false), {
+          value: new CborFloat(value, {
             precision: 'double',
+            rawBits: Number.isNaN(value)
+              ? floatPayloadBytes(view, offset, 8)
+              : undefined,
           }),
           nextOffset: offset + 8,
         };
