@@ -270,6 +270,56 @@ describe('CBOR.fromCDNSeq', () => {
     expect(warnings[0]).toContain('unterminated');
   });
 
+  // ── Comment preservation (preserveComments) ───────────────────────────────
+
+  describe('preserveComments', () => {
+    const roundtrip = (text: string): string[] => [
+      ...CBOR.fromCDNSeq(text, { preserveComments: true }),
+    ].map((item) => item.toCDN({ preserveComments: true }));
+
+    test('leading comment before the first item is preserved', () => {
+      expect(roundtrip('# top\n1')).toEqual(['# top\n1']);
+    });
+
+    test('same-line comment stays trailing on the previous item', () => {
+      expect(roundtrip('1 # trail\n2')).toEqual(['1 # trail', '2']);
+    });
+
+    test('comment on its own line becomes leading of the next item', () => {
+      expect(roundtrip('1\n# lead\n2')).toEqual(['1', '# lead\n2']);
+    });
+
+    test('block comments round-trip across items', () => {
+      expect(roundtrip('/* a */ 1 /* b */ 2')).toEqual([
+        '/* a */\n1 /* b */',
+        '2',
+      ]);
+    });
+
+    test('comments after the last item are dropped', () => {
+      expect(roundtrip('1\n# footer\n')).toEqual(['1']);
+    });
+
+    test('comment-only input yields no items', () => {
+      expect(roundtrip('# only comment\n')).toEqual([]);
+    });
+
+    test('comma-separated items keep leading comments', () => {
+      expect(roundtrip('1,\n# lead\n2')).toEqual(['1', '# lead\n2']);
+    });
+
+    test('without preserveComments comments are still skipped', () => {
+      const items = [...CBOR.fromCDNSeq('# a\n1\n# b\n2')];
+      expect(items.map((i) => i.toCDN())).toEqual(['1', '2']);
+    });
+
+    test('unterminated comment after last item still throws in strict mode', () => {
+      expect(() => [
+        ...CBOR.fromCDNSeq('1 /* unterminated', { preserveComments: true }),
+      ]).toThrow(SyntaxError);
+    });
+  });
+
   // ── Leading / trailing comma (ABNF: seq = S [item *(MSC item) SOC]) ──────────
   // SOC = S ["," S]  →  trailing comma is VALID per spec
 
