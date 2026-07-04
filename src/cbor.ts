@@ -16,6 +16,7 @@ import type {
 import { CBOR_OMIT } from './types';
 import { decodeCBOR } from './cbor/decoder';
 import { parseCDN } from './cdn/parser';
+import { CdnSyntaxError } from './cdn/errors';
 import { dt_as_Date as _dt_as_Date } from './extensions/dt';
 import { fromJS as _fromJS, _applyReplacer } from './js/fromJS';
 import { MapEntries as _MapEntries } from './mapEntries';
@@ -437,7 +438,9 @@ export class CBOR {
         emitCDNSeqWarning(
           e instanceof Error ? e.message : String(e),
           offset,
-          options
+          options,
+          true,
+          e instanceof CdnSyntaxError ? e : undefined
         );
         break;
       }
@@ -811,10 +814,19 @@ function whitespaceLike(text: string): string {
 
 function emitCDNSeqWarning(
   msg: string,
-  offset: number,
-  options: FromCDNSeqOptions | undefined
+  fallbackOffset: number,
+  options: FromCDNSeqOptions | undefined,
+  fatal?: boolean,
+  cause?: CdnSyntaxError
 ): void {
+  const offset = cause?.offset ?? fallbackOffset;
   const w: ParseWarning = { message: msg, offset };
+  if (fatal) w.fatal = true;
+  if (cause?.offset !== undefined) {
+    w.line = cause.line;
+    w.column = cause.column;
+    w.endOffset = cause.endOffset;
+  }
   if (options?.onWarning) options.onWarning(w);
   else if (!options?.silent)
     console.warn(`CDN sequence warning at offset ${offset}: ${msg}`);
@@ -889,7 +901,7 @@ function skipCDNSeparator(
       if (end < 0) {
         const msg = 'unterminated /* comment in CDN sequence';
         if (options?.strict !== false) throw new SyntaxError(msg);
-        emitCDNSeqWarning(msg, i, options);
+        emitCDNSeqWarning(msg, i, options, true);
         i = text.length;
       } else {
         if (text.slice(i, end).includes('\n')) seenNewline = true;
@@ -904,7 +916,7 @@ function skipCDNSeparator(
       if (end < 0) {
         const msg = 'unterminated / comment in CDN sequence';
         if (options?.strict !== false) throw new SyntaxError(msg);
-        emitCDNSeqWarning(msg, i, options);
+        emitCDNSeqWarning(msg, i, options, true);
         i = text.length;
       } else {
         if (text.slice(i, end).includes('\n')) seenNewline = true;

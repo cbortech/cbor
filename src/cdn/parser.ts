@@ -285,7 +285,10 @@ function attachComments(
     // node boundary (it is whitespace between tokens), so an interval-stack
     // sweep over byStart works: push nodes starting before the comment,
     // pop nodes that ended before it — the stack top is the container.
-    while (nextToPush < byStart.length && byStart[nextToPush].start < raw.start) {
+    while (
+      nextToPush < byStart.length &&
+      byStart[nextToPush].start < raw.start
+    ) {
       const n = byStart[nextToPush++];
       while (
         enclosing.length > 0 &&
@@ -433,8 +436,14 @@ class CDNParser {
         this.extByPrefix.set(prefix, ext);
       for (const tag of ext.tagNumbers ?? []) this.extByTag.set(tag, ext);
     }
-    this.t.onEscapeWarning = (msg, offset, line, col) => {
-      const w: ParseWarning = { message: msg, offset, line, column: col };
+    this.t.onEscapeWarning = (msg, offset, line, col, endOffset) => {
+      const w: ParseWarning = {
+        message: msg,
+        offset,
+        line,
+        column: col,
+        endOffset,
+      };
       this._pendingWarnings.push(w);
       if (this._options.onWarning) this._options.onWarning(w);
       else if (!this._options.silent)
@@ -442,7 +451,7 @@ class CDNParser {
           `CDN strict violation at line ${line}, column ${col}: ${msg}`
         );
       if (this._options.strict !== false)
-        throw new CdnSyntaxError(msg, { offset, line, column: col });
+        throw new CdnSyntaxError(msg, { offset, line, column: col, endOffset });
     };
   }
 
@@ -872,12 +881,25 @@ class CDNParser {
     return type === 'BYTES_HEX' || type === 'SQSTR' || type === 'BYTES_B64';
   }
 
+  /**
+   * Decode a hex payload, converting the codec's plain SyntaxError (e.g. odd
+   * length) into a CdnSyntaxError carrying the token's position.
+   */
+  private _hexToBytes(hex: string, tok: Token): Uint8Array {
+    try {
+      return hexToBytes(hex);
+    } catch (e) {
+      if (e instanceof CdnSyntaxError || !(e instanceof SyntaxError)) throw e;
+      this._fail(e.message, tok);
+    }
+  }
+
   private _decodeBytesToken(tok: Token): Uint8Array {
     const onRecoverableError = (msg: string) => this._warnOrFail(msg, tok);
     switch (tok.type) {
       case 'BYTES_HEX':
       case 'SQSTR':
-        return hexToBytes(tok.value);
+        return this._hexToBytes(tok.value, tok);
       case 'BYTES_B64':
         try {
           return base64ToBytes(tok.value, onRecoverableError);
@@ -936,7 +958,7 @@ class CDNParser {
         hasEllipsis = true;
       } else if (next.type === 'BYTES_HEX_ELIDED') {
         this.t.consume();
-        const subItems = this._buildBytesElidedItems(next.value);
+        const subItems = this._buildBytesElidedItems(next.value, next);
         for (const item of subItems) {
           if (item instanceof CborEllipsis) {
             parts.push({ ellipsis: true });
@@ -1006,7 +1028,7 @@ class CDNParser {
    * into a CborEllipsis([h'xx', 888(null), h'yy', ...]).
    */
   private _parseHexElidedConcat(firstTok: Token): CborEllipsis {
-    const items = this._buildBytesElidedItems(firstTok.value);
+    const items = this._buildBytesElidedItems(firstTok.value, firstTok);
 
     while (this.t.peek().type === 'PLUS') {
       this.t.consume(); // +
@@ -1016,7 +1038,7 @@ class CDNParser {
         items.push(new CborEllipsis());
       } else if (next.type === 'BYTES_HEX_ELIDED') {
         this.t.consume();
-        const subItems = this._buildBytesElidedItems(next.value);
+        const subItems = this._buildBytesElidedItems(next.value, next);
         this._mergeFirstBytesItem(items, subItems);
       } else if (this._isBytesToken(next.type)) {
         this.t.consume();
@@ -1040,13 +1062,16 @@ class CDNParser {
     return new CborEllipsis(items);
   }
 
-  private _buildBytesElidedItems(hexWithEllipsis: string): CborItem[] {
+  private _buildBytesElidedItems(
+    hexWithEllipsis: string,
+    tok: Token
+  ): CborItem[] {
     const segments = hexWithEllipsis.split('...');
     const items: CborItem[] = [];
     for (let i = 0; i < segments.length; i++) {
       if (i > 0) items.push(new CborEllipsis());
       if (segments[i].length > 0) {
-        items.push(new CborByteString(hexToBytes(segments[i])));
+        items.push(new CborByteString(this._hexToBytes(segments[i], tok)));
       }
     }
     return items;
@@ -1509,12 +1534,7 @@ class CDNParser {
     this._hintedPrefixes.add(prefix);
     const message = `app-string prefix '${prefix}' requires an extension that is not enabled; ${hint}`;
     if (this._options.onWarning) {
-      this._options.onWarning({
-        message,
-        offset: tok.offset,
-        line: tok.line,
-        column: tok.col,
-      });
+      this._options.onWarning({ message, ...tokenPosition(tok) });
     } else if (!this._options.silent) {
       console.warn(`CDN: ${message}`);
     }
@@ -1522,11 +1542,7 @@ class CDNParser {
 
   private _warn(msg: string, tok?: Token): void {
     const warning: ParseWarning = { message: msg };
-    if (tok !== undefined) {
-      warning.offset = tok.offset;
-      warning.line = tok.line;
-      warning.column = tok.col;
-    }
+    if (tok !== undefined) Object.assign(warning, tokenPosition(tok));
     this._pendingWarnings.push(warning);
     if (this._options.onWarning) {
       this._options.onWarning(warning);
@@ -1537,16 +1553,21 @@ class CDNParser {
   }
 
   private _fail(msg: string, tok?: Token): never {
-    throw new CdnSyntaxError(
-      msg,
-      tok
-        ? {
-            offset: tok.offset,
-            line: tok.line,
-            column: tok.col,
-            endOffset: tok.endOffset,
-          }
-        : undefined
-    );
+    throw new CdnSyntaxError(msg, tok ? tokenPosition(tok) : undefined);
   }
+}
+
+/** A token's source position in the shape shared by ParseWarning and CdnSyntaxError. */
+function tokenPosition(tok: Token): {
+  offset: number;
+  line: number;
+  column: number;
+  endOffset: number;
+} {
+  return {
+    offset: tok.offset,
+    line: tok.line,
+    column: tok.col,
+    endOffset: tok.endOffset,
+  };
 }

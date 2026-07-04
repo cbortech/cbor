@@ -118,6 +118,19 @@ export interface ParseWarning {
   line?: number;
   /** Column number (1-based) where the violation was detected. */
   column?: number;
+  /**
+   * Character offset just past the end of the offending range, when the
+   * violation is attributable to a specific token. Lets tooling underline
+   * the exact range instead of a single position.
+   */
+  endOffset?: number;
+  /**
+   * `true` when the violation is a hard syntax error that stopped parsing
+   * (emitted by non-strict sequence parsing, which reports the failure as a
+   * warning and abandons the rest of the input). Tooling should present
+   * fatal warnings as errors.
+   */
+  fatal?: boolean;
 }
 
 export interface FromCBOROptions {
