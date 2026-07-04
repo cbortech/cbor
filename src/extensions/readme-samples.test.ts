@@ -1,10 +1,10 @@
 /**
- * Verify the code samples shown in README.md / README.ja.md for the optional
- * bundled extensions (b32, h32, float, same).
+ * Verify the code samples shown in README.md / README.ja.md for the bundled
+ * extensions (t1, b1, ilbs, ilts, float, b32, h32, same).
  */
 
 import { describe, test, expect } from 'vitest';
-import { CBOR, b32, h32, float, same } from '../index';
+import { CBOR, b32, h32, same } from '../index';
 
 describe('README samples — b32 / h32', () => {
   test("b32'AEBAGBA' → h'01020304' with appStrings: false", () => {
@@ -18,19 +18,38 @@ describe('README samples — b32 / h32', () => {
   });
 });
 
-describe('README samples — float', () => {
+describe('README samples — t1 / b1', () => {
+  test('t1<<"Hello ", "world">> → "Hello world" with appStrings: false', () => {
+    const v = CBOR.fromCDN('t1<<"Hello ", "world">>');
+    expect(v.toCDN({ appStrings: false })).toBe('"Hello world"');
+  });
+
+  test("b1<<'Hello ', h'776f726c64'>> → 'Hello world' with appStrings: false", () => {
+    const v = CBOR.fromCDN("b1<<'Hello ', h'776f726c64'>>");
+    expect(v.toCDN({ appStrings: false })).toBe("'Hello world'");
+  });
+});
+
+describe('README samples — ilbs / ilts', () => {
+  test("ilbs<<'Hello ', 'world'>> → (_ 'Hello ', 'world') with appStrings: false", () => {
+    const v = CBOR.fromCDN("ilbs<<'Hello ', 'world'>>");
+    expect(v.toCDN({ appStrings: false })).toBe("(_ 'Hello ', 'world')");
+  });
+});
+
+describe('README samples — float (enabled by default)', () => {
   test("float'7e00' → NaN with appStrings: false", () => {
-    const v = CBOR.fromCDN("float'7e00'", { extensions: [float] });
+    const v = CBOR.fromCDN("float'7e00'");
     expect(v.toCDN({ appStrings: false })).toBe('NaN');
   });
 
   test("float<<h'3f800000'>> round-trips", () => {
-    const v = CBOR.fromCDN("float<<h'3f800000'>>", { extensions: [float] });
+    const v = CBOR.fromCDN("float<<h'3f800000'>>");
     expect(v.toCDN()).toBe("float<<h'3f800000'>>");
   });
 
   test("float<<h'3f800000'>> → 1.0_2 with appStrings: false", () => {
-    const v = CBOR.fromCDN("float<<h'3f800000'>>", { extensions: [float] });
+    const v = CBOR.fromCDN("float<<h'3f800000'>>");
     expect(v.toCDN({ appStrings: false })).toBe('1.0_2');
   });
 });

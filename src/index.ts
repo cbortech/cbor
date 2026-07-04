@@ -38,6 +38,8 @@ export { b32, h32 } from './extensions/b32';
 export { float } from './extensions/float';
 export { same } from './extensions/same';
 export { dt_as_Date } from './extensions/dt';
+export { t1, b1 } from './extensions/concat';
+export { ilbs, ilts } from './extensions/ilstrings';
 
 // Main CBOR class
 export { CBOR } from './cbor';
