@@ -11,7 +11,6 @@ import {
   indentOf,
   resolveIndent,
   resolveEiSuffix,
-  joinConcatParts,
   canonicalEncodingWidth,
 } from '../cdn/serialize-utils';
 
@@ -47,16 +46,7 @@ export class CborTextString extends CborItem {
     const suffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(BigInt(textEncoder.encode(this.value).length))
     );
-    if (
-      options?.preserveConcatenation &&
-      this.ednParts !== undefined &&
-      this.ednParts.length > 1
-    ) {
-      const literals = this.ednParts.map((text) => escapeString(text));
-      literals[literals.length - 1] += suffix;
-      return joinConcatParts(literals, resolveIndent(options), depth);
-    }
-    return formatTextString(this.value, suffix, options, depth);
+    return formatTextString(this.value, suffix, options, depth, this.ednParts);
   }
 
   _toJS(_options?: ToJSOptions): unknown {
@@ -68,25 +58,64 @@ function formatTextString(
   value: string,
   suffix: string,
   options: ToCDNOptions | undefined,
-  depth: number
+  depth: number,
+  ednParts: readonly string[] | undefined
 ): string {
-  const formats = resolveTextStringSplits(options);
+  const { cdn, newline } = resolveTextStringSplits(options);
   const indentStr = resolveIndent(options);
-  if (formats.length === 0 || indentStr === null) {
+  const preservedParts =
+    options?.preserveConcatenation &&
+    ednParts !== undefined &&
+    ednParts.length > 1
+      ? ednParts
+      : undefined;
+
+  if (indentStr === null) {
+    if (preservedParts !== undefined) {
+      return emitParts(
+        preservedParts.map((text) => ({ text, contentDepth: 0 })),
+        suffix,
+        null,
+        depth
+      );
+    }
+    return escapeString(value) + suffix;
+  }
+  if (!cdn && !newline && preservedParts === undefined) {
     return escapeString(value) + suffix;
   }
 
-  const breakpoints = new Map<number, number>();
-  let cdnBreakpoints: StringBreakpoint[] | null = null;
-  if (formats.includes('cdn')) {
-    cdnBreakpoints = collectCdnBreakpoints(value);
-    if (cdnBreakpoints !== null) {
-      for (const { point, contentDepth } of cdnBreakpoints) {
-        breakpoints.set(point, contentDepth);
+  const cdnBreakpoints = cdn ? collectCdnBreakpoints(value) : null;
+
+  // Preserved concatenation applies unless CDN reflow is applicable (the
+  // string content parses as CDN — then structure-aware indentation wins).
+  // `splitNewline` combines with it by further splitting the parts.
+  if (cdnBreakpoints === null && preservedParts !== undefined) {
+    const parts: StringPart[] = [];
+    for (const text of preservedParts) {
+      if (newline) {
+        const partBreakpoints = new Map<number, number>();
+        for (const { point, contentDepth } of collectNewlineBreakpoints(
+          text,
+          0
+        )) {
+          partBreakpoints.set(point, contentDepth);
+        }
+        parts.push(...splitAtBreakpoints(text, partBreakpoints));
+      } else {
+        parts.push({ text, contentDepth: 0 });
       }
     }
+    return emitParts(parts, suffix, indentStr, depth);
   }
-  if (formats.includes('newline')) {
+
+  const breakpoints = new Map<number, number>();
+  if (cdnBreakpoints !== null) {
+    for (const { point, contentDepth } of cdnBreakpoints) {
+      breakpoints.set(point, contentDepth);
+    }
+  }
+  if (newline) {
     const newlineBreakpoints =
       cdnBreakpoints !== null
         ? collectCdnNewlineBreakpoints(value)
@@ -100,11 +129,25 @@ function formatTextString(
 
   const parts = splitAtBreakpoints(value, breakpoints);
   if (parts.length <= 1) return escapeString(value) + suffix;
+  return emitParts(parts, suffix, indentStr, depth);
+}
 
+/**
+ * Serialize string parts as a `+` concatenation chain: one line when indent
+ * is disabled, otherwise one part per continuation line indented by
+ * `depth + 1 + contentDepth`.  The EI suffix is appended to the last part.
+ */
+function emitParts(
+  parts: readonly StringPart[],
+  suffix: string,
+  indentStr: string | null,
+  depth: number
+): string {
   const literals = parts.map(({ text }, i) => {
     const literal = escapeString(text);
     return i === parts.length - 1 ? literal + suffix : literal;
   });
+  if (indentStr === null) return literals.join(' + ');
   let result = literals[0]!;
   for (let i = 1; i < literals.length; i++) {
     const continuationIndent = indentOf(
@@ -117,25 +160,21 @@ function formatTextString(
 }
 
 /**
- * Resolve the effective split strategies from `textStringSplit`, falling back
- * to the deprecated array-valued `textStringFormat`.
+ * Resolve the effective split strategies from `splitCdn` / `splitNewline`,
+ * falling back per-field to the deprecated array-valued `textStringFormat`.
  */
-function resolveTextStringSplits(
-  options: ToCDNOptions | undefined
-): ('newline' | 'cdn')[] {
-  const split = options?.textStringSplit;
-  switch (split) {
-    case 'none':
-      return [];
-    case 'newline':
-      return ['newline'];
-    case 'cdn':
-      return ['cdn'];
-    case 'cdn+newline':
-      return ['cdn', 'newline'];
-    case undefined:
-      return normalizeTextStringFormats(options?.textStringFormat ?? []);
-  }
+function resolveTextStringSplits(options: ToCDNOptions | undefined): {
+  cdn: boolean;
+  newline: boolean;
+} {
+  const formats =
+    options?.splitCdn === undefined || options?.splitNewline === undefined
+      ? normalizeTextStringFormats(options?.textStringFormat ?? [])
+      : [];
+  return {
+    cdn: options?.splitCdn ?? formats.includes('cdn'),
+    newline: options?.splitNewline ?? formats.includes('newline'),
+  };
 }
 
 function normalizeTextStringFormats(

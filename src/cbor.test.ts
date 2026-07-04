@@ -689,14 +689,44 @@ describe('CBOR.format()', () => {
     );
   });
 
-  test('preserved concatenation takes precedence over text string splitting', () => {
+  test('splitNewline combines with preserved concatenation', () => {
     expect(
       CBOR.format('"a\\n" + "b\\nc"', {
         indent: 2,
         preserveConcatenation: true,
-        textStringSplit: 'newline',
+        splitNewline: true,
       })
-    ).toBe('"a\\n" +\n  "b\\nc"');
+    ).toBe('"a\\n" +\n  "b\\n" +\n  "c"');
+  });
+
+  test('preserved concatenation ignores splitNewline without newlines', () => {
+    expect(
+      CBOR.format('"ab" + "cd"', {
+        indent: 2,
+        preserveConcatenation: true,
+        splitNewline: true,
+      })
+    ).toBe('"ab" +\n  "cd"');
+  });
+
+  test('splitCdn takes precedence over preserved concatenation', () => {
+    expect(
+      CBOR.format('{"json": "{" + "\\"key\\": \\"value\\"" + "}"}', {
+        indent: 2,
+        preserveConcatenation: true,
+        splitCdn: true,
+      })
+    ).toBe('{\n  "json": "{" +\n      "\\"key\\": \\"value\\"" +\n    "}"\n}');
+  });
+
+  test('splitCdn falls back to preserved concatenation for non-CDN strings', () => {
+    expect(
+      CBOR.format('"hello " + "world!"', {
+        indent: 2,
+        preserveConcatenation: true,
+        splitCdn: true,
+      })
+    ).toBe('"hello " +\n  "world!"');
   });
 
   test('preserved concatenation round-trips through format', () => {
@@ -705,29 +735,50 @@ describe('CBOR.format()', () => {
     expect(CBOR.format(once, options)).toBe(once);
   });
 
-  test('textStringSplit replaces deprecated textStringFormat', () => {
+  test('splitCdn formatting round-trips with preserveConcatenation', () => {
+    const options = {
+      indent: 2,
+      preserveConcatenation: true,
+      splitCdn: true,
+    } as const;
+    const once = CBOR.format('{"json": "{\\"key\\": \\"value\\"}"}', options);
+    expect(once).toBe(
+      '{\n  "json": "{" +\n      "\\"key\\": \\"value\\"" +\n    "}"\n}'
+    );
+    expect(CBOR.format(once, options)).toBe(once);
+  });
+
+  test('splitCdn / splitNewline replace deprecated textStringFormat', () => {
     expect(
       CBOR.format('{"text": "line1\\nline2"}', {
         indent: 2,
-        textStringSplit: 'newline',
+        splitNewline: true,
       })
     ).toBe('{\n  "text": "line1\\n" +\n    "line2"\n}');
     expect(
       CBOR.format('{"edn": "[\\n1,2\\n]"}', {
         indent: 2,
-        textStringSplit: 'cdn+newline',
+        splitCdn: true,
+        splitNewline: true,
       })
     ).toBe('{\n  "edn": "[\\n" +\n      "1," +\n      "2\\n" +\n    "]"\n}');
   });
 
-  test('textStringSplit takes precedence over textStringFormat', () => {
+  test('splitCdn / splitNewline take precedence over textStringFormat', () => {
     expect(
       CBOR.format('{"text": "line1\\nline2"}', {
         indent: 2,
-        textStringSplit: 'none',
+        splitNewline: false,
         textStringFormat: ['newline'],
       })
     ).toBe('{\n  "text": "line1\\nline2"\n}');
+    expect(
+      CBOR.format('{"text": "line1\\nline2"}', {
+        indent: 2,
+        splitCdn: false,
+        textStringFormat: ['newline'],
+      })
+    ).toBe('{\n  "text": "line1\\n" +\n    "line2"\n}');
   });
 
   test('strips comments unless preserveComments is enabled', () => {
