@@ -148,6 +148,109 @@ export function resolveSeparators(
   };
 }
 
+// ─── Container serialization ─────────────────────────────────────────────────
+
+/**
+ * Shared CDN serialization for bracketed containers (CborArray / CborMap):
+ * encoding-indicator / `_` prefix resolution, single-line vs multi-line
+ * selection (comments force multi-line), separators, and per-entry
+ * leading/trailing plus container dangling comments.
+ *
+ * Entries are accessed through per-index callbacks (not materialised entry
+ * objects) so the common no-comments path allocates nothing per entry.
+ * `hasEntryComments`, `entryLeadingNode`, and `entryTrailing` are consulted
+ * only when `preserveComments` is set.  `renderEntry` receives the resolved
+ * `colSep` (': ' or ':' depending on compact mode) for rendering map pairs.
+ */
+export function serializeContainer(p: {
+  node: Commented;
+  options: ToCDNOptions | undefined;
+  depth: number;
+  openChar: '[' | '{';
+  closeChar: ']' | '}';
+  count: number;
+  indefiniteLength: boolean;
+  encodingWidth: EncodingWidth | undefined;
+  hasEntryComments: () => boolean;
+  /** Render entry `i` at child depth (`item` or `key: value`). */
+  renderEntry: (i: number, colSep: string) => string;
+  /** Node whose leading comments are emitted above entry `i` (item / map key). */
+  entryLeadingNode: (i: number) => Commented;
+  /** Pre-formatted trailing comment text for entry `i` (starts with ' ', or ''). */
+  entryTrailing: (
+    i: number,
+    style: 'c-style' | 'cdn-style' | undefined
+  ) => string;
+}): string {
+  const { options, depth, openChar, closeChar, count } = p;
+  let indentStr = resolveIndent(options);
+  const preserveComments = options?.preserveComments;
+  const commentStyle =
+    typeof preserveComments === 'string' ? preserveComments : undefined;
+  const hasComments =
+    preserveComments &&
+    (hasContainerLayoutComments(p.node) || p.hasEntryComments());
+  if (indentStr === null && hasComments) indentStr = '  ';
+  const { inlineSep, multilineSep, trailSep, colSep } = resolveSeparators(
+    options,
+    indentStr === null
+  );
+  const eiRaw = p.indefiniteLength
+    ? ''
+    : resolveEiSuffix(options, p.encodingWidth, () =>
+        canonicalEncodingWidth(BigInt(count))
+      );
+  const eiSuffix = eiRaw ? eiRaw + ' ' : '';
+  const showIndef =
+    p.indefiniteLength && (options?.encodingIndicators ?? 'auto') !== 'never';
+
+  if (indentStr === null || (count === 0 && !hasComments)) {
+    // single-line
+    let inner = '';
+    for (let i = 0; i < count; i++) {
+      if (i > 0) inner += inlineSep;
+      inner += p.renderEntry(i, colSep);
+    }
+    if (p.indefiniteLength) {
+      return showIndef
+        ? count === 0
+          ? `${openChar}_ ${closeChar}`
+          : `${openChar}_ ${inner}${closeChar}`
+        : `${openChar}${inner}${closeChar}`;
+    }
+    return `${openChar}${eiSuffix}${inner}${closeChar}`;
+  }
+
+  // multi-line
+  const childIndent = indentOf(indentStr, depth + 1);
+  const closeIndent = indentOf(indentStr, depth);
+  const open = p.indefiniteLength
+    ? showIndef
+      ? `${openChar}_ `
+      : openChar
+    : `${openChar}${eiSuffix}`;
+  const lines: string[] = [];
+  for (let i = 0; i < count; i++) {
+    if (preserveComments) {
+      lines.push(
+        ...formatLeadingComments(
+          p.entryLeadingNode(i),
+          childIndent,
+          commentStyle
+        )
+      );
+    }
+    const sep = i < count - 1 ? multilineSep : trailSep;
+    lines.push(
+      `${childIndent}${p.renderEntry(i, colSep)}${sep}${preserveComments ? p.entryTrailing(i, commentStyle) : ''}`
+    );
+  }
+  if (preserveComments)
+    lines.push(...formatDanglingComments(p.node, childIndent, commentStyle));
+  const body = lines.join('\n');
+  return `${open}\n${body}\n${closeIndent}${closeChar}`;
+}
+
 // ─── Byte string encoding ─────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

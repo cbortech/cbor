@@ -10,16 +10,9 @@ import {
   type EncodingWidth,
 } from '../cbor/encode';
 import {
-  resolveIndent,
-  indentOf,
-  resolveSeparators,
-  formatDanglingComments,
-  formatLeadingComments,
   formatTrailingComments,
-  hasContainerLayoutComments,
   hasPreservedComments,
-  resolveEiSuffix,
-  canonicalEncodingWidth,
+  serializeContainer,
 } from '../cdn/serialize-utils';
 
 /** CBOR Major Type 4 — array (definite- or indefinite-length). */
@@ -50,66 +43,20 @@ export class CborArray extends CborItem {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    let indentStr = resolveIndent(options);
-    const preserveComments = options?.preserveComments;
-    const commentStyle =
-      typeof preserveComments === 'string' ? preserveComments : undefined;
-    const hasComments =
-      preserveComments &&
-      (hasContainerLayoutComments(this) ||
-        this.items.some(hasPreservedComments));
-    if (indentStr === null && hasComments) indentStr = '  ';
-    const { inlineSep, multilineSep, trailSep } = resolveSeparators(
+    return serializeContainer({
+      node: this,
       options,
-      indentStr === null
-    );
-    const eiRaw = this.indefiniteLength
-      ? ''
-      : resolveEiSuffix(options, this.encodingWidth, () =>
-          canonicalEncodingWidth(BigInt(this.items.length))
-        );
-    const eiSuffix = eiRaw ? eiRaw + ' ' : '';
-    const showIndef =
-      this.indefiniteLength &&
-      (options?.encodingIndicators ?? 'auto') !== 'never';
-
-    if (indentStr === null || (this.items.length === 0 && !hasComments)) {
-      // single-line
-      const inner = this.items
-        .map((item) => item._toCDN(options, depth + 1))
-        .join(inlineSep);
-      if (this.indefiniteLength) {
-        return showIndef
-          ? this.items.length === 0
-            ? '[_ ]'
-            : `[_ ${inner}]`
-          : `[${inner}]`;
-      }
-      return `[${eiSuffix}${inner}]`;
-    }
-
-    // multi-line
-    const childIndent = indentOf(indentStr, depth + 1);
-    const closeIndent = indentOf(indentStr, depth);
-    const open = this.indefiniteLength
-      ? showIndef
-        ? '[_ '
-        : '['
-      : `[${eiSuffix}`;
-    const lines: string[] = [];
-    for (let i = 0; i < this.items.length; i++) {
-      const item = this.items[i];
-      if (preserveComments)
-        lines.push(...formatLeadingComments(item, childIndent, commentStyle));
-      const sep = i < this.items.length - 1 ? multilineSep : trailSep;
-      lines.push(
-        `${childIndent}${item._toCDN(options, depth + 1)}${sep}${preserveComments ? formatTrailingComments(item, commentStyle) : ''}`
-      );
-    }
-    if (preserveComments)
-      lines.push(...formatDanglingComments(this, childIndent, commentStyle));
-    const body = lines.join('\n');
-    return `${open}\n${body}\n${closeIndent}]`;
+      depth,
+      openChar: '[',
+      closeChar: ']',
+      count: this.items.length,
+      indefiniteLength: this.indefiniteLength,
+      encodingWidth: this.encodingWidth,
+      hasEntryComments: () => this.items.some(hasPreservedComments),
+      renderEntry: (i) => this.items[i]._toCDN(options, depth + 1),
+      entryLeadingNode: (i) => this.items[i],
+      entryTrailing: (i, style) => formatTrailingComments(this.items[i], style),
+    });
   }
 
   override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
