@@ -24,6 +24,24 @@ export type EncodingWidth = 'i' | 0 | 1 | 2 | 3;
 const SCRATCH = new DataView(new ArrayBuffer(8));
 const SCRATCH_BYTES = new Uint8Array(SCRATCH.buffer);
 
+/** Shared encoder — constructing TextEncoder per string is needlessly slow. */
+const textEncoder = new TextEncoder();
+const hasEncodeInto = typeof textEncoder.encodeInto === 'function';
+
+/** CBOR head size in bytes for an auto-width argument `n`. */
+function headSizeFor(n: number): number {
+  if (n <= 23) return 1;
+  if (n <= 0xff) return 2;
+  if (n <= 0xffff) return 3;
+  if (n <= 0xffff_ffff) return 5;
+  return 9;
+}
+
+/** CBOR head size in bytes for an explicit encoding width. */
+function headSizeForWidth(ew: EncodingWidth): number {
+  return ew === 'i' ? 1 : [2, 3, 5, 9][ew];
+}
+
 /**
  * Growable byte buffer used by the CBOR encoder.
  *
@@ -108,6 +126,55 @@ export class CborWriter {
     this._ensure(8);
     this.buf.set(SCRATCH_BYTES, this.len);
     this.len += 8;
+  }
+
+  /**
+   * Write a definite-length string head + UTF-8 body in one pass.
+   *
+   * The body is encoded directly into this writer's buffer with
+   * TextEncoder.encodeInto(), avoiding the temporary Uint8Array that
+   * TextEncoder.encode() allocates for every string.  The head position is
+   * predicted from the UTF-16 length (a lower bound on the UTF-8 length);
+   * when multi-byte characters push the byte count across a head-width
+   * boundary the body is shifted up with copyWithin (rare in practice).
+   */
+  writeTextString(
+    mt: number,
+    value: string,
+    encodingWidth?: EncodingWidth
+  ): void {
+    if (!hasEncodeInto) {
+      // Environments without encodeInto: one temporary array, as before.
+      const encoded = textEncoder.encode(value);
+      writeHeadTo(this, mt, encoded.length, encodingWidth);
+      this.writeBytes(encoded);
+      return;
+    }
+    const predictedHead =
+      encodingWidth === undefined
+        ? headSizeFor(value.length)
+        : headSizeForWidth(encodingWidth);
+    // Worst case: 3 UTF-8 bytes per UTF-16 code unit, plus the largest head.
+    this._ensure(9 + 3 * value.length);
+    const { written } = textEncoder.encodeInto(
+      value,
+      this.buf.subarray(this.len + predictedHead)
+    );
+    // The UTF-8 length is never smaller than the UTF-16 length, so the head
+    // can only grow; the _ensure above already covers the largest head.
+    const head =
+      encodingWidth === undefined ? headSizeFor(written) : predictedHead;
+    if (head !== predictedHead) {
+      this.buf.copyWithin(
+        this.len + head,
+        this.len + predictedHead,
+        this.len + predictedHead + written
+      );
+    }
+    // For an explicit encodingWidth too small for `written` this throws
+    // RangeError before writing anything; this.len is untouched in that case.
+    writeHeadTo(this, mt, written, encodingWidth);
+    this.len += written;
   }
 
   /** Copy of the bytes written so far. */
