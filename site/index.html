@@ -259,11 +259,11 @@
           </label>
           <label
             >Text strings
-            <select id="opt-tsfmt">
+            <select id="opt-tssplit">
               <option value="" selected>No split</option>
               <option value="newline">Newline</option>
               <option value="cdn">CDN</option>
-              <option value="newline,cdn">Newline + CDN</option>
+              <option value="cdn+newline">CDN + Newline</option>
             </select>
           </label>
           <label
@@ -277,6 +277,10 @@
           <label class="check">
             <input type="checkbox" id="opt-comments" checked />
             Keep comments
+          </label>
+          <label class="check">
+            <input type="checkbox" id="opt-concat" />
+            Keep concatenation
           </label>
         </div>
         <div id="editor" class="editor-host"></div>

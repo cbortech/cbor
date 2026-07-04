@@ -10,6 +10,7 @@ export type {
   FromCDNOptions,
   FromCDNSeqOptions,
   ToCDNOptions,
+  TextStringSplit,
   FromEDNOptions,
   ToEDNOptions,
   FromJSOptions,

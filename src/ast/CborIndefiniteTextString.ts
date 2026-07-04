@@ -4,6 +4,7 @@ import type { AnnotatedLine } from './CborItem';
 import { CborTextString } from './CborTextString';
 import { MT_TEXT, AI_INDEFINITE, BREAK_CODE } from '../cbor/constants';
 import type { CborWriter } from '../cbor/encode';
+import { byteToHexUpper } from '../utils/hex';
 
 /** CBOR Major Type 3 — indefinite-length UTF-8 text string (chunked). */
 export class CborIndefiniteTextString extends CborItem {
@@ -32,18 +33,16 @@ export class CborIndefiniteTextString extends CborItem {
   }
 
   override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
-    const byteHex = (b: number) =>
-      b.toString(16).toUpperCase().padStart(2, '0');
     const lines: AnnotatedLine[] = [
       {
         depth,
-        hex: byteHex((MT_TEXT << 5) | AI_INDEFINITE),
+        hex: byteToHexUpper((MT_TEXT << 5) | AI_INDEFINITE),
         comment: 'Start indefinite-length text string',
       },
     ];
     for (const chunk of this.chunks)
       lines.push(...chunk._toHexDump(depth + 1, options));
-    lines.push({ depth, hex: byteHex(BREAK_CODE), comment: '"break"' });
+    lines.push({ depth, hex: byteToHexUpper(BREAK_CODE), comment: '"break"' });
     return lines;
   }
 

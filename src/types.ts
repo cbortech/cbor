@@ -118,6 +118,19 @@ export interface ParseWarning {
   line?: number;
   /** Column number (1-based) where the violation was detected. */
   column?: number;
+  /**
+   * Character offset just past the end of the offending range, when the
+   * violation is attributable to a specific token. Lets tooling underline
+   * the exact range instead of a single position.
+   */
+  endOffset?: number;
+  /**
+   * `true` when the violation is a hard syntax error that stopped parsing
+   * (emitted by non-strict sequence parsing, which reports the failure as a
+   * warning and abandons the rest of the input). Tooling should present
+   * fatal warnings as errors.
+   */
+  fatal?: boolean;
 }
 
 export interface FromCBOROptions {
@@ -443,7 +456,9 @@ export interface ToCDNOptions {
    * This preserves the spelling and interior layout of non-concatenated
    * `h'...'`, `b64'...'`, `b32'...'`, `h32'...'`, raw-backtick byte strings,
    * and single-quoted byte strings, including comments inside those literals.
-   * Byte strings produced by `+` concatenation are normalised as usual.
+   * Byte strings produced by `+` concatenation are normalised as usual;
+   * combine with `preserveConcatenation` to keep both the part boundaries
+   * and each part's spelling.
    *
    * When enabled, this takes precedence over `bstrEncoding` and `sqstr` for
    * byte strings that carry original EDN source text.
@@ -519,8 +534,48 @@ export interface ToCDNOptions {
    *
    * When both are specified, CDN structure split points are combined with
    * newline split points.
+   *
+   * @deprecated Use `textStringSplit` instead. When both are specified,
+   *   `textStringSplit` takes precedence.
    */
   textStringFormat?: TextStringFormat[];
+
+  /**
+   * Split long text strings using CDN string concatenation syntax (`"a" + "b"`).
+   * Only effective when `indent` is specified.
+   *
+   * - `'none'`: never split (default)
+   * - `'newline'`: split at newline characters
+   * - `'cdn'`: split according to CDN structure when the string content
+   *   is parseable as CDN (JSON superset)
+   * - `'cdn+newline'`: combine CDN structure split points with newline
+   *   split points
+   *
+   * Replaces the deprecated array-valued `textStringFormat` option and takes
+   * precedence over it when both are specified.
+   *
+   * @default 'none'
+   */
+  textStringSplit?: TextStringSplit;
+
+  /**
+   * Preserve `+` string concatenation from the parsed CDN source.
+   *
+   * When a text string or byte string was parsed from a CDN concatenation
+   * chain (e.g. `"a" + "b"` or `h'01' + h'02'`), re-emit it as a
+   * concatenation with the original part boundaries instead of joining the
+   * parts into a single literal. Each part is re-serialized with the normal
+   * rules (`bstrEncoding` / `sqstr` for byte strings); combine with
+   * `preserveByteString` to also keep the original spelling of byte string
+   * parts.
+   *
+   * For strings carrying original part boundaries, this takes precedence
+   * over `textStringSplit` / `textStringFormat`. Has no effect on values
+   * that did not originate from a CDN concatenation.
+   *
+   * @default false
+   */
+  preserveConcatenation?: boolean;
 
   /**
    * Control whether CBOR encoding-width indicators (`_N`) are appended to CDN output.
@@ -537,6 +592,9 @@ export interface ToCDNOptions {
 }
 
 export type TextStringFormat = 'newline' | 'cdn' | DeprecatedTextStringFormat;
+
+/** Text string split mode for {@link ToCDNOptions.textStringSplit}. */
+export type TextStringSplit = 'none' | 'newline' | 'cdn' | 'cdn+newline';
 
 /** @deprecated Use `'cdn'` instead. */
 export type DeprecatedTextStringFormat = 'cboredn';

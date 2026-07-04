@@ -13,6 +13,7 @@ import { CborTag } from '../ast/CborTag';
 import { CborFloat } from '../ast/CborFloat';
 import { CborSimple } from '../ast/CborSimple';
 import { float16BitsToFloat64 } from '../utils/float16';
+import { bytesToHex } from '../utils/hex';
 import {
   MT_UINT,
   MT_NINT,
@@ -49,6 +50,22 @@ function aiToNonCanonicalEW(
   if (ai === AI_2BYTE && value <= 0xffn) return 1;
   if (ai === AI_4BYTE && value <= 0xffffn) return 2;
   if (ai === AI_8BYTE && value <= 0xffff_ffffn) return 3;
+  return undefined;
+}
+
+/**
+ * Number twin of {@link aiToNonCanonicalEW}, for the length/count arguments
+ * read by {@link readLength}.  Values ≥ 2^53 arrive rounded, but they are far
+ * above every threshold here, so the result is unaffected.
+ */
+function aiToNonCanonicalEWLen(
+  ai: number,
+  value: number
+): EncodingWidth | undefined {
+  if (ai === AI_1BYTE && value <= 23) return 0;
+  if (ai === AI_2BYTE && value <= 0xff) return 1;
+  if (ai === AI_4BYTE && value <= 0xffff) return 2;
+  if (ai === AI_8BYTE && value <= 0xffff_ffff) return 3;
   return undefined;
 }
 
@@ -111,23 +128,16 @@ function addWarning(node: CborItem, warning: DecodeWarning): void {
  * avoids the exponential character-escaping blowup that occurs when
  * pre-serialised JSON strings are embedded inside further JSON.stringify calls.
  */
-function bytesToHexFingerprint(bytes: Uint8Array): string {
-  let h = '';
-  for (const b of bytes) h += b.toString(16).padStart(2, '0');
-  return h;
-}
-
 function fingerprintKeyVal(key: CborItem): unknown {
   if (key instanceof CborUint) return ['u', String(key.value)];
   if (key instanceof CborNint) return ['n', String(key.value)];
   if (key instanceof CborTextString) return ['t', key.value];
   if (key instanceof CborIndefiniteTextString)
     return ['t', key.chunks.map((c) => c.value).join('')];
-  if (key instanceof CborByteString)
-    return ['b', bytesToHexFingerprint(key.value)];
+  if (key instanceof CborByteString) return ['b', bytesToHex(key.value)];
   if (key instanceof CborIndefiniteByteString) {
     let h = '';
-    for (const chunk of key.chunks) h += bytesToHexFingerprint(chunk.value);
+    for (const chunk of key.chunks) h += bytesToHex(chunk.value);
     return ['b', h];
   }
   if (key instanceof CborFloat) {
@@ -159,10 +169,7 @@ function fingerprintKeyVal(key: CborItem): unknown {
   if (key instanceof CborTag)
     return ['G', String(key.tag), fingerprintKeyVal(key.content)];
   // Fallback for any remaining AST node (e.g. CborEmbeddedCBOR): canonical CBOR bytes.
-  const bytes = key.toCBOR();
-  let hex = '';
-  for (const b of bytes) hex += b.toString(16).padStart(2, '0');
-  return ['c', hex];
+  return ['c', bytesToHex(key.toCBOR())];
 }
 
 function fingerprintKey(key: CborItem): string {
@@ -178,11 +185,10 @@ function fingerprintKey(key: CborItem): string {
     for (const c of key.chunks) s += c.value;
     return s;
   }
-  if (key instanceof CborByteString)
-    return 'b' + bytesToHexFingerprint(key.value);
+  if (key instanceof CborByteString) return 'b' + bytesToHex(key.value);
   if (key instanceof CborIndefiniteByteString) {
     let s = 'b';
-    for (const chunk of key.chunks) s += bytesToHexFingerprint(chunk.value);
+    for (const chunk of key.chunks) s += bytesToHex(chunk.value);
     return s;
   }
   if (key instanceof CborFloat) {
@@ -268,6 +274,45 @@ function readArgument(
   }
 }
 
+/**
+ * Read the CBOR argument as a JS number — used for the length/count of major
+ * types 2–5, where {@link readArgument}'s bigint would immediately be
+ * converted back via Number().  Avoids a BigInt allocation per non-immediate
+ * header on the decode hot path.
+ *
+ * An 8-byte argument ≥ 2^53 loses precision exactly as Number(bigint) would
+ * (both round to nearest double); such lengths always exceed any real input,
+ * so the subsequent bounds check fails identically either way.
+ */
+function readLength(
+  view: DataView,
+  offset: number,
+  ai: number
+): { value: number; nextOffset: number } {
+  if (ai <= 23) {
+    return { value: ai, nextOffset: offset };
+  }
+  switch (ai) {
+    case AI_1BYTE:
+      if (offset + 1 > view.byteLength) decodeError('unexpected end of input');
+      return { value: view.getUint8(offset), nextOffset: offset + 1 };
+    case AI_2BYTE:
+      if (offset + 2 > view.byteLength) decodeError('unexpected end of input');
+      return { value: view.getUint16(offset, false), nextOffset: offset + 2 };
+    case AI_4BYTE:
+      if (offset + 4 > view.byteLength) decodeError('unexpected end of input');
+      return { value: view.getUint32(offset, false), nextOffset: offset + 4 };
+    case AI_8BYTE: {
+      if (offset + 8 > view.byteLength) decodeError('unexpected end of input');
+      const hi = view.getUint32(offset, false);
+      const lo = view.getUint32(offset + 4, false);
+      return { value: hi * 0x1_0000_0000 + lo, nextOffset: offset + 8 };
+    }
+    default:
+      decodeError(`reserved additional info value: ${ai}`);
+  }
+}
+
 // ─── Core recursive decoder ───────────────────────────────────────────────────
 
 type DecodeResult = { value: CborItem; nextOffset: number };
@@ -339,6 +384,18 @@ function decodeItem(
   return result;
 }
 
+/**
+ * Copy a float's encoded payload bytes out of the input, so NaN payloads
+ * survive a decode → encode round-trip (see `CborFloat.rawBits`).
+ */
+function floatPayloadBytes(
+  view: DataView,
+  offset: number,
+  length: number
+): Uint8Array {
+  return new Uint8Array(view.buffer, view.byteOffset + offset, length).slice();
+}
+
 function decodeItemInner(
   view: DataView,
   offset: number,
@@ -383,13 +440,12 @@ function decodeItemInner(
         );
         return { value: new CborIndefiniteByteString(chunks), nextOffset };
       }
-      const { value: len, nextOffset: dataOffset } = readArgument(
+      const { value: length, nextOffset: dataOffset } = readLength(
         view,
         offset,
         ai
       );
-      const length = Number(len);
-      const encodingWidth = aiToNonCanonicalEW(ai, len);
+      const encodingWidth = aiToNonCanonicalEWLen(ai, length);
       if (dataOffset + length > view.byteLength)
         decodeError('byte string extends beyond input');
       const bytes = new Uint8Array(
@@ -416,13 +472,12 @@ function decodeItemInner(
         );
         return { value: new CborIndefiniteTextString(chunks), nextOffset };
       }
-      const { value: len, nextOffset: dataOffset } = readArgument(
+      const { value: length, nextOffset: dataOffset } = readLength(
         view,
         offset,
         ai
       );
-      const length = Number(len);
-      const encodingWidth = aiToNonCanonicalEW(ai, len);
+      const encodingWidth = aiToNonCanonicalEWLen(ai, length);
       if (dataOffset + length > view.byteLength)
         decodeError('text string extends beyond input');
       const bytes = new Uint8Array(
@@ -477,13 +532,12 @@ function decodeItemInner(
           nextOffset: pos,
         };
       }
-      const { value: count, nextOffset: itemsStart } = readArgument(
+      const { value: length, nextOffset: itemsStart } = readLength(
         view,
         offset,
         ai
       );
-      const length = Number(count);
-      const encodingWidth = aiToNonCanonicalEW(ai, count);
+      const encodingWidth = aiToNonCanonicalEWLen(ai, length);
       const items: CborItem[] = [];
       let pos = itemsStart;
       for (let i = 0; i < length; i++) {
@@ -527,13 +581,12 @@ function decodeItemInner(
         for (const w of indefMapWarnings) addWarning(indefMapNode, w);
         return { value: indefMapNode, nextOffset: pos };
       }
-      const { value: count, nextOffset: entriesStart } = readArgument(
+      const { value: length, nextOffset: entriesStart } = readLength(
         view,
         offset,
         ai
       );
-      const length = Number(count);
-      const encodingWidth = aiToNonCanonicalEW(ai, count);
+      const encodingWidth = aiToNonCanonicalEWLen(ai, length);
       const entries: [CborItem, CborItem][] = [];
       const seenKeys = new Set<string>();
       const mapWarnings: DecodeWarning[] = [];
@@ -617,9 +670,13 @@ function decodeItemInner(
         if (offset + 2 > view.byteLength)
           decodeError('unexpected end of input');
         const bits = view.getUint16(offset, false);
+        const value = float16BitsToFloat64(bits);
         return {
-          value: new CborFloat(float16BitsToFloat64(bits), {
+          value: new CborFloat(value, {
             precision: 'half',
+            rawBits: Number.isNaN(value)
+              ? floatPayloadBytes(view, offset, 2)
+              : undefined,
           }),
           nextOffset: offset + 2,
         };
@@ -629,9 +686,13 @@ function decodeItemInner(
       if (ai === AI_4BYTE) {
         if (offset + 4 > view.byteLength)
           decodeError('unexpected end of input');
+        const value = view.getFloat32(offset, false);
         return {
-          value: new CborFloat(view.getFloat32(offset, false), {
+          value: new CborFloat(value, {
             precision: 'single',
+            rawBits: Number.isNaN(value)
+              ? floatPayloadBytes(view, offset, 4)
+              : undefined,
           }),
           nextOffset: offset + 4,
         };
@@ -641,9 +702,13 @@ function decodeItemInner(
       if (ai === AI_8BYTE) {
         if (offset + 8 > view.byteLength)
           decodeError('unexpected end of input');
+        const value = view.getFloat64(offset, false);
         return {
-          value: new CborFloat(view.getFloat64(offset, false), {
+          value: new CborFloat(value, {
             precision: 'double',
+            rawBits: Number.isNaN(value)
+              ? floatPayloadBytes(view, offset, 8)
+              : undefined,
           }),
           nextOffset: offset + 8,
         };

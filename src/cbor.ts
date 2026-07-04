@@ -16,6 +16,7 @@ import type {
 import { CBOR_OMIT } from './types';
 import { decodeCBOR } from './cbor/decoder';
 import { parseCDN } from './cdn/parser';
+import { CdnSyntaxError } from './cdn/errors';
 import { dt_as_Date as _dt_as_Date } from './extensions/dt';
 import { fromJS as _fromJS, _applyReplacer } from './js/fromJS';
 import { MapEntries as _MapEntries } from './mapEntries';
@@ -371,11 +372,19 @@ export class CBOR {
     }
   }
 
-  /** CDN テキストの複数 item を 1 つずつパースするジェネレータ。 */
+  /**
+   * CDN テキストの複数 item を 1 つずつパースするジェネレータ。
+   *
+   * `preserveComments` が有効な場合、item 間のコメントは次の item の
+   * leading コメントとして、item と同じ行にあるコメントはその item の
+   * trailing コメントとして付与される。最後の item の後の行にだけ
+   * コメントが残る場合、そのコメントはどの item にも属さず破棄される。
+   */
   static *fromCDNSeq(
     text: string,
     options?: FromCDNSeqOptions
   ): Generator<CborItem> {
+    const preserve = !!options?.preserveComments;
     let offset = 0;
     let isFirst = true;
     while (true) {
@@ -383,7 +392,12 @@ export class CBOR {
         offset: next,
         hadSeparator,
         commaOffset,
-      } = skipCDNSeparator(text, offset, options);
+      } = skipCDNSeparator(
+        text,
+        offset,
+        options,
+        preserve ? (isFirst ? 'all' : 'after-newline') : 'none'
+      );
       // Leading comma: comma before the first item (including comma-only input).
       // Checked before the EOF break so that "," alone is also caught.
       // Trailing comma is valid per ABNF SOC = S ["," S] and is silently accepted.
@@ -393,6 +407,14 @@ export class CBOR {
         emitCDNSeqWarning(msg, commaOffset, options);
       }
       if (next >= text.length) break;
+      // Stopped at a comment that should lead the next item: make sure an
+      // item actually follows. If only comments remain, we are done (the
+      // remaining comments belong to no item and are dropped, matching the
+      // behaviour of `preserveComments: false`).
+      if (preserve && isCDNCommentStart(text, next)) {
+        const lookahead = skipCDNSeparator(text, next, options);
+        if (lookahead.offset >= text.length) break;
+      }
       if (!isFirst && !hadSeparator) {
         const msg =
           'CDN sequence items must be separated by whitespace, comma, or comment';
@@ -416,7 +438,9 @@ export class CBOR {
         emitCDNSeqWarning(
           e instanceof Error ? e.message : String(e),
           offset,
-          options
+          options,
+          true,
+          e instanceof CdnSyntaxError ? e : undefined
         );
         break;
       }
@@ -790,13 +814,28 @@ function whitespaceLike(text: string): string {
 
 function emitCDNSeqWarning(
   msg: string,
-  offset: number,
-  options: FromCDNSeqOptions | undefined
+  fallbackOffset: number,
+  options: FromCDNSeqOptions | undefined,
+  fatal?: boolean,
+  cause?: CdnSyntaxError
 ): void {
+  const offset = cause?.offset ?? fallbackOffset;
   const w: ParseWarning = { message: msg, offset };
+  if (fatal) w.fatal = true;
+  if (cause?.offset !== undefined) {
+    w.line = cause.line;
+    w.column = cause.column;
+    w.endOffset = cause.endOffset;
+  }
   if (options?.onWarning) options.onWarning(w);
   else if (!options?.silent)
     console.warn(`CDN sequence warning at offset ${offset}: ${msg}`);
+}
+
+/** Whether `text[i]` starts a CDN comment (`#`, `//`, `/* … *\/`, or `/ … /`). */
+function isCDNCommentStart(text: string, i: number): boolean {
+  const ch = text[i];
+  return ch === '#' || ch === '/';
 }
 
 /**
@@ -804,63 +843,83 @@ function emitCDNSeqWarning(
  * 次の item が始まる文字位置と、何らかの separator が存在したかどうかを返す。
  * 未終端のブロックコメントは strict モードでは throw し、
  * strict: false の場合は警告を emit して末尾まで読み飛ばす。
+ *
+ * `stopAtComments` は `preserveComments` 有効時にコメントを次の item の
+ * leading コメントとして残すためのモード:
+ * - `'none'`: コメントも読み飛ばす(従来動作)
+ * - `'all'`: 最初のコメントで停止する(先頭 item 用)
+ * - `'after-newline'`: 改行より後のコメントで停止する。直前 item と同じ行の
+ *   コメントはその item の trailing コメントとして既に付与されているため読み飛ばす。
  */
 function skipCDNSeparator(
   text: string,
   from: number,
-  options: FromCDNSeqOptions | undefined
+  options: FromCDNSeqOptions | undefined,
+  stopAtComments: 'none' | 'after-newline' | 'all' = 'none'
 ): { offset: number; hadSeparator: boolean; commaOffset: number } {
   let i = from;
   let hadSeparator = false;
   let seenComma = false;
+  let seenNewline = false;
   let commaOffset = -1;
+  const stopHere = (): boolean =>
+    stopAtComments === 'all' ||
+    (stopAtComments === 'after-newline' && seenNewline);
   while (i < text.length) {
     const ch = text[i];
-    if (
-      ch === ' ' ||
-      ch === '\t' ||
-      ch === '\r' ||
-      ch === '\n' ||
-      ch === '\x1e'
-    ) {
+    if (ch === ' ' || ch === '\t' || ch === '\r' || ch === '\x1e') {
       hadSeparator = true;
+      i++;
+      continue;
+    }
+    if (ch === '\n') {
+      hadSeparator = true;
+      seenNewline = true;
       i++;
       continue;
     }
     if (ch === '#') {
       hadSeparator = true;
+      if (stopHere()) break;
       const nl = text.indexOf('\n', i + 1);
       i = nl < 0 ? text.length : nl + 1;
+      seenNewline = true;
       continue;
     }
     if (ch === '/' && text[i + 1] === '/') {
       hadSeparator = true;
+      if (stopHere()) break;
       const nl = text.indexOf('\n', i + 2);
       i = nl < 0 ? text.length : nl + 1;
+      seenNewline = true;
       continue;
     }
     if (ch === '/' && text[i + 1] === '*') {
       hadSeparator = true;
+      if (stopHere()) break;
       const end = text.indexOf('*/', i + 2);
       if (end < 0) {
         const msg = 'unterminated /* comment in CDN sequence';
         if (options?.strict !== false) throw new SyntaxError(msg);
-        emitCDNSeqWarning(msg, i, options);
+        emitCDNSeqWarning(msg, i, options, true);
         i = text.length;
       } else {
+        if (text.slice(i, end).includes('\n')) seenNewline = true;
         i = end + 2;
       }
       continue;
     }
     if (ch === '/' && text[i + 1] !== '/') {
       hadSeparator = true;
+      if (stopHere()) break;
       const end = text.indexOf('/', i + 1);
       if (end < 0) {
         const msg = 'unterminated / comment in CDN sequence';
         if (options?.strict !== false) throw new SyntaxError(msg);
-        emitCDNSeqWarning(msg, i, options);
+        emitCDNSeqWarning(msg, i, options, true);
         i = text.length;
       } else {
+        if (text.slice(i, end).includes('\n')) seenNewline = true;
         i = end + 1;
       }
       continue;

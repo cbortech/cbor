@@ -1,11 +1,7 @@
 import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import { MT_TEXT } from '../cbor/constants';
-import {
-  writeHeadTo,
-  type CborWriter,
-  type EncodingWidth,
-} from '../cbor/encode';
+import type { CborWriter, EncodingWidth } from '../cbor/encode';
 import { parseCDN } from '../cdn/parser';
 // Internal lexer reuse: parseCDN() validates embedded CDN first; this pass
 // only needs token offsets so string formatting can split without changing text.
@@ -15,6 +11,7 @@ import {
   indentOf,
   resolveIndent,
   resolveEiSuffix,
+  joinConcatParts,
   canonicalEncodingWidth,
 } from '../cdn/serialize-utils';
 
@@ -26,23 +23,39 @@ export class CborTextString extends CborItem {
   readonly indefiniteLength = false as const;
   readonly value: string;
   encodingWidth: EncodingWidth | undefined;
+  /** Part boundaries of the original `+` concatenation chain, if any. */
+  readonly ednParts: readonly string[] | undefined;
 
-  constructor(value: string, options?: { encodingWidth?: EncodingWidth }) {
+  constructor(
+    value: string,
+    options?: {
+      encodingWidth?: EncodingWidth;
+      ednParts?: readonly string[];
+    }
+  ) {
     super();
     this.value = value;
     this.encodingWidth = options?.encodingWidth;
+    this.ednParts = options?.ednParts;
   }
 
   override _encodeTo(writer: CborWriter, _options?: ToCBOROptions): void {
-    const encoded = textEncoder.encode(this.value);
-    writeHeadTo(writer, MT_TEXT, encoded.length, this.encodingWidth);
-    writer.writeBytes(encoded);
+    writer.writeTextString(MT_TEXT, this.value, this.encodingWidth);
   }
 
   _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     const suffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(BigInt(textEncoder.encode(this.value).length))
     );
+    if (
+      options?.preserveConcatenation &&
+      this.ednParts !== undefined &&
+      this.ednParts.length > 1
+    ) {
+      const literals = this.ednParts.map((text) => escapeString(text));
+      literals[literals.length - 1] += suffix;
+      return joinConcatParts(literals, resolveIndent(options), depth);
+    }
     return formatTextString(this.value, suffix, options, depth);
   }
 
@@ -57,7 +70,7 @@ function formatTextString(
   options: ToCDNOptions | undefined,
   depth: number
 ): string {
-  const formats = normalizeTextStringFormats(options?.textStringFormat ?? []);
+  const formats = resolveTextStringSplits(options);
   const indentStr = resolveIndent(options);
   if (formats.length === 0 || indentStr === null) {
     return escapeString(value) + suffix;
@@ -101,6 +114,28 @@ function formatTextString(
     result += ` +\n${continuationIndent}${literals[i]}`;
   }
   return result;
+}
+
+/**
+ * Resolve the effective split strategies from `textStringSplit`, falling back
+ * to the deprecated array-valued `textStringFormat`.
+ */
+function resolveTextStringSplits(
+  options: ToCDNOptions | undefined
+): ('newline' | 'cdn')[] {
+  const split = options?.textStringSplit;
+  switch (split) {
+    case 'none':
+      return [];
+    case 'newline':
+      return ['newline'];
+    case 'cdn':
+      return ['cdn'];
+    case 'cdn+newline':
+      return ['cdn', 'newline'];
+    case undefined:
+      return normalizeTextStringFormats(options?.textStringFormat ?? []);
+  }
 }
 
 function normalizeTextStringFormats(

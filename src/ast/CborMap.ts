@@ -17,17 +17,11 @@ import {
   type EncodingWidth,
 } from '../cbor/encode';
 import {
-  resolveIndent,
-  indentOf,
-  resolveSeparators,
   convertCommentText,
-  formatDanglingComments,
-  formatLeadingComments,
-  hasContainerLayoutComments,
   hasPreservedComments,
-  resolveEiSuffix,
-  canonicalEncodingWidth,
+  serializeContainer,
 } from '../cdn/serialize-utils';
+import { byteToHexUpper, bytesToSpacedHexUpper } from '../utils/hex';
 
 /** CBOR Major Type 5 — map (definite- or indefinite-length). */
 export class CborMap extends CborItem {
@@ -63,98 +57,47 @@ export class CborMap extends CborItem {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    let indentStr = resolveIndent(options);
-    const preserveComments = options?.preserveComments;
-    const commentStyle =
-      typeof preserveComments === 'string' ? preserveComments : undefined;
-    const hasComments =
-      preserveComments &&
-      (hasContainerLayoutComments(this) ||
+    return serializeContainer({
+      node: this,
+      options,
+      depth,
+      openChar: '{',
+      closeChar: '}',
+      count: this.entries.length,
+      indefiniteLength: this.indefiniteLength,
+      encodingWidth: this.encodingWidth,
+      hasEntryComments: () =>
         this.entries.some(
           ([key, value]) =>
             hasPreservedComments(key) || hasPreservedComments(value)
-        ));
-    if (indentStr === null && hasComments) indentStr = '  ';
-    const { inlineSep, multilineSep, trailSep, colSep } = resolveSeparators(
-      options,
-      indentStr === null
-    );
-    const eiRaw = this.indefiniteLength
-      ? ''
-      : resolveEiSuffix(options, this.encodingWidth, () =>
-          canonicalEncodingWidth(BigInt(this.entries.length))
+        ),
+      renderEntry: (i, colSep) => {
+        const [k, v] = this.entries[i];
+        return `${k._toCDN(options, depth + 1)}${colSep}${v._toCDN(options, depth + 1)}`;
+      },
+      // Leading comments come from the key; the value's leading comments
+      // render inline after the entry (see entryTrailing).
+      entryLeadingNode: (i) => this.entries[i][0],
+      entryTrailing: (i, style) => {
+        const [k, v] = this.entries[i];
+        return formatMapEntryTrailingComments(
+          [
+            ...(k.comments?.trailing ?? []),
+            ...(v.comments?.leading ?? []),
+            ...(v.comments?.trailing ?? []),
+          ],
+          style
         );
-    const eiSuffix = eiRaw ? eiRaw + ' ' : '';
-    const showIndef =
-      this.indefiniteLength &&
-      (options?.encodingIndicators ?? 'auto') !== 'never';
-    const open = this.indefiniteLength
-      ? showIndef
-        ? '{_ '
-        : '{'
-      : `{${eiSuffix}`;
-
-    if (indentStr === null || (this.entries.length === 0 && !hasComments)) {
-      // single-line
-      const inner = this.entries
-        .map(
-          ([k, v]) =>
-            `${k._toCDN(options, depth + 1)}${colSep}${v._toCDN(options, depth + 1)}`
-        )
-        .join(inlineSep);
-      if (this.indefiniteLength) {
-        return showIndef
-          ? this.entries.length === 0
-            ? '{_ }'
-            : `{_ ${inner}}`
-          : `{${inner}}`;
-      }
-      return `{${eiSuffix}${inner}}`;
-    }
-
-    // multi-line
-    const childIndent = indentOf(indentStr, depth + 1);
-    const closeIndent = indentOf(indentStr, depth);
-    const lines: string[] = [];
-    for (let i = 0; i < this.entries.length; i++) {
-      const [k, v] = this.entries[i];
-      if (preserveComments) {
-        lines.push(...formatLeadingComments(k, childIndent, commentStyle));
-      }
-      const sep = i < this.entries.length - 1 ? multilineSep : trailSep;
-      const entryComments = preserveComments
-        ? formatMapEntryTrailingComments(
-            [
-              ...(k.comments?.trailing ?? []),
-              ...(v.comments?.leading ?? []),
-              ...(v.comments?.trailing ?? []),
-            ],
-            commentStyle
-          )
-        : '';
-      lines.push(
-        `${childIndent}${k._toCDN(options, depth + 1)}${colSep}${v._toCDN(options, depth + 1)}${sep}${entryComments}`
-      );
-    }
-    if (preserveComments)
-      lines.push(...formatDanglingComments(this, childIndent, commentStyle));
-    const body = lines.join('\n');
-    return `${open}\n${body}\n${closeIndent}}`;
+      },
+    });
   }
 
   override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
-    const byteHex = (b: number) =>
-      b.toString(16).toUpperCase().padStart(2, '0');
-    const toHex = (bytes: Uint8Array) =>
-      Array.from(bytes, (b) =>
-        b.toString(16).toUpperCase().padStart(2, '0')
-      ).join(' ');
-
     if (this.indefiniteLength) {
       const lines: AnnotatedLine[] = [
         {
           depth,
-          hex: byteHex((MT_MAP << 5) | AI_INDEFINITE),
+          hex: byteToHexUpper((MT_MAP << 5) | AI_INDEFINITE),
           comment: 'Start indefinite-length map',
         },
       ];
@@ -162,13 +105,17 @@ export class CborMap extends CborItem {
         lines.push(...k._toHexDump(depth + 1, options));
         lines.push(...v._toHexDump(depth + 1, options));
       }
-      lines.push({ depth, hex: byteHex(BREAK_CODE), comment: '"break"' });
+      lines.push({
+        depth,
+        hex: byteToHexUpper(BREAK_CODE),
+        comment: '"break"',
+      });
       return lines;
     }
     const lines: AnnotatedLine[] = [
       {
         depth,
-        hex: toHex(
+        hex: bytesToSpacedHexUpper(
           writeHead(MT_MAP, BigInt(this.entries.length), this.encodingWidth)
         ),
         comment: `Map of length ${this.entries.length}`,

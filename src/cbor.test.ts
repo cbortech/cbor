@@ -630,6 +630,106 @@ describe('CBOR.format()', () => {
     ).toBe("'hi'");
   });
 
+  test('joins text string concatenation by default', () => {
+    expect(CBOR.format('"a" + "b"')).toBe('"ab"');
+  });
+
+  test('preserves text string concatenation when requested', () => {
+    expect(CBOR.format('"a" + "b"', { preserveConcatenation: true })).toBe(
+      '"a" + "b"'
+    );
+    expect(CBOR.format("'a' + 'b'", { preserveConcatenation: true })).toBe(
+      "'a' + 'b'"
+    );
+  });
+
+  test('splits preserved concatenation across lines with indent', () => {
+    expect(
+      CBOR.format('{"k": "a" + "b"}', {
+        indent: 2,
+        preserveConcatenation: true,
+      })
+    ).toBe('{\n  "k": "a" +\n    "b"\n}');
+  });
+
+  test('preserves byte string concatenation when requested', () => {
+    expect(CBOR.format("h'01' + h'02'", { preserveConcatenation: true })).toBe(
+      "h'01' + h'02'"
+    );
+    // Each part is re-serialized with the normal rules (sqstr, bstrEncoding).
+    expect(CBOR.format("h'68' + h'69'", { preserveConcatenation: true })).toBe(
+      "'h' + 'i'"
+    );
+    expect(
+      CBOR.format("h'68' + b64'aQ'", {
+        preserveConcatenation: true,
+        sqstr: 'none',
+      })
+    ).toBe("h'68' + h'69'");
+  });
+
+  test('preserves byte string part spelling with preserveByteString', () => {
+    expect(
+      CBOR.format("h'68' + b64'aQ'", {
+        preserveConcatenation: true,
+        preserveByteString: true,
+      })
+    ).toBe("h'68' + b64'aQ'");
+  });
+
+  test('normalizes byte string parts in preserved text concatenation', () => {
+    expect(CBOR.format('"a" + h\'62\'', { preserveConcatenation: true })).toBe(
+      '"a" + "b"'
+    );
+  });
+
+  test('keeps encoding indicator at the end of a preserved chain', () => {
+    expect(CBOR.format('"a" + "b"_3', { preserveConcatenation: true })).toBe(
+      '"a" + "b"_3'
+    );
+  });
+
+  test('preserved concatenation takes precedence over text string splitting', () => {
+    expect(
+      CBOR.format('"a\\n" + "b\\nc"', {
+        indent: 2,
+        preserveConcatenation: true,
+        textStringSplit: 'newline',
+      })
+    ).toBe('"a\\n" +\n  "b\\nc"');
+  });
+
+  test('preserved concatenation round-trips through format', () => {
+    const options = { indent: 2, preserveConcatenation: true } as const;
+    const once = CBOR.format('{"k": "a" + "b" + "c"}', options);
+    expect(CBOR.format(once, options)).toBe(once);
+  });
+
+  test('textStringSplit replaces deprecated textStringFormat', () => {
+    expect(
+      CBOR.format('{"text": "line1\\nline2"}', {
+        indent: 2,
+        textStringSplit: 'newline',
+      })
+    ).toBe('{\n  "text": "line1\\n" +\n    "line2"\n}');
+    expect(
+      CBOR.format('{"edn": "[\\n1,2\\n]"}', {
+        indent: 2,
+        textStringSplit: 'cdn+newline',
+      })
+    ).toBe('{\n  "edn": "[\\n" +\n      "1," +\n      "2\\n" +\n    "]"\n}');
+  });
+
+  test('textStringSplit takes precedence over textStringFormat', () => {
+    expect(
+      CBOR.format('{"text": "line1\\nline2"}', {
+        indent: 2,
+        textStringSplit: 'none',
+        textStringFormat: ['newline'],
+      })
+    ).toBe('{\n  "text": "line1\\nline2"\n}');
+  });
+
   test('strips comments unless preserveComments is enabled', () => {
     expect(CBOR.format('[# a\n1, 2 # b\n]', { indent: 2 })).toBe(
       '[\n  1,\n  2\n]'
@@ -844,6 +944,13 @@ describe('CBOR.fromCBOR → toCBOR byte-exact round-trip (RFC 8949 Appendix A)',
     '9fff',
     '9f01820203820405ff',
     'bf61610161629f0203ffff',
+    // NaN payloads (preserved via CborFloat.rawBits)
+    'f97ef0',
+    'f9fe00',
+    'fa7fc00001',
+    'fa7f800001',
+    'fb7ff8000000000001',
+    'fb7ff0000000000001',
   ];
 
   for (const h of vectors) {
@@ -852,6 +959,29 @@ describe('CBOR.fromCBOR → toCBOR byte-exact round-trip (RFC 8949 Appendix A)',
       expect(toHex(CBOR.fromCBOR(original).toCBOR())).toBe(h);
     });
   }
+
+  test('NaN payload appears in toHexDump output', () => {
+    expect(CBOR.fromCBOR(hex('f97ef0')).toHexDump()).toContain('F9 7E F0');
+  });
+
+  test('canonical NaN still encodes canonically from CDN', () => {
+    expect(toHex(CBOR.fromCDN('NaN').toCBOR())).toBe('f97e00');
+  });
+
+  test('rawBits is ignored when value is not NaN', () => {
+    const f = new CborFloat(1.5, {
+      precision: 'half',
+      rawBits: new Uint8Array([0x7e, 0x01]),
+    });
+    expect(toHex(f.toCBOR())).toBe('f93e00');
+  });
+
+  test('rawBits with mismatched length falls back to canonical encoding', () => {
+    // half-precision rawBits left over after precision is changed to double
+    const f = CBOR.fromCBOR(hex('f97ef0')) as CborFloat;
+    f.precision = 'double';
+    expect(toHex(f.toCBOR())).toBe('fb7ff8000000000000');
+  });
 });
 
 // ─── Complete 4-way round-trip: fromCDN → toCBOR → fromCBOR → toCDN ──────────

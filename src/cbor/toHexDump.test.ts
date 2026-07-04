@@ -200,3 +200,23 @@ describe('toHexDump — indent option', () => {
     expect(lines[1]).toMatch(/^ \S/);
   });
 });
+
+// ─── Large inputs ─────────────────────────────────────────────────────────────
+
+describe('toHexDump — large inputs', () => {
+  test('200k-element array does not overflow the call stack', () => {
+    // Regression: the prefix-width pass used Math.max(...lines.map(...)),
+    // which throws RangeError once the line count exceeds the JS engine's
+    // maximum argument count.
+    const node = new CborArray(
+      Array.from({ length: 200_000 }, (_, i) => new CborUint(BigInt(i)))
+    );
+    const dump = node.toHexDump();
+    const lines = dump.split('\n');
+    expect(lines.length).toBe(200_001);
+    expect(lines[0]).toMatch(/-- Array of length 200000$/);
+    // widest prefix: depth-1 five-byte uint header, e.g. "   1A 00 03 0D 3F"
+    // (3 + 14 = 17 chars) → comment column starts at 19
+    expect(lines[1]).toBe('   00              -- 0');
+  });
+});

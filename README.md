@@ -214,7 +214,7 @@ console.log(text);
 
 ### Split text strings while formatting
 
-`textStringFormat` can split long text strings with CDN string concatenation.
+`textStringSplit` can split long text strings with CDN string concatenation.
 It is applied when `indent` is specified.
 
 ```ts
@@ -222,7 +222,7 @@ import { CBOR } from '@cbortech/cbor';
 
 const text = CBOR.format('{"text": "line1\\nline2\\nline3"}', {
   indent: 2,
-  textStringFormat: ['newline'],
+  textStringSplit: 'newline',
 });
 
 console.log(text);
@@ -233,14 +233,15 @@ console.log(text);
 // }
 ```
 
-For strings that contain CDN or JSON-like content, use `cdn`.
+For strings that contain CDN or JSON-like content, use `'cdn'`
+(or `'cdn+newline'` to combine both split strategies).
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
 const text = CBOR.format('{"cdn": "[1,2,3]"}', {
   indent: 2,
-  textStringFormat: ['cdn'],
+  textStringSplit: 'cdn',
 });
 
 console.log(text);
@@ -251,6 +252,29 @@ console.log(text);
 //       "3" +
 //     "]"
 // }
+```
+
+### Preserve `+` string concatenation
+
+By default, `CBOR.format()` joins `+` string concatenation into a single
+literal. `preserveConcatenation` keeps the original part boundaries for both
+text strings and byte strings; add `preserveByteString` to also keep the
+original spelling of byte string parts.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+CBOR.format('"a" + "b"');
+// '"ab"'
+
+CBOR.format('"a" + "b"', { preserveConcatenation: true });
+// '"a" + "b"'
+
+CBOR.format("h'68' + b64'aQ'", {
+  preserveConcatenation: true,
+  preserveByteString: true,
+});
+// "h'68' + b64'aQ'"
 ```
 
 ## Working With The AST

@@ -164,6 +164,61 @@ describe('text strings — encode', () => {
       '7f' + '657374726561' + '646d696e67' + 'ff'
     );
   });
+
+  // Multi-byte strings whose UTF-8 length needs a wider head than the UTF-16
+  // length predicts — exercises the head-size fixup in writeTextString().
+  describe('head-width boundary crossings (UTF-16 length vs UTF-8 length)', () => {
+    test('12 × "あ" (UTF-16 len 12 → 36 bytes): head grows 1 → 2 bytes', () => {
+      const s = 'あ'.repeat(12);
+      const bytes = new CborTextString(s).toCBOR();
+      expect(bytes[0]).toBe(0x78); // MT3, AI 24 (1-byte length)
+      expect(bytes[1]).toBe(36);
+      expect(bytes.length).toBe(2 + 36);
+      expect(decodeCBOR(bytes).toJS()).toBe(s);
+    });
+
+    test('100 × "あ" (UTF-16 len 100 → 300 bytes): head grows 2 → 3 bytes', () => {
+      const s = 'あ'.repeat(100);
+      const bytes = new CborTextString(s).toCBOR();
+      expect(bytes[0]).toBe(0x79); // MT3, AI 25 (2-byte length)
+      expect((bytes[1] << 8) | bytes[2]).toBe(300);
+      expect(decodeCBOR(bytes).toJS()).toBe(s);
+    });
+
+    test('30000 × "あ" (UTF-16 len 30000 → 90000 bytes): head grows 3 → 5 bytes', () => {
+      const s = 'あ'.repeat(30000);
+      const bytes = new CborTextString(s).toCBOR();
+      expect(bytes[0]).toBe(0x7a); // MT3, AI 26 (4-byte length)
+      expect(decodeCBOR(bytes).toJS()).toBe(s);
+    });
+
+    test('surrogate pair "🎉" (UTF-16 len 2 → 4 bytes)', () => {
+      const bytes = new CborTextString('🎉').toCBOR();
+      expect(toHex(bytes)).toBe('64f09f8e89');
+    });
+
+    test('string after a boundary-crossing string keeps correct offsets', () => {
+      const node = new CborArray([
+        new CborTextString('あ'.repeat(12)),
+        new CborTextString('tail'),
+      ]);
+      expect(decodeCBOR(node.toCBOR()).toJS()).toEqual([
+        'あ'.repeat(12),
+        'tail',
+      ]);
+    });
+  });
+
+  test('explicit encodingWidth too small for UTF-8 length throws RangeError', () => {
+    // UTF-16 length 23 fits _i, but the UTF-8 length (69) does not.
+    const node = new CborTextString('あ'.repeat(23), { encodingWidth: 'i' });
+    expect(() => node.toCBOR()).toThrow(RangeError);
+  });
+
+  test('explicit wider encodingWidth is honored', () => {
+    const bytes = new CborTextString('a', { encodingWidth: 1 }).toCBOR();
+    expect(toHex(bytes)).toBe('79000161');
+  });
 });
 
 describe('arrays — encode', () => {

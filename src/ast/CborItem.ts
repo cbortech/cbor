@@ -11,6 +11,7 @@ import type {
 import { CBOR_OMIT } from '../types';
 import { convertCommentText } from '../cdn/serialize-utils';
 import { CborWriter } from '../cbor/encode';
+import { bytesToSpacedHexUpper } from '../utils/hex';
 
 /** @internal One line of an annotated hex dump. */
 export interface AnnotatedLine {
@@ -133,9 +134,13 @@ export abstract class CborItem {
     const indentStr = typeof raw === 'string' ? raw : ' '.repeat(raw);
     const marker = (merged?.commentStyle ?? '--') + ' ';
     const lines = this._toHexDump(0, merged);
-    const maxPrefixLen = Math.max(
-      ...lines.map((l) => l.depth * indentStr.length + l.hex.length)
-    );
+    // A plain loop, not Math.max(...spread): spreading one argument per line
+    // overflows the call stack for items with hundreds of thousands of lines.
+    let maxPrefixLen = 0;
+    for (const l of lines) {
+      const prefixLen = l.depth * indentStr.length + l.hex.length;
+      if (prefixLen > maxPrefixLen) maxPrefixLen = prefixLen;
+    }
     const col = maxPrefixLen + 2;
     return lines
       .map((l) => {
@@ -218,9 +223,7 @@ export abstract class CborItem {
    * open/close lines with recursively collected children.
    */
   _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
-    const hex = Array.from(this._toCBOR(), (b) =>
-      b.toString(16).toUpperCase().padStart(2, '0')
-    ).join(' ');
+    const hex = bytesToSpacedHexUpper(this._toCBOR());
     return [{ depth, hex, comment: this._toCDN(options, 0) }];
   }
 }
