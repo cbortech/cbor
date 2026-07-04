@@ -87,10 +87,10 @@ describe('README examples', () => {
     );
   });
 
-  test('textStringSplit splits text strings at newlines', () => {
+  test('splitNewline splits text strings at newlines', () => {
     const text = CBOR.format('{"text": "line1\\nline2\\nline3"}', {
       indent: 2,
-      textStringSplit: 'newline',
+      splitNewline: true,
     });
 
     expect(text).toBe(
@@ -102,10 +102,10 @@ describe('README examples', () => {
     );
   });
 
-  test('textStringSplit splits text strings containing CDN', () => {
+  test('splitCdn splits text strings containing CDN', () => {
     const text = CBOR.format('{"cdn": "[1,2,3]"}', {
       indent: 2,
-      textStringSplit: 'cdn',
+      splitCdn: true,
     });
 
     expect(text).toBe(

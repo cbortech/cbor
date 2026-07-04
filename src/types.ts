@@ -535,28 +535,39 @@ export interface ToCDNOptions {
    * When both are specified, CDN structure split points are combined with
    * newline split points.
    *
-   * @deprecated Use `textStringSplit` instead. When both are specified,
-   *   `textStringSplit` takes precedence.
+   * @deprecated Use `splitCdn` / `splitNewline` instead. When one of those
+   *   is specified, it takes precedence over the corresponding array entry.
    */
   textStringFormat?: TextStringFormat[];
 
   /**
-   * Split long text strings using CDN string concatenation syntax (`"a" + "b"`).
-   * Only effective when `indent` is specified.
+   * Format text strings whose content is parseable as CDN (a JSON superset)
+   * by splitting them with CDN string concatenation (`"{" + "1:2" + "}"`)
+   * and structure-aware indentation, the same way the surrounding CDN is
+   * formatted. Only effective when `indent` is specified.
    *
-   * - `'none'`: never split (default)
-   * - `'newline'`: split at newline characters
-   * - `'cdn'`: split according to CDN structure when the string content
-   *   is parseable as CDN (JSON superset)
-   * - `'cdn+newline'`: combine CDN structure split points with newline
-   *   split points
+   * When the string content parses as CDN, this takes precedence over
+   * `preserveConcatenation`; when it does not, the original concatenation
+   * is preserved as usual.
    *
-   * Replaces the deprecated array-valued `textStringFormat` option and takes
-   * precedence over it when both are specified.
+   * Replaces the deprecated `textStringFormat: ['cdn']`.
    *
-   * @default 'none'
+   * @default false
    */
-  textStringSplit?: TextStringSplit;
+  splitCdn?: boolean;
+
+  /**
+   * Split text strings at newline characters using CDN string concatenation
+   * (`"line1\n" + "line2"`). Only effective when `indent` is specified.
+   *
+   * Combines with `preserveConcatenation`: preserved concatenation parts
+   * are further split at the newline characters they contain.
+   *
+   * Replaces the deprecated `textStringFormat: ['newline']`.
+   *
+   * @default false
+   */
+  splitNewline?: boolean;
 
   /**
    * Preserve `+` string concatenation from the parsed CDN source.
@@ -569,9 +580,11 @@ export interface ToCDNOptions {
    * `preserveByteString` to also keep the original spelling of byte string
    * parts.
    *
-   * For strings carrying original part boundaries, this takes precedence
-   * over `textStringSplit` / `textStringFormat`. Has no effect on values
-   * that did not originate from a CDN concatenation.
+   * Interaction with the split options: `splitCdn` takes precedence for
+   * text strings whose content parses as CDN, while `splitNewline` combines
+   * with this option by further splitting the preserved parts at newline
+   * characters. Has no effect on values that did not originate from a CDN
+   * concatenation.
    *
    * @default false
    */
@@ -592,9 +605,6 @@ export interface ToCDNOptions {
 }
 
 export type TextStringFormat = 'newline' | 'cdn' | DeprecatedTextStringFormat;
-
-/** Text string split mode for {@link ToCDNOptions.textStringSplit}. */
-export type TextStringSplit = 'none' | 'newline' | 'cdn' | 'cdn+newline';
 
 /** @deprecated Use `'cdn'` instead. */
 export type DeprecatedTextStringFormat = 'cboredn';

@@ -214,15 +214,15 @@ console.log(text);
 
 ### Split text strings while formatting
 
-`textStringSplit` can split long text strings with CDN string concatenation.
-It is applied when `indent` is specified.
+`splitNewline` splits long text strings at newline characters using CDN
+string concatenation. It is applied when `indent` is specified.
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
 const text = CBOR.format('{"text": "line1\\nline2\\nline3"}', {
   indent: 2,
-  textStringSplit: 'newline',
+  splitNewline: true,
 });
 
 console.log(text);
@@ -233,15 +233,17 @@ console.log(text);
 // }
 ```
 
-For strings that contain CDN or JSON-like content, use `'cdn'`
-(or `'cdn+newline'` to combine both split strategies).
+For strings that contain CDN or JSON-like content, `splitCdn` formats the
+string content with structure-aware line breaks and indentation, the same
+way the surrounding CDN is formatted. Both options can be combined, and they
+replace the deprecated array-valued `textStringFormat` option.
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
 const text = CBOR.format('{"cdn": "[1,2,3]"}', {
   indent: 2,
-  textStringSplit: 'cdn',
+  splitCdn: true,
 });
 
 console.log(text);
@@ -260,6 +262,11 @@ By default, `CBOR.format()` joins `+` string concatenation into a single
 literal. `preserveConcatenation` keeps the original part boundaries for both
 text strings and byte strings; add `preserveByteString` to also keep the
 original spelling of byte string parts.
+
+`preserveConcatenation` interacts with the split options: `splitCdn` takes
+precedence when the string content parses as CDN, while `splitNewline`
+combines with it by further splitting the preserved parts at newline
+characters.
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
