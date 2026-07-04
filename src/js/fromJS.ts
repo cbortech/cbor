@@ -18,6 +18,52 @@ import { Simple } from '../simple';
 import { MapEntries } from '../mapEntries';
 
 /**
+ * Extension hooks used by _fromJS, pre-filtered so the per-node loops touch
+ * only extensions that actually implement each hook.
+ */
+interface ResolvedExtensions {
+  /** Extensions with a fromJS hook (user extensions first). */
+  fromJS: readonly CborExtension[];
+  /** Extensions with a parseTag hook (user extensions first). */
+  parseTag: readonly CborExtension[];
+}
+
+/**
+ * BUILTIN_EXTENSIONS pre-filtered per hook, cached after first use.
+ * Lazy (not module-level) because mapEntries.ts imports fromJS.ts, forming a
+ * cycle that leaves BUILTIN_EXTENSIONS undefined at module init time.
+ */
+let _builtinResolvedExts: ResolvedExtensions | undefined;
+function getBuiltinResolvedExts(): ResolvedExtensions {
+  return (_builtinResolvedExts ??= {
+    fromJS: BUILTIN_EXTENSIONS.filter((ext) => ext.fromJS !== undefined),
+    parseTag: BUILTIN_EXTENSIONS.filter((ext) => ext.parseTag !== undefined),
+  });
+}
+
+/**
+ * Build the hook lists once per fromJS() entry call — _fromJS recursion is
+ * per-node, so rebuilding a spread extension array there is measurably slow.
+ */
+function resolveExtensions(
+  options: FromJSOptions | undefined
+): ResolvedExtensions {
+  const user = options?.extensions;
+  const builtin = getBuiltinResolvedExts();
+  if (!user?.length) return builtin;
+  return {
+    fromJS: [
+      ...user.filter((ext) => ext.fromJS !== undefined),
+      ...builtin.fromJS,
+    ],
+    parseTag: [
+      ...user.filter((ext) => ext.parseTag !== undefined),
+      ...builtin.parseTag,
+    ],
+  };
+}
+
+/**
  * Convert a plain JavaScript value to a CborItem AST node.
  *
  * Type dispatch order:
@@ -49,20 +95,19 @@ export function fromJS(value: unknown, options?: FromJSOptions): CborItem {
       Object.keys(rest).length > 0 ? (rest as FromJSOptions) : undefined
     );
   }
-  return _fromJS(value, options, true);
+  return _fromJS(value, options, true, resolveExtensions(options));
 }
 
 function _fromJS(
   value: unknown,
   options: FromJSOptions | undefined,
-  checkTag: boolean
+  checkTag: boolean,
+  exts: ResolvedExtensions
 ): CborItem {
   // ── Extension fromJS hooks ───────────────────────────────────────────────────
-  for (const ext of [...(options?.extensions ?? []), ...BUILTIN_EXTENSIONS]) {
-    if (ext.fromJS) {
-      const result = ext.fromJS(value, options ?? {});
-      if (result !== undefined) return result;
-    }
+  for (const ext of exts.fromJS) {
+    const result = ext.fromJS!(value, options ?? {});
+    if (result !== undefined) return result;
   }
 
   // ── CBOR tag annotation (Symbol key) ────────────────────────────────────────
@@ -78,12 +123,10 @@ function _fromJS(
     Tag.symbol in (value as object)
   ) {
     const tag = (value as Record<symbol, bigint>)[Tag.symbol];
-    const innerValue = _fromJS(value, options, false);
-    for (const ext of [...(options?.extensions ?? []), ...BUILTIN_EXTENSIONS]) {
-      if (ext.parseTag) {
-        const result = ext.parseTag(tag, innerValue);
-        if (result !== undefined) return result;
-      }
+    const innerValue = _fromJS(value, options, false, exts);
+    for (const ext of exts.parseTag) {
+      const result = ext.parseTag!(tag, innerValue);
+      if (result !== undefined) return result;
     }
     return new CborTag(tag, innerValue);
   }
@@ -124,12 +167,20 @@ function _fromJS(
   if (typeof value === 'string') return new CborTextString(value);
 
   // ── Boxed primitives — unwrap and recurse ───────────────────────────────────
-  if (value instanceof Number) return _fromJS(value.valueOf(), options, false);
-  if (value instanceof Boolean) return _fromJS(value.valueOf(), options, false);
-  if (value instanceof String) return _fromJS(value.valueOf(), options, false);
+  if (value instanceof Number)
+    return _fromJS(value.valueOf(), options, false, exts);
+  if (value instanceof Boolean)
+    return _fromJS(value.valueOf(), options, false, exts);
+  if (value instanceof String)
+    return _fromJS(value.valueOf(), options, false, exts);
   // Object(bigint) — detected via Object.prototype.toString
   if (Object.prototype.toString.call(value) === '[object BigInt]')
-    return _fromJS((value as { valueOf(): bigint }).valueOf(), options, false);
+    return _fromJS(
+      (value as { valueOf(): bigint }).valueOf(),
+      options,
+      false,
+      exts
+    );
 
   // ── ArrayBuffer / SharedArrayBuffer ─────────────────────────────────────────
   if (
@@ -154,19 +205,24 @@ function _fromJS(
     return new CborMap(
       [...value].map(
         ([k, v]) =>
-          [fromJS(k, options), fromJS(v, options)] as [CborItem, CborItem]
+          [
+            _fromJS(k, options, true, exts),
+            _fromJS(v, options, true, exts),
+          ] as [CborItem, CborItem]
       )
     );
   }
 
   if (Array.isArray(value)) {
-    return new CborArray(value.map((item) => fromJS(item, options)));
+    return new CborArray(
+      value.map((item) => _fromJS(item, options, true, exts))
+    );
   }
 
   if (typeof value === 'object') {
     const entries: [CborItem, CborItem][] = [];
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      entries.push([new CborTextString(k), fromJS(v, options)]);
+      entries.push([new CborTextString(k), _fromJS(v, options, true, exts)]);
     }
     return new CborMap(entries);
   }
@@ -202,10 +258,11 @@ export function _applyReplacer(
   extensions?: readonly CborExtension[],
   undefinedOmits?: boolean
 ): unknown {
-  const allExts: readonly CborExtension[] = [
+  // Only isJSType hooks are consulted below; filter once, not per node.
+  const jsTypeExts: readonly CborExtension[] = [
     ...(extensions ?? []),
     ...BUILTIN_EXTENSIONS,
-  ];
+  ].filter((ext) => ext.isJSType !== undefined);
 
   /** True when a replacer/reviver result should cause the entry to be dropped. */
   function _omits(v: unknown): boolean {
@@ -227,7 +284,7 @@ export function _applyReplacer(
       // Built-in types pass through so fromJS can handle them natively.
       if (_isNativelyHandled(v as object)) return v;
       // Extension-owned values pass through so fromJS can handle them natively.
-      if (allExts.some((ext) => ext.isJSType?.(v))) return v;
+      if (jsTypeExts.some((ext) => ext.isJSType!(v))) return v;
       // Plain objects only: honor toJSON() first (matches JSON.stringify semantics).
       const proto = Object.getPrototypeOf(v as object) as unknown;
       if (proto === Object.prototype || proto === null) {
@@ -285,7 +342,7 @@ export function _applyReplacer(
       // Built-in types pass through to fromJS unchanged.
       if (_isNativelyHandled(val as object)) return val;
       // Extension-owned values pass through so fromJS can handle them natively.
-      if (allExts.some((ext) => ext.isJSType?.(val))) return val;
+      if (jsTypeExts.some((ext) => ext.isJSType!(val))) return val;
       const result: Record<string, unknown> = {};
       for (const k of Object.keys(val as object)) {
         const child = applyFn((val as Record<string, unknown>)[k], k, val);
