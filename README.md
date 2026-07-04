@@ -3,6 +3,8 @@
 TypeScript library for converting between [CBOR](#specifications),
 [CDN (CBOR-EDN)](#specifications), and JavaScript values.
 
+![Relationship between CBOR, CDN, and JavaScript values](./assets/cbor-cdn-js.png)
+
 A live playground is available at **https://cbor.tech/cbor/**.
 
 This package exposes the `CBOR` facade plus a separate AST entrypoint for the
@@ -438,6 +440,62 @@ console.log(text);
 // DT'2026-05-06T00:00:00Z'
 ```
 
+## String Concatenation and Indefinite-Length Strings
+
+The `t1` / `b1` / `ilbs` / `ilts` application extensions from
+draft-ietf-cbor-edn-literals-26 (§3.4 / §3.5) are enabled by default.
+
+`t1<<...>>` and `b1<<...>>` join (text or byte) string arguments from left to
+right into a single text string (`t1`) or byte string (`b1`). Arguments may
+also be ellipses (`...`) to elide parts of a string.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const text = CBOR.fromCDN('t1<<"Hello ", "world">>');
+console.log(text.toCDN({ appStrings: false }));
+// "Hello world"
+
+const bytes = CBOR.fromCDN("b1<<'Hello ', h'776f726c64'>>");
+console.log(bytes.toCDN({ appStrings: false }));
+// 'Hello world'
+```
+
+`ilbs<<...>>` / `ilts<<...>>` build an indefinite-length byte / text string
+with one chunk per argument, honoring encoding indicators on each argument.
+They replace the deprecated `(_ chunk, ...)` streamstring syntax for new CDN
+documents; this library keeps accepting the legacy syntax on input.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const v = CBOR.fromCDN("ilbs<<'Hello ', 'world'>>");
+console.log(v.toCDN({ appStrings: false }));
+// (_ 'Hello ', 'world')
+```
+
+> [!NOTE]
+> The identifiers `t1` and `b1` are explicitly provisional in draft-26 and
+> may be renamed by the CBOR working group.
+
+## float
+
+Interprets a hex bit-pattern as an IEEE 754 floating-point value
+(draft-ietf-cbor-edn-literals-26 §3.7). Enabled by default.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const v = CBOR.fromCDN("float'7e00'");
+console.log(v.toCDN({ appStrings: false }));
+// NaN
+
+// Interpret bytes as float bits
+const v2 = CBOR.fromCDN("float<<h'3f800000'>>");
+console.log(v2.toCDN({ appStrings: false }));
+// 1.0_2
+```
+
 ## Optional Extensions
 
 This package includes several bundled extensions that are not enabled by
@@ -463,26 +521,6 @@ console.log(v1.toCDN({ appStrings: false }));
 const v2 = CBOR.fromCDN("h32'00P00'", { extensions: [h32] });
 console.log(v2.toCDN({ appStrings: false }));
 // h'003200'
-```
-
-### float
-
-Interprets a hex bit-pattern as an IEEE 754 floating-point value. This
-extension is described in
-[draft-bormann-cbor-edn-app-ext](https://datatracker.ietf.org/doc/draft-bormann-cbor-edn-app-ext/)
-and also used in [cbor-test-vectors](https://github.com/cbor-wg/cbor-test-vectors).
-
-```ts
-import { CBOR, float } from '@cbortech/cbor';
-
-const v = CBOR.fromCDN("float'7e00'", { extensions: [float] });
-console.log(v.toCDN({ appStrings: false }));
-// NaN
-
-// Interpret bytes as float bits
-const v2 = CBOR.fromCDN("float<<h'3f800000'>>", { extensions: [float] });
-console.log(v2.toCDN({ appStrings: false }));
-// 1.0_2
 ```
 
 ### same
@@ -736,6 +774,22 @@ This library targets:
 - [CBOR, RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)
 - [Concise Diagnostic Notation (CDN), draft-ietf-cbor-edn-literals-25](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/)
 
+On top of draft -25, this library already incorporates parts of
+[draft -26](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/26/):
+
+- the `t1` / `b1` string-concatenation extensions (§3.4)
+- the `ilbs` / `ilts` indefinite-length string extensions (§3.5)
+- the `float` extension as a default extension (§3.7)
+- the draft-26 raw-string delimiter and trimming rules (§2.5.4): the closing
+  delimiter must have exactly as many backquotes as the opening one, and the
+  space-trimming rule applies to all delimiter lengths
+
+The legacy `+` string-concatenation syntax (removed in draft -26) and the
+`(_ ...)` streamstring syntax (deprecated in draft -26) are still accepted.
+Note that the CDN specification is still an Internet-Draft and may continue
+to change (for example, the extension names `t1` and `b1` are explicitly
+provisional).
+
 CDN is a human-readable text notation for CBOR data. It is useful for
 examples, test vectors, debugging, fixtures, and configuration-like files where
 raw CBOR bytes would be hard to read.
@@ -748,8 +802,6 @@ application literals like `dt'2026-05-06T00:00:00Z'`.
 CDN is a superset of JSON and JSONC, so ordinary JSON data and
 commented JSON-style data can be parsed and formatted as CDN without
 special handling.
-
-CDN is still an Internet-Draft rather than a widely deployed RFC.
 
 ## License
 
