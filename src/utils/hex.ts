@@ -42,6 +42,27 @@ export function bytesToHex(bytes: Uint8Array): string {
   return out;
 }
 
+// Uppercase table for the annotated hex-dump format (RFC 8949 §3 style).
+const HEX_DIGITS_UPPER = Array.from({ length: 256 }, (_, i) =>
+  i.toString(16).toUpperCase().padStart(2, '0')
+);
+
+/** Encode one byte as two uppercase hex digits (e.g. 10 → "0A"). */
+export function byteToHexUpper(b: number): string {
+  return HEX_DIGITS_UPPER[b]!;
+}
+
+/** Encode bytes as space-separated uppercase hex (e.g. "0A FF"), the
+ *  per-line format used by `toHexDump()`. */
+export function bytesToSpacedHexUpper(bytes: Uint8Array): string {
+  let out = '';
+  for (let i = 0; i < bytes.length; i++) {
+    if (i > 0) out += ' ';
+    out += HEX_DIGITS_UPPER[bytes[i]!];
+  }
+  return out;
+}
+
 /**
  * Decode a hex string to bytes.
  *

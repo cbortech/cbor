@@ -11,6 +11,7 @@ import type {
 import { CBOR_OMIT } from '../types';
 import { convertCommentText } from '../cdn/serialize-utils';
 import { CborWriter } from '../cbor/encode';
+import { bytesToSpacedHexUpper } from '../utils/hex';
 
 /** @internal One line of an annotated hex dump. */
 export interface AnnotatedLine {
@@ -222,9 +223,7 @@ export abstract class CborItem {
    * open/close lines with recursively collected children.
    */
   _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
-    const hex = Array.from(this._toCBOR(), (b) =>
-      b.toString(16).toUpperCase().padStart(2, '0')
-    ).join(' ');
+    const hex = bytesToSpacedHexUpper(this._toCBOR());
     return [{ depth, hex, comment: this._toCDN(options, 0) }];
   }
 }

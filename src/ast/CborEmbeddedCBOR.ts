@@ -15,6 +15,7 @@ import {
   resolveEiSuffix,
   canonicalEncodingWidth,
 } from '../cdn/serialize-utils';
+import { bytesToSpacedHexUpper } from '../utils/hex';
 
 /**
  * CBOR Sequence Literal (§2.5.6) — `<<item, item, ...>>`.
@@ -87,17 +88,14 @@ export class CborEmbeddedCBOR extends CborItem {
   }
 
   override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
-    const toHex = (bytes: Uint8Array) =>
-      Array.from(bytes, (b) =>
-        b.toString(16).toUpperCase().padStart(2, '0')
-      ).join(' ');
-
     const content = this._content();
     const n = content.length;
     const lines: AnnotatedLine[] = [
       {
         depth,
-        hex: toHex(writeHead(MT_BYTES, BigInt(n), this.encodingWidth)),
+        hex: bytesToSpacedHexUpper(
+          writeHead(MT_BYTES, BigInt(n), this.encodingWidth)
+        ),
         comment: `Embedded CBOR sequence, ${n} byte${n !== 1 ? 's' : ''}`,
       },
     ];

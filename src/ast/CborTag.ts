@@ -13,6 +13,7 @@ import {
   resolveEiSuffix,
   canonicalEncodingWidth,
 } from '../cdn/serialize-utils';
+import { bytesToSpacedHexUpper } from '../utils/hex';
 
 /** CBOR Major Type 6 — tagged data item. */
 export class CborTag extends CborItem {
@@ -46,14 +47,12 @@ export class CborTag extends CborItem {
   }
 
   override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
-    const toHex = (bytes: Uint8Array) =>
-      Array.from(bytes, (b) =>
-        b.toString(16).toUpperCase().padStart(2, '0')
-      ).join(' ');
     const lines: AnnotatedLine[] = [
       {
         depth,
-        hex: toHex(writeHead(MT_TAG, this.tag, this.encodingWidth)),
+        hex: bytesToSpacedHexUpper(
+          writeHead(MT_TAG, this.tag, this.encodingWidth)
+        ),
         comment: `Tag ${this.tag}`,
       },
     ];

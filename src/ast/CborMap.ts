@@ -28,6 +28,7 @@ import {
   resolveEiSuffix,
   canonicalEncodingWidth,
 } from '../cdn/serialize-utils';
+import { byteToHexUpper, bytesToSpacedHexUpper } from '../utils/hex';
 
 /** CBOR Major Type 5 — map (definite- or indefinite-length). */
 export class CborMap extends CborItem {
@@ -143,18 +144,11 @@ export class CborMap extends CborItem {
   }
 
   override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
-    const byteHex = (b: number) =>
-      b.toString(16).toUpperCase().padStart(2, '0');
-    const toHex = (bytes: Uint8Array) =>
-      Array.from(bytes, (b) =>
-        b.toString(16).toUpperCase().padStart(2, '0')
-      ).join(' ');
-
     if (this.indefiniteLength) {
       const lines: AnnotatedLine[] = [
         {
           depth,
-          hex: byteHex((MT_MAP << 5) | AI_INDEFINITE),
+          hex: byteToHexUpper((MT_MAP << 5) | AI_INDEFINITE),
           comment: 'Start indefinite-length map',
         },
       ];
@@ -162,13 +156,17 @@ export class CborMap extends CborItem {
         lines.push(...k._toHexDump(depth + 1, options));
         lines.push(...v._toHexDump(depth + 1, options));
       }
-      lines.push({ depth, hex: byteHex(BREAK_CODE), comment: '"break"' });
+      lines.push({
+        depth,
+        hex: byteToHexUpper(BREAK_CODE),
+        comment: '"break"',
+      });
       return lines;
     }
     const lines: AnnotatedLine[] = [
       {
         depth,
-        hex: toHex(
+        hex: bytesToSpacedHexUpper(
           writeHead(MT_MAP, BigInt(this.entries.length), this.encodingWidth)
         ),
         comment: `Map of length ${this.entries.length}`,
