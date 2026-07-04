@@ -53,6 +53,22 @@ function aiToNonCanonicalEW(
   return undefined;
 }
 
+/**
+ * Number twin of {@link aiToNonCanonicalEW}, for the length/count arguments
+ * read by {@link readLength}.  Values ≥ 2^53 arrive rounded, but they are far
+ * above every threshold here, so the result is unaffected.
+ */
+function aiToNonCanonicalEWLen(
+  ai: number,
+  value: number
+): EncodingWidth | undefined {
+  if (ai === AI_1BYTE && value <= 23) return 0;
+  if (ai === AI_2BYTE && value <= 0xff) return 1;
+  if (ai === AI_4BYTE && value <= 0xffff) return 2;
+  if (ai === AI_8BYTE && value <= 0xffff_ffff) return 3;
+  return undefined;
+}
+
 const textDecoderStrict = new TextDecoder('utf-8', {
   fatal: true,
   ignoreBOM: true,
@@ -258,6 +274,45 @@ function readArgument(
   }
 }
 
+/**
+ * Read the CBOR argument as a JS number — used for the length/count of major
+ * types 2–5, where {@link readArgument}'s bigint would immediately be
+ * converted back via Number().  Avoids a BigInt allocation per non-immediate
+ * header on the decode hot path.
+ *
+ * An 8-byte argument ≥ 2^53 loses precision exactly as Number(bigint) would
+ * (both round to nearest double); such lengths always exceed any real input,
+ * so the subsequent bounds check fails identically either way.
+ */
+function readLength(
+  view: DataView,
+  offset: number,
+  ai: number
+): { value: number; nextOffset: number } {
+  if (ai <= 23) {
+    return { value: ai, nextOffset: offset };
+  }
+  switch (ai) {
+    case AI_1BYTE:
+      if (offset + 1 > view.byteLength) decodeError('unexpected end of input');
+      return { value: view.getUint8(offset), nextOffset: offset + 1 };
+    case AI_2BYTE:
+      if (offset + 2 > view.byteLength) decodeError('unexpected end of input');
+      return { value: view.getUint16(offset, false), nextOffset: offset + 2 };
+    case AI_4BYTE:
+      if (offset + 4 > view.byteLength) decodeError('unexpected end of input');
+      return { value: view.getUint32(offset, false), nextOffset: offset + 4 };
+    case AI_8BYTE: {
+      if (offset + 8 > view.byteLength) decodeError('unexpected end of input');
+      const hi = view.getUint32(offset, false);
+      const lo = view.getUint32(offset + 4, false);
+      return { value: hi * 0x1_0000_0000 + lo, nextOffset: offset + 8 };
+    }
+    default:
+      decodeError(`reserved additional info value: ${ai}`);
+  }
+}
+
 // ─── Core recursive decoder ───────────────────────────────────────────────────
 
 type DecodeResult = { value: CborItem; nextOffset: number };
@@ -385,13 +440,12 @@ function decodeItemInner(
         );
         return { value: new CborIndefiniteByteString(chunks), nextOffset };
       }
-      const { value: len, nextOffset: dataOffset } = readArgument(
+      const { value: length, nextOffset: dataOffset } = readLength(
         view,
         offset,
         ai
       );
-      const length = Number(len);
-      const encodingWidth = aiToNonCanonicalEW(ai, len);
+      const encodingWidth = aiToNonCanonicalEWLen(ai, length);
       if (dataOffset + length > view.byteLength)
         decodeError('byte string extends beyond input');
       const bytes = new Uint8Array(
@@ -418,13 +472,12 @@ function decodeItemInner(
         );
         return { value: new CborIndefiniteTextString(chunks), nextOffset };
       }
-      const { value: len, nextOffset: dataOffset } = readArgument(
+      const { value: length, nextOffset: dataOffset } = readLength(
         view,
         offset,
         ai
       );
-      const length = Number(len);
-      const encodingWidth = aiToNonCanonicalEW(ai, len);
+      const encodingWidth = aiToNonCanonicalEWLen(ai, length);
       if (dataOffset + length > view.byteLength)
         decodeError('text string extends beyond input');
       const bytes = new Uint8Array(
@@ -479,13 +532,12 @@ function decodeItemInner(
           nextOffset: pos,
         };
       }
-      const { value: count, nextOffset: itemsStart } = readArgument(
+      const { value: length, nextOffset: itemsStart } = readLength(
         view,
         offset,
         ai
       );
-      const length = Number(count);
-      const encodingWidth = aiToNonCanonicalEW(ai, count);
+      const encodingWidth = aiToNonCanonicalEWLen(ai, length);
       const items: CborItem[] = [];
       let pos = itemsStart;
       for (let i = 0; i < length; i++) {
@@ -529,13 +581,12 @@ function decodeItemInner(
         for (const w of indefMapWarnings) addWarning(indefMapNode, w);
         return { value: indefMapNode, nextOffset: pos };
       }
-      const { value: count, nextOffset: entriesStart } = readArgument(
+      const { value: length, nextOffset: entriesStart } = readLength(
         view,
         offset,
         ai
       );
-      const length = Number(count);
-      const encodingWidth = aiToNonCanonicalEW(ai, count);
+      const encodingWidth = aiToNonCanonicalEWLen(ai, length);
       const entries: [CborItem, CborItem][] = [];
       const seenKeys = new Set<string>();
       const mapWarnings: DecodeWarning[] = [];
