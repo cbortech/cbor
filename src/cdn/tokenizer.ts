@@ -6,6 +6,7 @@
  */
 
 import { CdnSyntaxError } from './errors';
+import { bytesToHex } from '../utils/hex';
 
 export type TokenType =
   | 'INTEGER'
@@ -57,6 +58,17 @@ export interface Token {
   endOffset: number;
   /** Only set when type === 'APP_STRING': the extension prefix (e.g. 'dt', 'DT'). */
   appPrefix?: string;
+}
+
+/**
+ * @internal
+ * SQSTR tokens carry the UTF-8 payload the tokenizer already encoded, so the
+ * parser does not decode the hex `value` back into the same bytes.  The
+ * property is non-enumerable and deliberately absent from the public `Token`
+ * type: the tokenize() API shape (keys, JSON.stringify, spread) is unchanged.
+ */
+export interface SqstrToken extends Token {
+  readonly _sqstrBytes?: Uint8Array;
 }
 
 export interface TokenizerOptions {
@@ -1409,10 +1421,12 @@ export class Tokenizer {
         // 'text' → UTF-8 encoded byte string (major type 2)
         const strVal = this._readStringContent("'");
         const utf8 = textEncoder.encode(strVal);
-        const hex = Array.from(utf8, (b) =>
-          b.toString(16).padStart(2, '0')
-        ).join('');
-        return this._tok('SQSTR', hex, line, col);
+        const tok = this._tok('SQSTR', bytesToHex(utf8), line, col);
+        // Attach the payload for the parser (see SqstrToken).  defineProperty
+        // keeps it out of keys/JSON/spread; SQSTR is rare enough that the
+        // defineProperty cost does not matter.
+        Object.defineProperty(tok, '_sqstrBytes', { value: utf8 });
+        return tok;
       }
     }
 
