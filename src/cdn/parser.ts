@@ -848,15 +848,17 @@ class CDNParser {
     }
 
     if (!hasEllipsis) {
-      // No ellipsis — join all text fragments into a single CborTextString
-      const joined = parts.map((p) => ('text' in p ? p.text : '')).join('');
+      // No ellipsis — join all text fragments into a single CborTextString,
+      // keeping the part boundaries for `preserveConcatenation`.
+      const texts = parts.map((p) => ('text' in p ? p.text : ''));
+      const joined = texts.join('');
       const ew = this.consumeEncodingIndicator(() =>
         BigInt(textEncoder.encode(joined).length)
       );
-      return new CborTextString(
-        joined,
-        ew !== undefined ? { encodingWidth: ew } : undefined
-      );
+      return new CborTextString(joined, {
+        ednParts: texts,
+        ...(ew !== undefined ? { encodingWidth: ew } : {}),
+      });
     }
 
     // Build 888([...]) with consolidated adjacent text fragments
@@ -952,9 +954,9 @@ class CDNParser {
 
     // Concatenation chain — may include ellipsis
     let hasEllipsis = false;
-    const parts: Array<{ bytes: Uint8Array } | { ellipsis: true }> = [
-      { bytes: first },
-    ];
+    const parts: Array<
+      { bytes: Uint8Array; source?: string } | { ellipsis: true }
+    > = [{ bytes: first, source: firstSource }];
 
     while (this.t.peek().type === 'PLUS') {
       this.t.consume(); // +
@@ -976,7 +978,7 @@ class CDNParser {
         }
       } else if (this._isBytesToken(next.type)) {
         this.t.consume();
-        parts.push({ bytes: this._decodeBytesToken(next) });
+        parts.push({ bytes: this._decodeBytesToken(next), source: next.raw });
       } else if (next.type === 'TSTR' || next.type === 'RAWSTRING') {
         // §5.1: when a byte string leads, the right-hand side must also be a
         // byte string.  Text strings are only allowed on the right of a
@@ -997,15 +999,16 @@ class CDNParser {
     }
 
     if (!hasEllipsis) {
-      const allBytes = parts.map((p) =>
-        'bytes' in p ? p.bytes : new Uint8Array(0)
+      const byteParts = parts.map((p) =>
+        'bytes' in p ? p : { bytes: new Uint8Array(0) }
       );
-      const concat = this._concatBytes(allBytes);
+      const concat = this._concatBytes(byteParts.map((p) => p.bytes));
       const ew = this.consumeEncodingIndicator(() => BigInt(concat.length));
-      return new CborByteString(
-        concat,
-        ew !== undefined ? { encodingWidth: ew } : undefined
-      );
+      return new CborByteString(concat, {
+        ednEncoding: this._tokenTypeToCdnEncoding(firstType),
+        ednParts: byteParts,
+        ...(ew !== undefined ? { encodingWidth: ew } : {}),
+      });
     }
 
     // Build 888([...]) with consolidated adjacent byte fragments

@@ -87,10 +87,10 @@ describe('README examples', () => {
     );
   });
 
-  test('textStringFormat splits text strings at newlines', () => {
+  test('textStringSplit splits text strings at newlines', () => {
     const text = CBOR.format('{"text": "line1\\nline2\\nline3"}', {
       indent: 2,
-      textStringFormat: ['newline'],
+      textStringSplit: 'newline',
     });
 
     expect(text).toBe(
@@ -102,10 +102,10 @@ describe('README examples', () => {
     );
   });
 
-  test('textStringFormat splits text strings containing CDN', () => {
+  test('textStringSplit splits text strings containing CDN', () => {
     const text = CBOR.format('{"cdn": "[1,2,3]"}', {
       indent: 2,
-      textStringFormat: ['cdn'],
+      textStringSplit: 'cdn',
     });
 
     expect(text).toBe(
@@ -117,6 +117,19 @@ describe('README examples', () => {
         '    "]"\n' +
         '}'
     );
+  });
+
+  test('preserveConcatenation keeps + string concatenation', () => {
+    expect(CBOR.format('"a" + "b"')).toBe('"ab"');
+    expect(CBOR.format('"a" + "b"', { preserveConcatenation: true })).toBe(
+      '"a" + "b"'
+    );
+    expect(
+      CBOR.format("h'68' + b64'aQ'", {
+        preserveConcatenation: true,
+        preserveByteString: true,
+      })
+    ).toBe("h'68' + b64'aQ'");
   });
 
   test('AST item methods', () => {

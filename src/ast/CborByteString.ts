@@ -9,8 +9,17 @@ import {
 import {
   serializeBytes,
   resolveEiSuffix,
+  resolveIndent,
+  joinConcatParts,
   canonicalEncodingWidth,
 } from '../cdn/serialize-utils';
+
+/** One part of a byte string parsed from a CDN `+` concatenation chain. */
+export interface CborByteStringPart {
+  bytes: Uint8Array;
+  /** Original literal source text, when the part came from a byte string token. */
+  source?: string;
+}
 
 /** CBOR Major Type 2 — definite-length byte string. */
 export class CborByteString extends CborItem {
@@ -20,6 +29,8 @@ export class CborByteString extends CborItem {
   readonly ednEncoding: 'hex' | 'base64' | 'base64url' | 'base32' | 'base32hex';
   encodingWidth: EncodingWidth | undefined;
   readonly ednSource: string | undefined;
+  /** Part boundaries of the original `+` concatenation chain, if any. */
+  readonly ednParts: readonly CborByteStringPart[] | undefined;
 
   constructor(
     value: Uint8Array,
@@ -27,6 +38,7 @@ export class CborByteString extends CborItem {
       ednEncoding?: 'hex' | 'base64' | 'base64url' | 'base32' | 'base32hex';
       encodingWidth?: EncodingWidth;
       ednSource?: string;
+      ednParts?: readonly CborByteStringPart[];
     }
   ) {
     super();
@@ -34,6 +46,7 @@ export class CborByteString extends CborItem {
     this.ednEncoding = options?.ednEncoding ?? 'hex';
     this.encodingWidth = options?.encodingWidth;
     this.ednSource = options?.ednSource;
+    this.ednParts = options?.ednParts;
   }
 
   override _encodeTo(writer: CborWriter, _options?: ToCBOROptions): void {
@@ -42,6 +55,24 @@ export class CborByteString extends CborItem {
   }
 
   _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
+    if (
+      options?.preserveConcatenation &&
+      this.ednParts !== undefined &&
+      this.ednParts.length > 1
+    ) {
+      const suffix = resolveEiSuffix(options, this.encodingWidth, () =>
+        canonicalEncodingWidth(BigInt(this.value.length))
+      );
+      let encoding = options?.bstrEncoding ?? this.ednEncoding;
+      if (options?.appStrings === false && encoding !== 'hex') encoding = 'hex';
+      const literals = this.ednParts.map((part) =>
+        options?.preserveByteString && part.source !== undefined
+          ? part.source
+          : serializeBytes(part.bytes, encoding, options?.sqstr)
+      );
+      literals[literals.length - 1] += suffix;
+      return joinConcatParts(literals, resolveIndent(options), _depth);
+    }
     if (options?.preserveByteString && this.ednSource !== undefined) {
       // App-string byte strings (e.g. b32'...'_1) embed the EI inside ednSource.
       // Regular byte strings (h'...', b64'...') store EI separately in encodingWidth.
