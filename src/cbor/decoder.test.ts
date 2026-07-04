@@ -733,6 +733,22 @@ describe('strict / onWarning option', () => {
     expect(warnings[0].message).toContain('duplicate map key');
   });
 
+  test('strict: false: indefinite byte-string key equal to definite byte-string key is detected as duplicate', () => {
+    // {h'0102': "a", (_ h'01', h'02'): "b"} — both fingerprint as b"0102"
+    // a2 42 01 02 61 61 5f 41 01 41 02 ff 61 62
+    const warnings: { message: string; offset: number }[] = [];
+    const result = decodeCBOR(
+      hex('a2 42 01 02 61 61 5f 41 01 41 02 ff 61 62'),
+      {
+        strict: false,
+        onWarning: (w) => warnings.push(w),
+      }
+    ) as CborMap;
+    expect(result).toBeInstanceOf(CborMap);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('duplicate map key');
+  });
+
   test('strict: false: indefinite text key equal to definite text key is detected as duplicate', () => {
     // {"ab": 1, indefinite("a"+"b"): 2} — both fingerprint as ["t","ab"]
     // a2 62 61 62 01 7f 61 61 61 62 ff 02

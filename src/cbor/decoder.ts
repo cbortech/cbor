@@ -13,6 +13,7 @@ import { CborTag } from '../ast/CborTag';
 import { CborFloat } from '../ast/CborFloat';
 import { CborSimple } from '../ast/CborSimple';
 import { float16BitsToFloat64 } from '../utils/float16';
+import { bytesToHex } from '../utils/hex';
 import {
   MT_UINT,
   MT_NINT,
@@ -111,23 +112,16 @@ function addWarning(node: CborItem, warning: DecodeWarning): void {
  * avoids the exponential character-escaping blowup that occurs when
  * pre-serialised JSON strings are embedded inside further JSON.stringify calls.
  */
-function bytesToHexFingerprint(bytes: Uint8Array): string {
-  let h = '';
-  for (const b of bytes) h += b.toString(16).padStart(2, '0');
-  return h;
-}
-
 function fingerprintKeyVal(key: CborItem): unknown {
   if (key instanceof CborUint) return ['u', String(key.value)];
   if (key instanceof CborNint) return ['n', String(key.value)];
   if (key instanceof CborTextString) return ['t', key.value];
   if (key instanceof CborIndefiniteTextString)
     return ['t', key.chunks.map((c) => c.value).join('')];
-  if (key instanceof CborByteString)
-    return ['b', bytesToHexFingerprint(key.value)];
+  if (key instanceof CborByteString) return ['b', bytesToHex(key.value)];
   if (key instanceof CborIndefiniteByteString) {
     let h = '';
-    for (const chunk of key.chunks) h += bytesToHexFingerprint(chunk.value);
+    for (const chunk of key.chunks) h += bytesToHex(chunk.value);
     return ['b', h];
   }
   if (key instanceof CborFloat) {
@@ -159,10 +153,7 @@ function fingerprintKeyVal(key: CborItem): unknown {
   if (key instanceof CborTag)
     return ['G', String(key.tag), fingerprintKeyVal(key.content)];
   // Fallback for any remaining AST node (e.g. CborEmbeddedCBOR): canonical CBOR bytes.
-  const bytes = key.toCBOR();
-  let hex = '';
-  for (const b of bytes) hex += b.toString(16).padStart(2, '0');
-  return ['c', hex];
+  return ['c', bytesToHex(key.toCBOR())];
 }
 
 function fingerprintKey(key: CborItem): string {
@@ -178,11 +169,10 @@ function fingerprintKey(key: CborItem): string {
     for (const c of key.chunks) s += c.value;
     return s;
   }
-  if (key instanceof CborByteString)
-    return 'b' + bytesToHexFingerprint(key.value);
+  if (key instanceof CborByteString) return 'b' + bytesToHex(key.value);
   if (key instanceof CborIndefiniteByteString) {
     let s = 'b';
-    for (const chunk of key.chunks) s += bytesToHexFingerprint(chunk.value);
+    for (const chunk of key.chunks) s += bytesToHex(chunk.value);
     return s;
   }
   if (key instanceof CborFloat) {
