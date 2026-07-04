@@ -23,6 +23,21 @@ export function indentOf(indentStr: string, depth: number): string {
   return indentStr.repeat(depth);
 }
 
+/**
+ * Join pre-serialized string-concatenation part literals with `+`.
+ *
+ * Single-line (` + `) when indent is disabled; otherwise each continuation
+ * part starts on its own line, indented one level deeper than the owner.
+ */
+export function joinConcatParts(
+  literals: readonly string[],
+  indentStr: string | null,
+  depth: number
+): string {
+  if (indentStr === null) return literals.join(' + ');
+  return literals.join(` +\n${indentOf(indentStr, depth + 1)}`);
+}
+
 // ─── Comment helpers ─────────────────────────────────────────────────────────
 
 export interface Commented {

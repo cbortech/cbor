@@ -212,7 +212,7 @@ console.log(text);
 
 ### テキスト文字列を分割して整形する
 
-`textStringFormat` を使うと、長いテキスト文字列を CDN の文字列連結として分割できます。
+`textStringSplit` を使うと、長いテキスト文字列を CDN の文字列連結として分割できます。
 このオプションは `indent` を指定したときに適用されます。
 
 ```ts
@@ -220,7 +220,7 @@ import { CBOR } from '@cbortech/cbor';
 
 const text = CBOR.format('{"text": "line1\\nline2\\nline3"}', {
   indent: 2,
-  textStringFormat: ['newline'],
+  textStringSplit: 'newline',
 });
 
 console.log(text);
@@ -231,14 +231,15 @@ console.log(text);
 // }
 ```
 
-文字列の中身が CDN や JSON 風の内容なら、`cdn` を使えます。
+文字列の中身が CDN や JSON 風の内容なら、`'cdn'` を使えます
+(`'cdn+newline'` で両方の分割を組み合わせられます)。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
 const text = CBOR.format('{"cdn": "[1,2,3]"}', {
   indent: 2,
-  textStringFormat: ['cdn'],
+  textStringSplit: 'cdn',
 });
 
 console.log(text);
@@ -249,6 +250,29 @@ console.log(text);
 //       "3" +
 //     "]"
 // }
+```
+
+### `+` による文字列連結を保持する
+
+デフォルトでは、`CBOR.format()` は `+` による文字列連結を 1 つのリテラルに
+結合します。`preserveConcatenation` を指定すると、テキスト文字列・バイト文字列とも
+元の連結の区切りを保持します。`preserveByteString` を併用すると、バイト文字列の
+各パートの元の表記も保持されます。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+CBOR.format('"a" + "b"');
+// '"ab"'
+
+CBOR.format('"a" + "b"', { preserveConcatenation: true });
+// '"a" + "b"'
+
+CBOR.format("h'68' + b64'aQ'", {
+  preserveConcatenation: true,
+  preserveByteString: true,
+});
+// "h'68' + b64'aQ'"
 ```
 
 ## AST を扱う

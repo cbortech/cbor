@@ -273,9 +273,10 @@ describe('CBOR.fromCDNSeq', () => {
   // ── Comment preservation (preserveComments) ───────────────────────────────
 
   describe('preserveComments', () => {
-    const roundtrip = (text: string): string[] => [
-      ...CBOR.fromCDNSeq(text, { preserveComments: true }),
-    ].map((item) => item.toCDN({ preserveComments: true }));
+    const roundtrip = (text: string): string[] =>
+      [...CBOR.fromCDNSeq(text, { preserveComments: true })].map((item) =>
+        item.toCDN({ preserveComments: true })
+      );
 
     test('leading comment before the first item is preserved', () => {
       expect(roundtrip('# top\n1')).toEqual(['# top\n1']);

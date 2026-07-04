@@ -103,15 +103,14 @@ export function readFormatOptions(): FromCDNOptions & ToCDNOptions {
   };
   if (indentRaw !== '')
     options.indent = indentRaw === 'tab' ? '\t' : Number(indentRaw);
-  const tsfmt = sel('opt-tsfmt');
-  if (tsfmt !== '')
-    options.textStringFormat = tsfmt.split(
-      ','
-    ) as ToCDNOptions['textStringFormat'];
+  const textStringSplit = sel('opt-tssplit') as ToCDNOptions['textStringSplit'];
+  if (textStringSplit !== '') options.textStringSplit = textStringSplit;
   const encInd = sel('opt-enc-ind') as ToCDNOptions['encodingIndicators'];
   if (encInd !== 'auto') options.encodingIndicators = encInd;
   if ((document.getElementById('opt-comments') as HTMLInputElement).checked)
     options.preserveComments = true;
+  if ((document.getElementById('opt-concat') as HTMLInputElement).checked)
+    options.preserveConcatenation = true;
   return options;
 }
 
