@@ -212,15 +212,15 @@ console.log(text);
 
 ### テキスト文字列を分割して整形する
 
-`textStringSplit` を使うと、長いテキスト文字列を CDN の文字列連結として分割できます。
-このオプションは `indent` を指定したときに適用されます。
+`splitNewline` を使うと、長いテキスト文字列を改行文字の位置で CDN の文字列連結として
+分割できます。このオプションは `indent` を指定したときに適用されます。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
 const text = CBOR.format('{"text": "line1\\nline2\\nline3"}', {
   indent: 2,
-  textStringSplit: 'newline',
+  splitNewline: true,
 });
 
 console.log(text);
@@ -231,15 +231,16 @@ console.log(text);
 // }
 ```
 
-文字列の中身が CDN や JSON 風の内容なら、`'cdn'` を使えます
-(`'cdn+newline'` で両方の分割を組み合わせられます)。
+文字列の中身が CDN や JSON 風の内容なら、`splitCdn` で周囲の CDN と同じように
+構造に応じた改行とインデントを入れて整形できます。両方のオプションは併用でき、
+配列で指定する従来の `textStringFormat` オプションを置き換えます(非推奨)。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
 const text = CBOR.format('{"cdn": "[1,2,3]"}', {
   indent: 2,
-  textStringSplit: 'cdn',
+  splitCdn: true,
 });
 
 console.log(text);
@@ -258,6 +259,10 @@ console.log(text);
 結合します。`preserveConcatenation` を指定すると、テキスト文字列・バイト文字列とも
 元の連結の区切りを保持します。`preserveByteString` を併用すると、バイト文字列の
 各パートの元の表記も保持されます。
+
+分割オプションとの関係: 文字列の中身が CDN としてパースできる場合は `splitCdn` が
+`preserveConcatenation` より優先されます。`splitNewline` は共存し、保持した各パートに
+改行文字が含まれていればさらにそこで分割します。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';

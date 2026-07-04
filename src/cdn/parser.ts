@@ -1272,8 +1272,7 @@ class CDNParser {
 
   /** Parses `(_ chunk, chunk, ...)` — indefinite byte or text string. */
   private parseIndefGroup():
-    | CborIndefiniteByteString
-    | CborIndefiniteTextString {
+    CborIndefiniteByteString | CborIndefiniteTextString {
     this.t.consume(); // (
     const next = this.t.peek();
     if (next.type === 'UNDERSCORE') {

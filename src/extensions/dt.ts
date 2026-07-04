@@ -228,10 +228,7 @@ export class CborEpochDtExtFloat extends CborFloat {
 export class CborTaggedEpochDtExt extends CborTag {
   constructor(
     datetimeOrContent:
-      | string
-      | CborEpochDtExtUint
-      | CborEpochDtExtNint
-      | CborEpochDtExtFloat,
+      string | CborEpochDtExtUint | CborEpochDtExtNint | CborEpochDtExtFloat,
     options?: { encodingWidth?: EncodingWidth }
   ) {
     super(
@@ -249,9 +246,7 @@ export class CborTaggedEpochDtExt extends CborTag {
     // If the inner content has non-canonical encoding, fall back to generic tag
     // notation so the inner EI (e.g. dt'...'_3) is not silently discarded.
     const c = this.content as
-      | CborEpochDtExtUint
-      | CborEpochDtExtNint
-      | CborEpochDtExtFloat;
+      CborEpochDtExtUint | CborEpochDtExtNint | CborEpochDtExtFloat;
     const innerIsNonCanonical =
       c instanceof CborFloat
         ? c.precision !== undefined &&
@@ -274,10 +269,7 @@ export class CborTaggedEpochDtExt extends CborTag {
 export class CborTaggedEpochDtAsDateExt extends CborTaggedEpochDtExt {
   constructor(
     datetimeOrContent:
-      | string
-      | CborEpochDtExtUint
-      | CborEpochDtExtNint
-      | CborEpochDtExtFloat,
+      string | CborEpochDtExtUint | CborEpochDtExtNint | CborEpochDtExtFloat,
     options?: { encodingWidth?: EncodingWidth }
   ) {
     super(datetimeOrContent, options);
@@ -285,9 +277,7 @@ export class CborTaggedEpochDtAsDateExt extends CborTaggedEpochDtExt {
 
   override _toJS(_options?: ToJSOptions): Date {
     const c = this.content as
-      | CborEpochDtExtUint
-      | CborEpochDtExtNint
-      | CborEpochDtExtFloat;
+      CborEpochDtExtUint | CborEpochDtExtNint | CborEpochDtExtFloat;
     const epochMs =
       c instanceof CborFloat ? c.value * 1000 : Number(c.value) * 1000;
     return new Date(epochMs);
@@ -344,9 +334,7 @@ export function createDtExtension(options?: {
     parseTag(tag: bigint, value: CborItem): CborItem | undefined {
       if (tag !== TAG_EPOCH) return undefined;
       let content:
-        | CborEpochDtExtUint
-        | CborEpochDtExtNint
-        | CborEpochDtExtFloat;
+        CborEpochDtExtUint | CborEpochDtExtNint | CborEpochDtExtFloat;
       if (value instanceof CborUint) {
         content = new CborEpochDtExtUint(value.value, {
           encodingWidth: value.encodingWidth,
