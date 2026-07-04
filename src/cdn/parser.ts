@@ -402,7 +402,6 @@ const externalExtensionHint = (name: string, pkg: string): string =>
 const MISSING_EXTENSION_HINTS: ReadonlyMap<string, string> = new Map([
   ['b32', bundledExtensionHint('b32')],
   ['h32', bundledExtensionHint('h32')],
-  ['float', bundledExtensionHint('float')],
   ['same', bundledExtensionHint('same')],
   ['hash', externalExtensionHint('hash', '@cbortech/hash-extension')],
   ['uuid', externalExtensionHint('uuid', '@cbortech/uuid-extension')],

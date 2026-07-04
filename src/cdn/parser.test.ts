@@ -515,9 +515,16 @@ describe('parseCDN — raw string literals (backtick)', () => {
     expect(n.value).toBe('a``b');
   });
 
-  test('excess closing backticks become content (§2.5.3)', () => {
-    // ```a = ``foo````` (3-backtick delimited, 5 closing) → "a = ``foo``"
-    const n = parseCDN('```a = ``foo`````') as CborTextString;
+  test('backtick run longer than the delimiter throws (§2.5.4 alikerawdelim)', () => {
+    // Draft-25 allowed ```a = ``foo````` (excess closing backticks became
+    // content); draft-26 requires the closing delimiter to be exactly as
+    // long as the opening one, so a longer run is an error.
+    expect(() => parseCDN('```a = ``foo`````')).toThrow(SyntaxError);
+  });
+
+  test('trailing-backtick content is notated with the space rule (§2.5.4)', () => {
+    // ``` a = ``foo`` ``` → "a = ``foo``"
+    const n = parseCDN('``` a = ``foo`` ```') as CborTextString;
     expect(n.value).toBe('a = ``foo``');
   });
 
@@ -540,6 +547,26 @@ describe('parseCDN — raw string literals (backtick)', () => {
   test('multi-backtick delimiter strips at most one space on each side', () => {
     const n = parseCDN('``  x  ``') as CborTextString;
     expect(n.value).toBe(' x ');
+  });
+
+  test('space rule applies to single-backtick delimiters too (§2.5.4)', () => {
+    const n = parseCDN('` x `') as CborTextString;
+    expect(n.value).toBe('x');
+  });
+
+  test('space rule requires both a leading and a trailing space (§2.5.4)', () => {
+    expect((parseCDN('`` x``') as CborTextString).value).toBe(' x');
+    expect((parseCDN('``x ``') as CborTextString).value).toBe('x ');
+  });
+
+  test('space rule does not apply after the leading-newline rule (§2.5.4)', () => {
+    // Inner "\n`a` " — newline rule strips the LF; the space rule is skipped.
+    const n = parseCDN('``\n`a` ``') as CborTextString;
+    expect(n.value).toBe('`a` ');
+  });
+
+  test('a single-space inner string is kept as-is', () => {
+    expect((parseCDN('` `') as CborTextString).value).toBe(' ');
   });
 
   // ── Encoding indicator and concatenation ─────────────────────────────────
@@ -2960,7 +2987,6 @@ describe('parseCDN — missing-extension hints', () => {
     ],
     ["b32'AEBAGBA'", 'b32', 'b32', '@cbortech/cbor'],
     ["h32'00P00'", 'h32', 'h32', '@cbortech/cbor'],
-    ["float'7e00'", 'float', 'float', '@cbortech/cbor'],
     ['same<<42, 42>>', 'same', 'same', '@cbortech/cbor'],
   ])('%s hints to enable the %s extension', (text, prefix, name, pkg) => {
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -3028,7 +3054,7 @@ describe('parseCDN — missing-extension hints', () => {
   test('hint is emitted once per prefix per parse', () => {
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      parseCDN("[float'7e00', float'7e00', b32'AEBAGBA']");
+      parseCDN("[h32'00P00', h32'00P00', b32'AEBAGBA']");
       expect(spy).toHaveBeenCalledTimes(2);
     } finally {
       spy.mockRestore();

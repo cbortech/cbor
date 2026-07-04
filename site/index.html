@@ -75,7 +75,13 @@
           rel="noopener"
           >Concise Diagnostic Notation (CDN / CBOR-EDN), draft-25</a
         >
-        — encode, decode, parse, pretty-print, and round-trip with full
+        (incorporating parts of
+        <a
+          href="https://datatracker.ietf.org/doc/html/draft-ietf-cbor-edn-literals-26"
+          target="_blank"
+          rel="noopener"
+          >draft-26</a
+        >) — encode, decode, parse, pretty-print, and round-trip with full
         fidelity. Everything on this page runs in your browser using the library
         itself.
       </p>
@@ -111,8 +117,11 @@
           <strong>Extensible</strong> — built-in app-string extensions:
           <code>dt'…'</code> / <code>DT'…'</code>, <code>ip'…'</code> /
           <code>IP'…'</code>, <code>cri'…'</code> / <code>CRI'…'</code>,
-          <code>b32'…'</code>, <code>h32'…'</code>, <code>float'…'</code>,
-          <code>same'…'</code>. This playground additionally enables
+          <code>t1&lt;&lt;…&gt;&gt;</code> / <code>b1&lt;&lt;…&gt;&gt;</code>,
+          <code>ilbs&lt;&lt;…&gt;&gt;</code> /
+          <code>ilts&lt;&lt;…&gt;&gt;</code>, <code>b32'…'</code>,
+          <code>h32'…'</code>, <code>float'…'</code>, <code>same'…'</code>. This
+          playground additionally enables
           <a
             href="https://www.npmjs.com/package/@cbortech/hash-extension"
             target="_blank"

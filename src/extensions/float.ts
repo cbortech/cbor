@@ -13,12 +13,11 @@
  * The sequence form `float<<byteStr>>` accepts a single byte-string expression
  * (e.g. `float<<h'7ef0'>>`) and interprets its bytes as float bits.
  *
- * Defined in draft-ietf-cbor-edn-literals §3.7.  Not included in the default
- * extension set (must be added explicitly):
+ * Defined in draft-ietf-cbor-edn-literals-26 §3.7 and included in the default
+ * extension set:
  *
  * @example
- * import { float } from '@cbortech/cbor';
- * parseCDN("float'7ef0'", { extensions: [float] }); // NaN as float16
+ * parseCDN("float'7ef0'"); // NaN as float16
  */
 
 import type { CborExtension } from './types';

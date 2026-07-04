@@ -892,14 +892,17 @@ export class Tokenizer {
   }
 
   /**
-   * Read raw text-string content between N-backtick delimiters (§2.5.3).
+   * Read raw text-string content between N-backtick delimiters
+   * (§2.5.4 of draft-ietf-cbor-edn-literals-26).
    *
    * - The opening delimiter is the maximal run of consecutive backticks (N ≥ 1).
-   * - A single leading newline (LF or CRLF) immediately after the opening is stripped.
    * - No escape sequences are processed — content is taken verbatim.
-   * - Literal CR is stripped for source-level CRLF normalisation.
-   * - The closing delimiter is the first run of M ≥ N backticks; any excess
-   *   M-N backticks are appended to the content before closing.
+   * - Literal CR is stripped for source-level CRLF normalisation (§1.3.5).
+   * - The closing delimiter is a run of exactly N backticks (alikerawdelim);
+   *   shorter runs are content, longer runs are an error.
+   * - A single leading newline (LF or CRLF) is stripped; if that rule did not
+   *   apply and the inner string both starts and ends with a space, exactly
+   *   one leading and one trailing space are stripped.
    */
   private _readRawStringContent(): string {
     const openLine = this.line,
@@ -912,9 +915,13 @@ export class Tokenizer {
       n++;
     }
 
-    // Strip a single leading CRLF or LF (§2.5.3)
+    // Strip a single leading CRLF or LF (§2.5.4, first trimming rule)
+    let newlineStripped = false;
     if (!this._eof() && this._ch() === '\r') this._advance(); // CR
-    if (!this._eof() && this._ch() === '\n') this._advance(); // LF
+    if (!this._eof() && this._ch() === '\n') {
+      this._advance(); // LF
+      newlineStripped = true;
+    }
 
     const inputLen = this.input.length;
     let out = '';
@@ -958,41 +965,56 @@ export class Tokenizer {
       if (ch === '`') {
         // Count this backtick run
         let m = 0;
+        const runLine = this.line,
+          runCol = this.col;
         while (!this._eof() && this._ch() === '`') {
           this._advance();
           m++;
         }
-        if (m >= n) {
-          // Closing delimiter found; excess backticks become content
-          out += '`'.repeat(m - n);
-          // For N≥2, strip one leading and one trailing space (§2.5.3).
-          if (n >= 2) {
-            if (out.startsWith(' ')) out = out.slice(1);
-            if (out.endsWith(' ')) out = out.slice(0, -1);
-          }
+        if (m === n) {
+          // Closing delimiter found (alikerawdelim: exactly N backticks).
+          // Second trimming rule (§2.5.4): if no leading newline was
+          // stripped and the inner string starts AND ends with a space,
+          // strip exactly one of each.
+          if (
+            !newlineStripped &&
+            out.length >= 2 &&
+            out.startsWith(' ') &&
+            out.endsWith(' ')
+          )
+            out = out.slice(1, -1);
           if (out === '')
             this._fail(
-              'raw string must not be empty (§2.5.3)',
+              'raw string must not be empty (§2.5.4)',
               openLine,
               openCol
             );
           return out;
         }
-        // Not enough backticks — all become content
+        if (m > n) {
+          // Longer runs can neither be content (shortrawdelim) nor close the
+          // string (alikerawdelim) — §2.5.4 / §5.1 Item 7.
+          this._fail(
+            `raw string contains a run of ${m} backquotes, longer than the ${n}-backquote delimiter; use longer delimiters`,
+            runLine,
+            runCol
+          );
+        }
+        // Shorter run — all backticks become content
         out += '`'.repeat(m);
       } else {
         const cp = ch.codePointAt(0)!;
         // rawchars = 1*(%x0a/%x0d / %x20-5f / %x61-7e / NONASCII) — HT and other C0 controls forbidden
         if (cp < 0x20 && cp !== 0x0a && cp !== 0x0d) {
           this._fail(
-            `raw string content must not contain control character U+${cp.toString(16).toUpperCase().padStart(4, '0')} (§2.5.3)`,
+            `raw string content must not contain control character U+${cp.toString(16).toUpperCase().padStart(4, '0')} (§2.5.4)`,
             this.line,
             this.col
           );
         }
         if (cp === 0x7f) {
           this._fail(
-            'raw string content must not contain DEL (U+007F) (§2.5.3)',
+            'raw string content must not contain DEL (U+007F) (§2.5.4)',
             this.line,
             this.col
           );
@@ -1801,7 +1823,7 @@ export class Tokenizer {
           }
         }
 
-        // app-rstring: prefix followed by backtick raw string (§2.5.3 / app-rstring)
+        // app-rstring: prefix followed by backtick raw string (§2.5.4 / app-rstring)
         if (q === '`') {
           const raw = this._readRawStringContent();
           switch (ident) {

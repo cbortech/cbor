@@ -129,6 +129,22 @@ export const SAMPLES: Sample[] = [
 ]`,
   },
   {
+    name: 'App strings: t1/b1 & ilbs/ilts',
+    cdn: `{
+  # draft-26 extensions t1 / b1 join (text or byte) strings into one.
+  "text":  t1<<"Hello ", "world">>,
+  "mixed": t1<<"Hello", h'20', "world">>,
+  "bytes": b1<<'Hello ', h'776f726c64'>>,
+  # An ellipsis elides part of a string (tag 888)
+  "elided": t1<<"Herewith I buy", ..., "signed: Alice & Bob">>,
+
+  # ilbs / ilts build indefinite-length strings, one chunk per argument
+  "il-bytes": ilbs<<h'0011', h'2233'>>,
+  "il-text":  ilts<<"chunked ", "text">>,
+  "il-ei":    ilbs<<'Hello '_0, 'world'>>,  # per-chunk encoding indicator
+}`,
+  },
+  {
     name: 'CDN Sequence',
     cdn: `# CDN Sequence — multiple items separated by whitespace, comma, or comment.
 # Output is a CBOR Sequence (RFC 8742): concatenated CBOR items.
