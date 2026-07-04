@@ -2,6 +2,8 @@
 
 [CBOR](#準拠している仕様)、[CDN (CBOR-EDN)](#準拠している仕様)、JavaScript 値を相互変換するための TypeScript ライブラリです。
 
+![CBOR、CDN、JavaScript 値の関係図](./assets/cbor-cdn-js.png)
+
 プレイグラウンドを **https://cbor.tech/cbor/** で公開しています。
 
 このパッケージは `CBOR` ファサードに加えて、extension の実装に必要な CBOR AST ノードクラス用の entrypoint を公開します。

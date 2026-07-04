@@ -63,7 +63,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "assets/cbor-cdn-js.png"
   ],
   "workspaces": [
     "site"
