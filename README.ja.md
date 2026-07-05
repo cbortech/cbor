@@ -257,6 +257,9 @@ console.log(text);
 
 ### `+` による文字列連結を保持する
 
+注意: `+` による文字列連結構文は draft-26 で削除されました。この節は legacy
+syntax を扱う場合のためのものです。
+
 デフォルトでは、`CBOR.format()` は `+` による文字列連結を 1 つのリテラルに
 結合します。`preserveConcatenation` を指定すると、テキスト文字列・バイト文字列とも
 元の連結の区切りを保持します。`preserveByteString` を併用すると、バイト文字列の
