@@ -260,6 +260,9 @@ console.log(text);
 
 ### Preserve `+` string concatenation
 
+Note: `+` string concatenation was removed in draft-26. This section is for
+handling legacy syntax.
+
 By default, `CBOR.format()` joins `+` string concatenation into a single
 literal. `preserveConcatenation` keeps the original part boundaries for both
 text strings and byte strings; add `preserveByteString` to also keep the

@@ -1,7 +1,7 @@
 /**
  * Renders the result of `CborItem.toJS()` as readable pseudo-JavaScript.
  * Handles the library's representations: bigints, boxed tagged values,
- * Simple instances, MapEntries, Uint8Array, and Map.
+ * Simple instances, MapEntries, Uint8Array, Set, and Map.
  */
 import { MapEntries, Simple, Tag } from '@cbortech/cbor';
 
@@ -50,6 +50,13 @@ function _render(value: unknown, depth: number): string {
     return `Uint8Array(${value.length}) [ ${hex(value)} ]`;
   if (value instanceof Date)
     return `Date(${JSON.stringify(value.toISOString())})`;
+  if (value instanceof Set) {
+    if (value.size === 0) return 'Set {}';
+    const body = [...value]
+      .map((v) => `${pad}${inspectJS(v, depth + 1)}`)
+      .join(',\n');
+    return `Set {\n${body}\n${close}}`;
+  }
 
   if (value instanceof MapEntries) {
     if (value.length === 0) return 'MapEntries []';

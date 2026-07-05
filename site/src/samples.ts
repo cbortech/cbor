@@ -61,6 +61,7 @@ export const SAMPLES: Sample[] = [
     name: 'String concatenation (+)',
     cdn: `{
   # Text and byte strings can be split with +.
+  # Note: + concatenation was removed in draft-26; this is legacy syntax.
   # Try Format → Text strings: Newline or CDN to auto-split.
   "poem": "Roses are red,\\n" +
     "Violets are blue,\\n" +
@@ -127,6 +128,19 @@ export const SAMPLES: Sample[] = [
   # hash'...' — requires @cbortech/hash-extension
   hash'SHA-256;base64url:47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU',
 ]`,
+  },
+  {
+    name: 'App sequences: Set & Map',
+    cdn: `{
+  # SET / MAP require @cbortech/set-map-extensions.
+  # SET uses tag 258 over an array; MAP uses tag 259 over a map.
+  "roles": SET<<["admin", "editor", "viewer"]>>,
+  "scores": MAP<<{
+    "alice": 98,
+    "bob": 72,
+    "carol": 85,
+  }>>,
+}`,
   },
   {
     name: 'App strings: t1/b1 & ilbs/ilts',
