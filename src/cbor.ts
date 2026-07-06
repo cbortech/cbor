@@ -725,7 +725,8 @@ export class CBOR {
         value,
         opts.replacer,
         opts.extensions,
-        opts.undefinedOmits
+        opts.undefinedOmits,
+        opts.builtinExtensions
       );
       if (replaced === undefined || replaced === CBOR_OMIT)
         return undefined as unknown as string;

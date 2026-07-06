@@ -37,9 +37,15 @@ export { MapEntries } from './mapEntries';
 export { b32, h32 } from './extensions/b32';
 export { float } from './extensions/float';
 export { same } from './extensions/same';
-export { dt_as_Date } from './extensions/dt';
+export { dt, dt_as_Date } from './extensions/dt';
+export { ip } from './extensions/ip';
+export { cri } from './extensions/cri';
 export { t1, b1 } from './extensions/concat';
 export { ilbs, ilts } from './extensions/ilstrings';
+
+// The default set of bundled application-oriented extensions, for use with
+// the `builtinExtensions` option (e.g. to build a filtered subset).
+export { BUILTIN_EXTENSIONS } from './extensions/builtins';
 
 // Main CBOR class
 export { CBOR } from './cbor';

@@ -7,7 +7,7 @@
  */
 import { linter, type Diagnostic } from '@codemirror/lint';
 import { CBOR, CdnSyntaxError } from '@cbortech/cbor';
-import { SITE_EXTENSIONS } from '../extensions';
+import { getEnabledExtensions } from '../ui/toolbar';
 
 export const cdnLinter = linter((view) => {
   const text = view.state.doc.toString();
@@ -18,7 +18,7 @@ export const cdnLinter = linter((view) => {
     // Exhaust the generator so every item is parsed and every warning collected.
     for (const _item of CBOR.fromCDNSeq(text, {
       strict: false,
-      extensions: SITE_EXTENSIONS,
+      ...getEnabledExtensions(),
       onWarning: (w) => {
         const from = clamp(w.offset ?? 0);
         diagnostics.push({

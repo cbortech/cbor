@@ -12,6 +12,9 @@ import { CborTag } from '../ast/CborTag';
 import { CborFloat } from '../ast/CborFloat';
 import { CborSimple } from '../ast/CborSimple';
 import { CborEmbeddedCBOR } from '../ast/CborEmbeddedCBOR';
+import { CborBigUint } from '../ast/CborBignum';
+import { dt, CborTaggedEpochDtExt } from '../extensions/dt';
+import { BUILTIN_EXTENSIONS } from '../extensions/builtins';
 
 /** Convert a hex string (spaces allowed) to Uint8Array. */
 function hex(s: string): Uint8Array {
@@ -873,6 +876,87 @@ describe('input with non-zero byteOffset', () => {
     const slice = new Uint8Array(fullBuffer, 1, 4);
     const r = decodeCBOR(slice) as CborByteString;
     expect(r.value).toEqual(new Uint8Array([0x01, 0x02, 0x03]));
+  });
+});
+
+// ─── builtinExtensions option ─────────────────────────────────────────────────
+
+describe('decodeCBOR — builtinExtensions option', () => {
+  const DT_TAGGED_BYTES = hex('c11a6955b900'); // 1(1767225600) via tag 1
+
+  test('omitted: default bundled dt extension resolves tag 1', () => {
+    const r = decodeCBOR(DT_TAGGED_BYTES);
+    expect(r).toBeInstanceOf(CborTaggedEpochDtExt);
+  });
+
+  test('false: tag 1 falls back to plain CborTag', () => {
+    const r = decodeCBOR(DT_TAGGED_BYTES, { builtinExtensions: false });
+    expect(r).toBeInstanceOf(CborTag);
+    expect(r).not.toBeInstanceOf(CborTaggedEpochDtExt);
+    expect((r as CborTag).tag).toBe(1n);
+  });
+
+  test('array: an explicit [dt] set still resolves tag 1', () => {
+    const r = decodeCBOR(DT_TAGGED_BYTES, { builtinExtensions: [dt] });
+    expect(r).toBeInstanceOf(CborTaggedEpochDtExt);
+  });
+
+  test('core RFC 8949 features (bignum, embedded CBOR) stay active regardless of builtinExtensions', () => {
+    // 2(h'010000000000000000') = bignum for 2^64
+    const big = decodeCBOR(hex('c249010000000000000000'), {
+      builtinExtensions: false,
+    });
+    expect(big).toBeInstanceOf(CborBigUint);
+
+    // 24(h'820102') = embedded CBOR data item [1, 2]
+    const embedded = decodeCBOR(hex('d81843820102'), {
+      builtinExtensions: false,
+    }) as CborTag;
+    expect(embedded).toBeInstanceOf(CborTag);
+    expect(embedded.content).toBeInstanceOf(CborEmbeddedCBOR);
+  });
+
+  test('builtinExtensions is forwarded into embedded CBOR (tag 24) decoding', () => {
+    // 24(h'c100') = embedded CBOR data item 1(0) — tag 1 is the `dt` prefix.
+    const EMBEDDED_TAG1_BYTES = hex('d81842c100');
+
+    // Disabled outside → must stay disabled for the tag found inside the
+    // embedded byte string too: the inner item stays a plain CborTag(1, 0),
+    // not a CborTaggedEpochDtExt.
+    const disabled = decodeCBOR(EMBEDDED_TAG1_BYTES, {
+      builtinExtensions: false,
+    }) as CborTag;
+    const disabledInner = (disabled.content as CborEmbeddedCBOR).items[0];
+    expect(disabledInner).toBeInstanceOf(CborTag);
+    expect(disabledInner).not.toBeInstanceOf(CborTaggedEpochDtExt);
+
+    // Explicitly re-enabling dt via builtinExtensions still resolves inside
+    // the embedded item.
+    const enabled = decodeCBOR(EMBEDDED_TAG1_BYTES, {
+      builtinExtensions: [dt],
+    }) as CborTag;
+    const enabledInner = (enabled.content as CborEmbeddedCBOR).items[0];
+    expect(enabledInner).toBeInstanceOf(CborTaggedEpochDtExt);
+  });
+
+  test('user extensions still take priority over a custom builtinExtensions array', () => {
+    const r = decodeCBOR(DT_TAGGED_BYTES, {
+      builtinExtensions: [dt],
+      extensions: [
+        {
+          tagNumbers: [1n],
+          parseTag: () => new CborTextString('custom'),
+        },
+      ],
+    });
+    expect(r).toBeInstanceOf(CborTextString);
+  });
+
+  test('a custom array can reorder/reuse the same extension objects exported as BUILTIN_EXTENSIONS', () => {
+    const r = decodeCBOR(DT_TAGGED_BYTES, {
+      builtinExtensions: [...BUILTIN_EXTENSIONS].reverse(),
+    });
+    expect(r).toBeInstanceOf(CborTaggedEpochDtExt);
   });
 });
 

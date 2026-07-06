@@ -17,6 +17,13 @@ are not part of the documented public API.
 npm install @cbortech/cbor
 ```
 
+For command-line conversion and inspection, a companion CLI package is
+available as [@cbortech/cbor-cli](https://www.npmjs.com/package/@cbortech/cbor-cli).
+
+```bash
+npm install -g @cbortech/cbor-cli
+```
+
 ## Import
 
 ```ts
@@ -593,6 +600,31 @@ const cbor = new CBOR({ extensions: [uuid] });
 
 const id = cbor.parse("uuid'550e8400-e29b-41d4-a716-446655440000'");
 // Uint8Array(16) [85, 14, 132, 0, 226, 155, 65, 212, 167, 22, 68, 102, 85, 68, 0, 0]
+```
+
+### set / map
+
+`SET` and `MAP` are library-specific application extensions for tagged Set and
+Map values. They are provided together as
+[@cbortech/set-map-extensions](https://www.npmjs.com/package/@cbortech/set-map-extensions).
+`SET<<[...]>>` produces CBOR tag 258 over an array, and `MAP<<{...}>>` produces
+CBOR tag 259 over a map.
+
+```bash
+npm install @cbortech/set-map-extensions
+```
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+import { set, map } from '@cbortech/set-map-extensions';
+
+const cbor = new CBOR({ extensions: [set, map] });
+
+const roles = cbor.parse('SET<<["admin", "editor"]>>');
+// Set { 'admin', 'editor' }
+
+const scores = cbor.parse('MAP<<{"alice": 98, "bob": 72}>>');
+// Map { 'alice' => 98, 'bob' => 72 }
 ```
 
 ## Tags

@@ -15,6 +15,13 @@
 npm install @cbortech/cbor
 ```
 
+コマンドラインでの変換や確認には、CLI パッケージ
+[@cbortech/cbor-cli](https://www.npmjs.com/package/@cbortech/cbor-cli) も利用できます。
+
+```bash
+npm install -g @cbortech/cbor-cli
+```
+
 ## インポート
 
 ```ts
@@ -588,6 +595,31 @@ const cbor = new CBOR({ extensions: [uuid] });
 
 const id = cbor.parse("uuid'550e8400-e29b-41d4-a716-446655440000'");
 // Uint8Array(16) [85, 14, 132, 0, 226, 155, 65, 212, 167, 22, 68, 102, 85, 68, 0, 0]
+```
+
+### set / map
+
+`SET` と `MAP` は、タグ付きの Set / Map 値を扱うための、このライブラリ独自の
+application extension です。
+[@cbortech/set-map-extensions](https://www.npmjs.com/package/@cbortech/set-map-extensions)
+としてまとめて別パッケージで提供しています。`SET<<[...]>>` は配列に CBOR tag
+258 を付けた値、`MAP<<{...}>>` は map に CBOR tag 259 を付けた値を生成します。
+
+```bash
+npm install @cbortech/set-map-extensions
+```
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+import { set, map } from '@cbortech/set-map-extensions';
+
+const cbor = new CBOR({ extensions: [set, map] });
+
+const roles = cbor.parse('SET<<["admin", "editor"]>>');
+// Set { 'admin', 'editor' }
+
+const scores = cbor.parse('MAP<<{"alice": 98, "bob": 72}>>');
+// Map { 'alice' => 98, 'bob' => 72 }
 ```
 
 ## タグ

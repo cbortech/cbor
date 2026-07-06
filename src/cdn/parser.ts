@@ -29,7 +29,7 @@ import { maxForEncodingWidth, type EncodingWidth } from '../cbor/encode';
 import { parseHexFloat } from '../utils/hexfloat';
 import { hexToBytes } from '../utils/hex';
 import { float64ToFloat16Bits, float16BitsToFloat64 } from '../utils/float16';
-import { BUILTIN_EXTENSIONS } from '../extensions/builtins';
+import { resolveBuiltinExtensions } from '../extensions/builtins';
 import { CborUnresolvedAppExt } from '../ast/CborUnresolvedAppExt';
 import { CborAppSeqResult } from '../ast/CborAppSeqResult';
 import { CborEllipsis } from '../ast/CborEllipsis';
@@ -393,11 +393,14 @@ const bundledExtensionHint = (name: string): string =>
   `import { ${name} } from '@cbortech/cbor' and pass it via the 'extensions' option (extensions: [${name}])`;
 const externalExtensionHint = (name: string, pkg: string): string =>
   `install ${pkg}, import { ${name} } from '${pkg}', and pass it via the 'extensions' option (extensions: [${name}])`;
+const builtinDisabledHint = (name: string): string =>
+  `'${name}' is a default built-in extension that was excluded via the 'builtinExtensions' option; add it back to that array (or omit 'builtinExtensions' to use the default set)`;
 
 /**
- * App-string prefixes handled by known opt-in extensions, mapped to guidance
- * on how to enable them. Used to emit a non-fatal hint when such a prefix is
- * encountered without the corresponding extension registered.
+ * App-string prefixes handled by known opt-in extensions or by default
+ * built-ins that can be excluded via `builtinExtensions`, mapped to guidance
+ * on how to (re-)enable them. Used to emit a non-fatal hint when such a
+ * prefix is encountered without the corresponding extension registered.
  */
 const MISSING_EXTENSION_HINTS: ReadonlyMap<string, string> = new Map([
   ['b32', bundledExtensionHint('b32')],
@@ -406,6 +409,19 @@ const MISSING_EXTENSION_HINTS: ReadonlyMap<string, string> = new Map([
   ['hash', externalExtensionHint('hash', '@cbortech/hash-extension')],
   ['uuid', externalExtensionHint('uuid', '@cbortech/uuid-extension')],
   ['UUID', externalExtensionHint('uuid', '@cbortech/uuid-extension')],
+  // Only reachable via a non-default `builtinExtensions` override — these
+  // are otherwise always present in the default bundled set.
+  ['dt', builtinDisabledHint('dt')],
+  ['DT', builtinDisabledHint('dt')],
+  ['ip', builtinDisabledHint('ip')],
+  ['IP', builtinDisabledHint('ip')],
+  ['cri', builtinDisabledHint('cri')],
+  ['CRI', builtinDisabledHint('cri')],
+  ['t1', builtinDisabledHint('t1')],
+  ['b1', builtinDisabledHint('b1')],
+  ['ilbs', builtinDisabledHint('ilbs')],
+  ['ilts', builtinDisabledHint('ilts')],
+  ['float', builtinDisabledHint('float')],
 ]);
 
 // ─── Parser ───────────────────────────────────────────────────────────────────
@@ -431,7 +447,8 @@ class CDNParser {
     this.extByPrefix = new Map();
     this.extByTag = new Map();
     this.unresolvedExtension = _options.unresolvedExtension ?? 'cpa999';
-    for (const ext of [...BUILTIN_EXTENSIONS, ...(_options.extensions ?? [])]) {
+    const builtins = resolveBuiltinExtensions(_options.builtinExtensions);
+    for (const ext of [...builtins, ...(_options.extensions ?? [])]) {
       for (const prefix of ext.appStringPrefixes ?? [])
         this.extByPrefix.set(prefix, ext);
       for (const tag of ext.tagNumbers ?? []) this.extByTag.set(tag, ext);
