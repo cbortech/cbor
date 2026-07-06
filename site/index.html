@@ -73,15 +73,16 @@
           href="https://datatracker.ietf.org/doc/html/draft-ietf-cbor-edn-literals-25"
           target="_blank"
           rel="noopener"
-          >Concise Diagnostic Notation (CDN / CBOR-EDN), draft-25</a
+          >CDN (CBOR-EDN) draft-25</a
         >
-        (incorporating parts of
+        /
         <a
           href="https://datatracker.ietf.org/doc/html/draft-ietf-cbor-edn-literals-26"
           target="_blank"
           rel="noopener"
           >draft-26</a
-        >) — encode, decode, parse, pretty-print, and round-trip with full
+        >
+        — encode, decode, parse, pretty-print, and round-trip with full
         fidelity. Everything on this page runs in your browser using the library
         itself.
       </p>
@@ -101,9 +102,8 @@
       </div>
       <ul class="features">
         <li>
-          <strong>Lossless round-trips</strong> — encoding widths, indefinite
-          lengths, duplicate map keys, and comments survive CDN (CBOR-EDN) ⇄
-          CBOR conversion.
+          <strong>Lossless round-trips</strong> — encoding widths and comments
+          survive CDN (CBOR-EDN) ⇄ CBOR conversion.
         </li>
         <li>
           <strong>JSON-like API</strong> — <code>CBOR.parse</code> /
@@ -114,28 +114,27 @@
           ranges, warnings, and annotated hex dumps.
         </li>
         <li>
-          <strong>Extensible</strong> — built-in app-string extensions:
-          <code>dt'…'</code> / <code>DT'…'</code>, <code>ip'…'</code> /
-          <code>IP'…'</code>, <code>cri'…'</code> / <code>CRI'…'</code>,
-          <code>t1&lt;&lt;…&gt;&gt;</code> / <code>b1&lt;&lt;…&gt;&gt;</code>,
-          <code>ilbs&lt;&lt;…&gt;&gt;</code> /
-          <code>ilts&lt;&lt;…&gt;&gt;</code>, <code>b32'…'</code>,
-          <code>h32'…'</code>, <code>float'…'</code>, <code>same'…'</code>. This
-          playground additionally enables
+          <strong>Extensible</strong> — application-oriented extensions for
+          dates, IP addresses, string concatenation, and more, plus optional
           <a
             href="https://www.npmjs.com/package/@cbortech/hash-extension"
             target="_blank"
             rel="noopener"
-            >@cbortech/hash-extension</a
-          >
-          (<code>hash'…'</code>) and
+            >hash</a
+          >,
           <a
             href="https://www.npmjs.com/package/@cbortech/uuid-extension"
             target="_blank"
             rel="noopener"
-            >@cbortech/uuid-extension</a
+            >uuid</a
+          >, and
+          <a
+            href="https://www.npmjs.com/package/@cbortech/set-map-extensions"
+            target="_blank"
+            rel="noopener"
+            >set/map</a
           >
-          (<code>uuid'…'</code> / <code>UUID'…'</code>).
+          support. Toggle any extension from the button above the CDN editor.
         </li>
       </ul>
     </section>
@@ -171,6 +170,19 @@
               </svg>
             </button>
           </div>
+          <button
+            id="ext-opts-btn"
+            class="ctl toolbar-icon-btn"
+            title="Enabled extensions"
+            aria-label="Enabled extensions"
+            aria-expanded="false"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M4 7h4a2 2 0 1 1 4 0h4a1 1 0 0 1 1 1v4a2 2 0 1 0 0 4v4a1 1 0 0 1-1 1h-4a2 2 0 1 0-4 0H4a1 1 0 0 1-1-1v-4a2 2 0 1 1 0-4V8a1 1 0 0 1 1-1Z"
+              />
+            </svg>
+          </button>
           <button
             id="cdn-import-btn"
             class="ctl toolbar-icon-btn"
@@ -275,11 +287,11 @@
             </select>
           </label>
           <label class="check">
-            <input type="checkbox" id="opt-split-newline" />
+            <input type="checkbox" id="opt-split-newline" checked />
             Split at newlines
           </label>
           <label class="check">
-            <input type="checkbox" id="opt-split-cdn" />
+            <input type="checkbox" id="opt-split-cdn" checked />
             Format CDN strings
           </label>
           <label class="check">
@@ -287,9 +299,15 @@
             Keep comments
           </label>
           <label class="check">
-            <input type="checkbox" id="opt-concat" />
+            <input type="checkbox" id="opt-concat" checked />
             Keep concatenation
           </label>
+        </div>
+        <div id="ext-popover" class="popover ext-popover" hidden>
+          <div class="popover-section-title">Built-in</div>
+          <div id="ext-popover-builtin" class="popover-grid"></div>
+          <div class="popover-section-title">Additional</div>
+          <div id="ext-popover-extra" class="popover-grid"></div>
         </div>
         <div id="editor" class="editor-host"></div>
       </section>

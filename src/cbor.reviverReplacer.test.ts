@@ -209,6 +209,17 @@ describe('replacer — entry points', () => {
     expect(result).toMatch(/\n/);
     expect(result).toMatch(/"a"/);
   });
+
+  test('CBOR.stringify(value, { replacer, builtinExtensions: false }) — option threads through the replacer path', () => {
+    // No default bundled extension implements isJSType/fromJS, so this is
+    // equivalent to the default — this test just guards the wiring between
+    // CBOR.stringify's options-form replacer path and _applyReplacer.
+    const result = CBOR.stringify(
+      { a: 1, b: 2 },
+      { replacer: ['a'], builtinExtensions: false }
+    );
+    expect(result).toBe('{"a":1}');
+  });
 });
 
 // ─── replacer — function replacer semantics ───────────────────────────────────

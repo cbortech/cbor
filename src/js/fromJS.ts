@@ -2,7 +2,7 @@ import type { FromJSOptions } from '../types';
 import { CBOR_OMIT } from '../types';
 import type { CborItem } from '../ast/CborItem';
 import type { CborExtension } from '../extensions/types';
-import { BUILTIN_EXTENSIONS } from '../extensions/builtins';
+import { resolveBuiltinExtensions } from '../extensions/builtins';
 import { CborUint } from '../ast/CborUint';
 import { CborNint } from '../ast/CborNint';
 import { CborBigUint, CborBigNint } from '../ast/CborBignum';
@@ -29,16 +29,28 @@ interface ResolvedExtensions {
 }
 
 /**
- * BUILTIN_EXTENSIONS pre-filtered per hook, cached after first use.
- * Lazy (not module-level) because mapEntries.ts imports fromJS.ts, forming a
- * cycle that leaves BUILTIN_EXTENSIONS undefined at module init time.
+ * Default resolved builtins (no `builtinExtensions` override) pre-filtered
+ * per hook, cached after first use. Lazy (not module-level) because
+ * mapEntries.ts imports fromJS.ts, forming a cycle that leaves the builtins
+ * module's exports undefined at module init time.
  */
-let _builtinResolvedExts: ResolvedExtensions | undefined;
-function getBuiltinResolvedExts(): ResolvedExtensions {
-  return (_builtinResolvedExts ??= {
-    fromJS: BUILTIN_EXTENSIONS.filter((ext) => ext.fromJS !== undefined),
-    parseTag: BUILTIN_EXTENSIONS.filter((ext) => ext.parseTag !== undefined),
-  });
+let _defaultResolvedExts: ResolvedExtensions | undefined;
+function getBuiltinResolvedExts(
+  builtinExtensions: CborExtension[] | false | undefined
+): ResolvedExtensions {
+  if (builtinExtensions === undefined) {
+    if (_defaultResolvedExts) return _defaultResolvedExts;
+    const resolved = resolveBuiltinExtensions(undefined);
+    return (_defaultResolvedExts = {
+      fromJS: resolved.filter((ext) => ext.fromJS !== undefined),
+      parseTag: resolved.filter((ext) => ext.parseTag !== undefined),
+    });
+  }
+  const resolved = resolveBuiltinExtensions(builtinExtensions);
+  return {
+    fromJS: resolved.filter((ext) => ext.fromJS !== undefined),
+    parseTag: resolved.filter((ext) => ext.parseTag !== undefined),
+  };
 }
 
 /**
@@ -49,7 +61,7 @@ function resolveExtensions(
   options: FromJSOptions | undefined
 ): ResolvedExtensions {
   const user = options?.extensions;
-  const builtin = getBuiltinResolvedExts();
+  const builtin = getBuiltinResolvedExts(options?.builtinExtensions);
   if (!user?.length) return builtin;
   return {
     fromJS: [
@@ -87,7 +99,8 @@ export function fromJS(value: unknown, options?: FromJSOptions): CborItem {
       value,
       replacer,
       rest.extensions,
-      rest.undefinedOmits
+      rest.undefinedOmits,
+      rest.builtinExtensions
     );
     if (replaced === CBOR_OMIT) return CborSimple.UNDEFINED;
     return fromJS(
@@ -256,12 +269,13 @@ export function _applyReplacer(
   value: unknown,
   replacer: _Replacer,
   extensions?: readonly CborExtension[],
-  undefinedOmits?: boolean
+  undefinedOmits?: boolean,
+  builtinExtensions?: CborExtension[] | false
 ): unknown {
   // Only isJSType hooks are consulted below; filter once, not per node.
   const jsTypeExts: readonly CborExtension[] = [
     ...(extensions ?? []),
-    ...BUILTIN_EXTENSIONS,
+    ...resolveBuiltinExtensions(builtinExtensions),
   ].filter((ext) => ext.isJSType !== undefined);
 
   /** True when a replacer/reviver result should cause the entry to be dropped. */

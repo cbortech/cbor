@@ -1,13 +1,20 @@
 /**
  * Wiring for the static chrome: theme toggle, copy buttons, samples
- * dropdown, format-options popover, bytes-pane mode tabs, and share links.
+ * dropdown, format-options popover, extensions popover, bytes-pane mode
+ * tabs, and share links.
  */
-import type { FromCDNOptions, ToCDNOptions } from '@cbortech/cbor';
+import type {
+  CborExtension,
+  FromCDNOptions,
+  ToCDNOptions,
+} from '@cbortech/cbor';
 import { SAMPLES } from '../samples';
+import { EXTENSION_ENTRIES } from '../extensions';
 
 export type BytesMode = 'annotated' | 'plain' | 'js' | 'edit';
 
 const THEME_KEY = 'cbor-site-theme';
+const EXT_DISABLED_KEY = 'cbor-site-ext-disabled';
 const copyFeedback = new WeakMap<
   HTMLElement,
   { html: string; timer: ReturnType<typeof setTimeout> }
@@ -75,9 +82,10 @@ export function initSamples(onSelect: (cdn: string) => void): () => void {
   };
 }
 
-export function initFormatPopover(): void {
-  const button = document.getElementById('format-opts-btn')!;
-  const popover = document.getElementById('format-popover')!;
+/** Wire a toolbar icon button to show/hide its popover, closing on outside click. */
+function wirePopoverToggle(buttonId: string, popoverId: string): void {
+  const button = document.getElementById(buttonId)!;
+  const popover = document.getElementById(popoverId)!;
   button.addEventListener('click', (e) => {
     e.stopPropagation();
     const open = popover.hidden;
@@ -89,6 +97,10 @@ export function initFormatPopover(): void {
     popover.hidden = true;
     button.setAttribute('aria-expanded', 'false');
   });
+}
+
+export function initFormatPopover(): void {
+  wirePopoverToggle('format-opts-btn', 'format-popover');
 }
 
 export function readFormatOptions(): FromCDNOptions & ToCDNOptions {
@@ -116,6 +128,78 @@ export function readFormatOptions(): FromCDNOptions & ToCDNOptions {
   if ((document.getElementById('opt-concat') as HTMLInputElement).checked)
     options.preserveConcatenation = true;
   return options;
+}
+
+// ── Extensions popover ───────────────────────────────────────────────────────
+
+function extCheckboxId(key: string): string {
+  return `ext-${key}`;
+}
+
+function loadDisabledExtKeys(): Set<string> {
+  try {
+    const raw = localStorage.getItem(EXT_DISABLED_KEY);
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveDisabledExtKeys(disabled: Set<string>): void {
+  localStorage.setItem(EXT_DISABLED_KEY, JSON.stringify([...disabled]));
+}
+
+/**
+ * Populate the built-in / additional extension checkbox groups from
+ * `EXTENSION_ENTRIES`, restore persisted on/off state (default: all on),
+ * and call `onChange` whenever a checkbox is toggled.
+ */
+export function initExtensionsPopover(onChange: () => void): void {
+  wirePopoverToggle('ext-opts-btn', 'ext-popover');
+  const builtinGroup = document.getElementById('ext-popover-builtin')!;
+  const extraGroup = document.getElementById('ext-popover-extra')!;
+  const disabled = loadDisabledExtKeys();
+
+  for (const entry of EXTENSION_ENTRIES) {
+    const label = document.createElement('label');
+    label.className = 'check';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = extCheckboxId(entry.key);
+    checkbox.checked = !disabled.has(entry.key);
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) disabled.delete(entry.key);
+      else disabled.add(entry.key);
+      saveDisabledExtKeys(disabled);
+      onChange();
+    });
+    label.append(checkbox, ` ${entry.label}`);
+    (entry.kind === 'builtin' ? builtinGroup : extraGroup).appendChild(label);
+  }
+}
+
+/**
+ * Read the current extensions popover checkbox state into the two option
+ * arrays consumed by `fromCDN`/`fromCBOR`/`fromHexDump`: bundled extensions
+ * that were unchecked go through `builtinExtensions` (an explicit subset of
+ * the default set), and non-bundled ones that were checked go through
+ * `extensions` as usual.
+ */
+export function getEnabledExtensions(): {
+  extensions: CborExtension[];
+  builtinExtensions: CborExtension[];
+} {
+  const extensions: CborExtension[] = [];
+  const builtinExtensions: CborExtension[] = [];
+  for (const entry of EXTENSION_ENTRIES) {
+    const checkbox = document.getElementById(
+      extCheckboxId(entry.key)
+    ) as HTMLInputElement | null;
+    if (checkbox && !checkbox.checked) continue;
+    if (entry.kind === 'builtin') builtinExtensions.push(entry.ext);
+    else extensions.push(entry.ext);
+  }
+  return { extensions, builtinExtensions };
 }
 
 export function initModeTabs(onChange: (mode: BytesMode) => void): void {

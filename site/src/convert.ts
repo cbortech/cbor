@@ -10,7 +10,7 @@ import { CBOR, type ParseWarning } from '@cbortech/cbor';
 import type { CborItem } from '@cbortech/cbor/ast';
 import { buildRangeMap, type NodeRange } from './mapping/lockstep';
 import { buildRows, type HexRow } from './hexview/build-rows';
-import { SITE_EXTENSIONS } from './extensions';
+import { getEnabledExtensions } from './ui/toolbar';
 
 export interface ConversionOk {
   ok: true;
@@ -45,10 +45,12 @@ export function convertCdn(text: string): Conversion {
   if (text.trim() === '') return { ok: true, empty: true };
   try {
     const warnings: ParseWarning[] = [];
+    const { extensions, builtinExtensions } = getEnabledExtensions();
     const seqOpts = {
       strict: false,
       onWarning: (w: ParseWarning) => warnings.push(w),
-      extensions: SITE_EXTENSIONS,
+      extensions,
+      builtinExtensions,
     };
 
     const cdnAsts = [...CBOR.fromCDNSeq(text, seqOpts)];
@@ -75,7 +77,8 @@ export function convertCdn(text: string): Conversion {
     // to the full byte array, which is exactly what buildRows / buildRangeMap need.
     const binAsts = [
       ...CBOR.fromCBORSeq(bytes, {
-        extensions: SITE_EXTENSIONS,
+        extensions,
+        builtinExtensions,
         strict: false,
         onWarning: (w) => warnings.push(w),
       }),
@@ -116,9 +119,11 @@ export function bytesToCdnText(hexDumpText: string): {
   warnings: string[];
 } {
   const warnings: string[] = [];
+  const { extensions, builtinExtensions } = getEnabledExtensions();
   const items = [
     ...CBOR.fromHexDumpSeq(hexDumpText, {
-      extensions: SITE_EXTENSIONS,
+      extensions,
+      builtinExtensions,
       strict: false,
       onWarning: (w) => warnings.push(w.message),
     }),

@@ -169,6 +169,27 @@ export interface FromCBOROptions {
   extensions?: CborExtension[];
 
   /**
+   * Override the default set of bundled application-oriented extensions
+   * (`dt`, `ip`, `cri`, `t1`, `b1`, `ilbs`, `ilts`, `float`).
+   *
+   * - omitted (default): use the standard bundled set.
+   * - array: replace the bundled set with exactly these extensions.
+   * - `false`: disable all of them.
+   *
+   * `bignum` (tags 2/3) and embedded-CBOR (tag 24) support are core RFC 8949
+   * representation features, not application-oriented extensions, and are
+   * always active regardless of this option.
+   *
+   * `dt`, `ip`, `t1`, and `b1` are mandatory-to-implement per §2.1 of
+   * draft-ietf-cbor-edn-literals-26; disabling them produces a decoder that
+   * no longer conforms to that recommendation. This is intended for
+   * allowlisting scenarios (see §7 Security considerations of the same
+   * draft) where an application wants explicit control over which
+   * extensions it accepts.
+   */
+  builtinExtensions?: CborExtension[] | false;
+
+  /**
    * Controls how CBOR validity violations are handled.
    *
    * - `true` (default): violations call `onWarning` and then throw, stopping
@@ -217,6 +238,12 @@ export interface FromHexDumpOptions {
    * returning a non-`undefined` value replaces the default `CborTag` node.
    */
   extensions?: CborExtension[];
+
+  /**
+   * Override the default set of bundled application-oriented extensions.
+   * Mirrors `FromCBOROptions.builtinExtensions`.
+   */
+  builtinExtensions?: CborExtension[] | false;
 
   /**
    * Controls how CBOR validity violations are handled during hex-dump decoding.
@@ -286,6 +313,29 @@ export interface FromCDNOptions {
    * extension for the same prefix.
    */
   extensions?: CborExtension[];
+
+  /**
+   * Override the default set of bundled application-oriented extensions
+   * (`dt`, `ip`, `cri`, `t1`, `b1`, `ilbs`, `ilts`, `float`).
+   *
+   * - omitted (default): use the standard bundled set.
+   * - array: replace the bundled set with exactly these extensions.
+   * - `false`: disable all of them; app-string literals using their
+   *   prefixes then fall through to `unresolvedExtension` handling.
+   *
+   * `dt`, `ip`, `t1`, and `b1` are mandatory-to-implement per §2.1 of
+   * draft-ietf-cbor-edn-literals-26; disabling them produces a parser that
+   * no longer conforms to that recommendation. This is intended for
+   * allowlisting scenarios (see §7 Security considerations of the same
+   * draft) where an application wants explicit control over which
+   * extensions it accepts from untrusted CDN input.
+   *
+   * @example
+   * // Only accept dt/DT — everything else becomes an Unresolved (tag 999) node.
+   * import { CBOR, dt } from '@cbortech/cbor';
+   * CBOR.fromCDN(text, { builtinExtensions: [dt] });
+   */
+  builtinExtensions?: CborExtension[] | false;
 
   /**
    * How to handle unrecognised application-extension identifiers
@@ -376,6 +426,15 @@ export interface FromJSOptions {
    * Extensions with `fromJS()` are given first chance to convert each value.
    */
   extensions?: CborExtension[];
+
+  /**
+   * Override the default set of bundled application-oriented extensions.
+   * Mirrors `FromCDNOptions.builtinExtensions`. Only affects builtins that
+   * implement `fromJS()` / `parseTag()` (none of the bundled application
+   * extensions implement `fromJS()` by default — use `dt_as_Date` via
+   * `extensions` for `Date` round-tripping).
+   */
+  builtinExtensions?: CborExtension[] | false;
 
   /**
    * How to encode integer-valued JS `number`s.

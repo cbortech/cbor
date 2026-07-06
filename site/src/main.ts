@@ -1,6 +1,6 @@
 import './styles.css';
 import { CBOR } from '@cbortech/cbor';
-import { SITE_EXTENSIONS } from './extensions';
+import { forceLinting } from '@codemirror/lint';
 import {
   bytesToCdnText,
   bytesToHexString,
@@ -17,6 +17,8 @@ import {
   copyWithFeedback,
   decodeShareHash,
   encodeShareHash,
+  getEnabledExtensions,
+  initExtensionsPopover,
   initFormatPopover,
   initModeTabs,
   initSamples,
@@ -283,6 +285,13 @@ hexviewEl.addEventListener('paste', (e) => {
 
 initTheme();
 initFormatPopover();
+initExtensionsPopover(() => {
+  // Extension toggles change parse/decode results without editing the
+  // document, so force both the bytes-pane conversion and the CDN editor's
+  // lint diagnostics to refresh immediately (no debounce).
+  update(editor.state.doc.toString());
+  forceLinting(editor);
+});
 resetSamples = initSamples((cdn) => setEditorText(editor, cdn));
 initModeTabs((next) => {
   mode = next;
@@ -294,7 +303,7 @@ el('format-btn').addEventListener('click', () => {
   const text = editor.state.doc.toString();
   if (text.trim() === '') return;
   try {
-    const opts = { ...readFormatOptions(), extensions: SITE_EXTENSIONS };
+    const opts = { ...readFormatOptions(), ...getEnabledExtensions() };
     const items = [...CBOR.fromCDNSeq(text, opts)];
     setEditorText(editor, items.map((item) => item.toCDN(opts)).join('\n'));
   } catch {
@@ -358,7 +367,7 @@ function importCborFile(file: File): void {
       const warnings: string[] = [];
       const items = [
         ...CBOR.fromCBORSeq(new Uint8Array(buf), {
-          extensions: SITE_EXTENSIONS,
+          ...getEnabledExtensions(),
           strict: false,
           onWarning: (w) => warnings.push(w.message),
         }),
