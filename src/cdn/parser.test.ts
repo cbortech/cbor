@@ -25,7 +25,9 @@ import {
   CborEpochDtExtFloat,
 } from '../extensions/dt';
 import { ip } from '../extensions/ip';
+import { cri } from '../extensions/cri';
 import { same } from '../extensions/same';
+import { BUILTIN_EXTENSIONS } from '../extensions/builtins';
 
 /** Convert Uint8Array to lowercase hex string. */
 function toHex(bytes: Uint8Array): string {
@@ -2967,6 +2969,99 @@ describe('parseCDN — pluggable app-string extensions', () => {
         true
       );
     });
+  });
+});
+
+describe('parseCDN — builtinExtensions option', () => {
+  test('omitted: default bundled extensions (dt, ip, cri, t1, b1, ilbs, ilts, float) are active', () => {
+    expect(parseCDN("dt'2026-01-01T00:00:00Z'")).not.toBeInstanceOf(
+      CborUnresolvedAppExt
+    );
+    expect(parseCDN("ip'192.0.2.1'")).not.toBeInstanceOf(CborUnresolvedAppExt);
+    expect(parseCDN("cri'https://example.com'")).not.toBeInstanceOf(
+      CborUnresolvedAppExt
+    );
+    expect(parseCDN('t1<<"a">>')).not.toBeInstanceOf(CborUnresolvedAppExt);
+    expect(parseCDN("float'3f800000'")).not.toBeInstanceOf(
+      CborUnresolvedAppExt
+    );
+  });
+
+  test('false: disables every bundled application extension', () => {
+    expect(
+      parseCDN("dt'2026-01-01T00:00:00Z'", { builtinExtensions: false })
+    ).toBeInstanceOf(CborUnresolvedAppExt);
+    expect(
+      parseCDN("ip'192.0.2.1'", { builtinExtensions: false })
+    ).toBeInstanceOf(CborUnresolvedAppExt);
+    expect(
+      parseCDN("float'3f800000'", { builtinExtensions: false })
+    ).toBeInstanceOf(CborUnresolvedAppExt);
+  });
+
+  test("false + unresolvedExtension: 'error' throws for a disabled builtin", () => {
+    expect(() =>
+      parseCDN("dt'2026-01-01T00:00:00Z'", {
+        builtinExtensions: false,
+        unresolvedExtension: 'error',
+      })
+    ).toThrow(SyntaxError);
+  });
+
+  test('array: replaces the default set with exactly the given extensions', () => {
+    // Only dt and cri are allowed — ip falls back to the Unresolved stand-in.
+    const result = parseCDN(
+      "[dt'2026-01-01T00:00:00Z', ip'192.0.2.1', cri'https://example.com']",
+      { builtinExtensions: [dt, cri], strict: false }
+    ) as CborArray;
+    expect(result.items[0]).not.toBeInstanceOf(CborUnresolvedAppExt);
+    expect(result.items[1]).toBeInstanceOf(CborUnresolvedAppExt);
+    expect(result.items[2]).not.toBeInstanceOf(CborUnresolvedAppExt);
+  });
+
+  test('a disabled builtin still hints, with builtinExtensions-specific guidance', () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      parseCDN("dt'2026-01-01T00:00:00Z'", { builtinExtensions: false });
+      expect(spy).toHaveBeenCalledTimes(1);
+      const msg = spy.mock.calls[0]![0] as string;
+      expect(msg).toContain("'dt'");
+      expect(msg).toContain('builtinExtensions');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('core RFC 8949 features (bignum, embedded CBOR) stay active regardless of builtinExtensions', () => {
+    const big = parseCDN('18446744073709551616', { builtinExtensions: false });
+    expect(big.toJS()).toBe(18446744073709551616n);
+
+    const embedded = parseCDN('24(<<1, 2>>)', {
+      builtinExtensions: false,
+    }) as CborTag;
+    expect(embedded).toBeInstanceOf(CborTag);
+    expect(embedded.content).toBeInstanceOf(CborEmbeddedCBOR);
+  });
+
+  test('user extensions still take priority over a custom builtinExtensions array', () => {
+    const result = parseCDN("dt'custom'", {
+      builtinExtensions: [dt],
+      extensions: [
+        {
+          appStringPrefixes: ['dt'],
+          parseAppString: (_p, s) => new CborTextString(s),
+        },
+      ],
+    });
+    expect(result).toBeInstanceOf(CborTextString);
+    expect((result as CborTextString).value).toBe('custom');
+  });
+
+  test('a custom array can reorder/reuse the same extension objects exported as BUILTIN_EXTENSIONS', () => {
+    const result = parseCDN('t1<<"a", "b">>', {
+      builtinExtensions: [...BUILTIN_EXTENSIONS].reverse(),
+    });
+    expect(result.toJS()).toBe('ab');
   });
 });
 

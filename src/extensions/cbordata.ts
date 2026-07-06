@@ -29,11 +29,15 @@ const cbordata: CborExtension = {
   ): CborItem | undefined {
     if (tag !== TAG_CBOR_DATA) return undefined;
     if (!(value instanceof CborByteString)) return undefined;
-    // Forward strict/onWarning/silent into the inner decode, but reset
-    // offset and allowTrailing since the embedded bytes start at 0.
+    // Forward strict/onWarning/silent/builtinExtensions into the inner decode,
+    // but reset offset and allowTrailing since the embedded bytes start at 0.
+    // Forwarding builtinExtensions matters for the allowlist story: a
+    // disabled built-in (e.g. dt via builtinExtensions: false) must not
+    // re-enable itself for tags found inside embedded CBOR.
     const innerOptions: FromCBOROptions | undefined = options
       ? {
           extensions: options.extensions,
+          builtinExtensions: options.builtinExtensions,
           strict: options.strict,
           onWarning: options.onWarning,
           silent: options.silent,

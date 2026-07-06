@@ -1,6 +1,6 @@
 import type { FromCBOROptions, DecodeWarning, CborExtension } from '../types';
 import type { CborItem } from '../ast/CborItem';
-import { BUILTIN_EXTENSIONS } from '../extensions/builtins';
+import { resolveBuiltinExtensions } from '../extensions/builtins';
 import { CborUint } from '../ast/CborUint';
 import { CborNint } from '../ast/CborNint';
 import { CborByteString } from '../ast/CborByteString';
@@ -210,15 +210,22 @@ const SMALL_BIGINTS: readonly bigint[] = Array.from({ length: 24 }, (_, i) =>
 );
 
 /**
- * BUILTIN_EXTENSIONS filtered to those with a parseTag hook, cached after
- * first use. Lazy (not module-level) because cbordata.ts imports decoder.ts,
- * forming a cycle that leaves BUILTIN_EXTENSIONS undefined at module init time.
+ * Default resolved builtins (no `builtinExtensions` override) filtered to
+ * those with a parseTag hook, cached after first use. Lazy (not module-level)
+ * because cbordata.ts imports decoder.ts, forming a cycle that leaves the
+ * builtins module's exports undefined at module init time.
  */
-let _builtinTagExts: readonly CborExtension[] | undefined;
-function getBuiltinTagExts(): readonly CborExtension[] {
-  return (_builtinTagExts ??= BUILTIN_EXTENSIONS.filter(
+let _defaultTagExts: readonly CborExtension[] | undefined;
+function getBuiltinTagExts(
+  builtinExtensions: CborExtension[] | false | undefined
+): readonly CborExtension[] {
+  if (builtinExtensions === undefined)
+    return (_defaultTagExts ??= resolveBuiltinExtensions(undefined).filter(
+      (ext) => ext.parseTag !== undefined
+    ));
+  return resolveBuiltinExtensions(builtinExtensions).filter(
     (ext) => ext.parseTag !== undefined
-  ));
+  );
 }
 
 /**
@@ -768,12 +775,13 @@ export function decodeCBOR(
   // Build the tag-extension list once per decode call.
   // For the common case (no user extensions) reuse the pre-filtered module-level
   // constant to avoid a spread + filter allocation on every decode call.
+  const builtinTagExts = getBuiltinTagExts(options?.builtinExtensions);
   const tagExts = options?.extensions?.length
     ? [
         ...options.extensions.filter((e) => e.parseTag !== undefined),
-        ...getBuiltinTagExts(),
+        ...builtinTagExts,
       ]
-    : getBuiltinTagExts();
+    : builtinTagExts;
   const { value, nextOffset } = decodeItem(view, offset, options, tagExts);
   if (!options?.allowTrailing && nextOffset !== view.byteLength) {
     const w = strictViolation(

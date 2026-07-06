@@ -195,6 +195,31 @@ describe('fromJS — unsupported types', () => {
   });
 });
 
+describe('fromJS — builtinExtensions option', () => {
+  class Marker {
+    constructor(readonly text: string) {}
+  }
+  const markerExt = {
+    isJSType: (v: unknown): v is Marker => v instanceof Marker,
+    fromJS: (v: unknown) =>
+      v instanceof Marker ? new CborTextString(v.text) : undefined,
+  };
+
+  test('a custom extension passed via `extensions` still applies with builtinExtensions: false', () => {
+    const node = fromJS(new Marker('hi'), {
+      extensions: [markerExt],
+      builtinExtensions: false,
+    }) as CborTextString;
+    expect(node).toBeInstanceOf(CborTextString);
+    expect(node.value).toBe('hi');
+  });
+
+  test('none of the default bundled extensions implement fromJS/isJSType, so omitting builtinExtensions behaves the same as false for plain values', () => {
+    expect(fromJS(42, { builtinExtensions: false })).toBeInstanceOf(CborUint);
+    expect(fromJS(42)).toBeInstanceOf(CborUint);
+  });
+});
+
 // ─── toJS ────────────────────────────────────────────────────────────────────
 
 describe('CborUint.toJS()', () => {

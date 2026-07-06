@@ -352,6 +352,32 @@ select.ctl {
   padding: 2px 4px;
 }
 
+.ext-popover {
+  max-width: 420px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.popover-section-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--fg-dim);
+  margin-top: 4px;
+}
+.popover-section-title:first-child {
+  margin-top: 0;
+}
+.popover-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 16px;
+}
+.popover-grid label.check {
+  justify-content: flex-start;
+  gap: 6px;
+}
+
 .mode-tabs {
   display: inline-flex;
   border: 1px solid var(--border);
