@@ -4,17 +4,22 @@ import ip from './ip';
 import cri from './cri';
 import bignum from './bignum';
 import cbordata from './cbordata';
+import ellipsis from './ellipsis';
 import { t1, b1 } from './concat';
 import { ilbs, ilts } from './ilstrings';
 import float from './float';
 
 /**
- * Core RFC 8949 data-model extensions (bignum tags 2/3, embedded-CBOR tag
- * 24). These implement base CBOR representation rather than an
- * application-oriented extension, so they are always active and are not
- * affected by the `builtinExtensions` option.
+ * Core data-model extensions (bignum tags 2/3, embedded-CBOR tag 24, and the
+ * CPA888 ellipsis tag). These implement base CBOR/EDN representation rather
+ * than an application-oriented extension, so they are always active and are
+ * not affected by the `builtinExtensions` option.
  */
-export const CORE_EXTENSIONS: readonly CborExtension[] = [bignum, cbordata];
+export const CORE_EXTENSIONS: readonly CborExtension[] = [
+  bignum,
+  cbordata,
+  ellipsis,
+];
 
 /**
  * Default application-oriented extensions bundled with the library.

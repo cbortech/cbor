@@ -239,73 +239,157 @@
         <div id="format-popover" class="popover" hidden>
           <label
             >Indent
-            <select id="opt-indent">
+            <select id="opt-indent" aria-describedby="hint-opt-indent">
               <option value="2" selected>2 spaces</option>
               <option value="4">4 spaces</option>
               <option value="tab">Tab</option>
               <option value="">Compact</option>
             </select>
+            <span class="opt-hint" role="tooltip" id="hint-opt-indent"
+              >Pretty-print indentation; Compact emits single-line output</span
+            >
           </label>
           <label
             >Commas
-            <select id="opt-commas">
+            <select id="opt-commas" aria-describedby="hint-opt-commas">
               <option value="comma" selected>Comma</option>
               <option value="trailing">Trailing</option>
               <option value="none">None</option>
             </select>
+            <span class="opt-hint" role="tooltip" id="hint-opt-commas"
+              >Separators between array/map elements: commas, commas with a
+              trailing comma after the last element, or spaces only</span
+            >
           </label>
           <label
             >Integers
-            <select id="opt-int">
+            <select id="opt-int" aria-describedby="hint-opt-int">
               <option value="decimal" selected>Decimal</option>
               <option value="hex">Hex</option>
               <option value="octal">Octal</option>
               <option value="binary">Binary</option>
             </select>
+            <span class="opt-hint" role="tooltip" id="hint-opt-int"
+              >Numeric notation for integers: decimal (42), hex (0x2a), octal
+              (0o52), or binary (0b101010)</span
+            >
           </label>
           <label
             >Floats
-            <select id="opt-float">
+            <select id="opt-float" aria-describedby="hint-opt-float">
               <option value="decimal" selected>Decimal</option>
               <option value="hex">Hex (C99)</option>
             </select>
+            <span class="opt-hint" role="tooltip" id="hint-opt-float"
+              >Notation for floating-point values: decimal (1.5) or C99-style
+              hex (0x1.8p+0)</span
+            >
           </label>
           <label
             >Byte strings
-            <select id="opt-bstr">
+            <select id="opt-bstr" aria-describedby="hint-opt-bstr">
               <option value="hex" selected>Hex</option>
               <option value="base64">Base64</option>
               <option value="base64url">Base64url</option>
             </select>
+            <span class="opt-hint" role="tooltip" id="hint-opt-bstr"
+              >Encoding for byte string literals: h'…' hex, b64'…' base64, or
+              b64'…' with the base64url alphabet</span
+            >
           </label>
           <label
             >Enc. indicators
-            <select id="opt-enc-ind">
+            <select id="opt-enc-ind" aria-describedby="hint-opt-enc-ind">
               <option value="auto" selected>Auto</option>
               <option value="always">Always</option>
               <option value="never">Never</option>
             </select>
+            <span class="opt-hint" role="tooltip" id="hint-opt-enc-ind"
+              >When to append encoding-width indicators (_0…_7, _i): only for
+              non-canonical encodings (Auto), on every item (Always), or
+              never</span
+            >
           </label>
           <label class="check">
-            <input type="checkbox" id="opt-split-newline" checked />
+            <input
+              type="checkbox"
+              id="opt-split-newline"
+              aria-describedby="hint-opt-split-newline"
+              checked
+            />
             Split at newlines
+            <span class="opt-hint" role="tooltip" id="hint-opt-split-newline"
+              >Split text strings at newline characters using string
+              concatenation ("line1\n" + "line2")</span
+            >
           </label>
           <label class="check">
-            <input type="checkbox" id="opt-split-cdn" checked />
+            <input
+              type="checkbox"
+              id="opt-split-cdn"
+              aria-describedby="hint-opt-split-cdn"
+              checked
+            />
             Format CDN strings
+            <span class="opt-hint" role="tooltip" id="hint-opt-split-cdn"
+              >Re-format text strings whose content parses as CDN (a JSON
+              superset) by splitting them with concatenation and structure-aware
+              indentation</span
+            >
           </label>
           <label class="check">
-            <input type="checkbox" id="opt-comments" checked />
+            <input
+              type="checkbox"
+              id="opt-comments"
+              aria-describedby="hint-opt-comments"
+              checked
+            />
             Keep comments
+            <span class="opt-hint" role="tooltip" id="hint-opt-comments"
+              >Keep comments from the input and emit them in the formatted
+              output</span
+            >
           </label>
           <label class="check">
-            <input type="checkbox" id="opt-concat" checked />
+            <input
+              type="checkbox"
+              id="opt-concat"
+              aria-describedby="hint-opt-concat"
+              checked
+            />
             Keep concatenation
+            <span class="opt-hint" role="tooltip" id="hint-opt-concat"
+              >Keep + string concatenation boundaries from the input ("a" + "b")
+              instead of joining the parts into one literal</span
+            >
+          </label>
+          <label class="check">
+            <input
+              type="checkbox"
+              id="opt-app-strings"
+              aria-describedby="hint-opt-app-strings"
+              checked
+            />
+            App strings
+            <span class="opt-hint" role="tooltip" id="hint-opt-app-strings"
+              >Use application-string notation for known tags (e.g.
+              DT'2023-01-01T12:00:00Z', ip'192.0.2.42') instead of raw tag
+              notation like 1(1672574400)</span
+            >
           </label>
         </div>
         <div id="ext-popover" class="popover ext-popover" hidden>
           <div class="popover-section-title">Built-in</div>
-          <div id="ext-popover-builtin" class="popover-grid"></div>
+          <div id="ext-popover-builtin" class="popover-grid">
+            <label class="check" title="Core CDN syntax — always active">
+              <input type="checkbox" checked disabled />
+              h
+            </label>
+            <label class="check" title="Core CDN syntax — always active">
+              <input type="checkbox" checked disabled />
+              b64
+            </label>
+          </div>
           <div class="popover-section-title">Additional</div>
           <div id="ext-popover-extra" class="popover-grid"></div>
         </div>

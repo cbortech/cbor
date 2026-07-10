@@ -352,6 +352,40 @@ select.ctl {
   padding: 2px 4px;
 }
 
+/* Per-option help bubble, shown on hover or keyboard focus. The text is a
+   real element tied to its control via aria-describedby, so screen readers
+   announce it even while it is visually hidden. */
+#format-popover label {
+  position: relative;
+}
+.opt-hint {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 100%;
+  z-index: 11;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--fg);
+  box-shadow: 0 4px 12px #00000055;
+  /* Hide visually with opacity only (not visibility/display) so the element
+     stays in the accessibility tree for aria-describedby at all times;
+     pointer-events: none keeps the invisible bubble from intercepting
+     clicks. */
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+#format-popover label:hover .opt-hint,
+#format-popover label:focus-within .opt-hint {
+  opacity: 1;
+  transition-delay: 0.35s;
+}
+
 .ext-popover {
   max-width: 420px;
   max-height: 70vh;
@@ -376,6 +410,10 @@ select.ctl {
 .popover-grid label.check {
   justify-content: flex-start;
   gap: 6px;
+}
+.popover-grid label.check:has(input:disabled) {
+  color: var(--fg-dim);
+  cursor: default;
 }
 
 .mode-tabs {

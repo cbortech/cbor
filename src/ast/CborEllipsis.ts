@@ -31,6 +31,7 @@ export class CborEllipsis extends CborTag {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
+    if (options?.appStrings === false) return super._toCDN(options, depth);
     if (this.content instanceof CborSimple) {
       // Subtree elision → "..."
       return '...';
