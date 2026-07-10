@@ -302,10 +302,23 @@
             <input type="checkbox" id="opt-concat" checked />
             Keep concatenation
           </label>
+          <label class="check">
+            <input type="checkbox" id="opt-app-strings" checked />
+            App strings
+          </label>
         </div>
         <div id="ext-popover" class="popover ext-popover" hidden>
           <div class="popover-section-title">Built-in</div>
-          <div id="ext-popover-builtin" class="popover-grid"></div>
+          <div id="ext-popover-builtin" class="popover-grid">
+            <label class="check" title="Core CDN syntax — always active">
+              <input type="checkbox" checked disabled />
+              h
+            </label>
+            <label class="check" title="Core CDN syntax — always active">
+              <input type="checkbox" checked disabled />
+              b64
+            </label>
+          </div>
           <div class="popover-section-title">Additional</div>
           <div id="ext-popover-extra" class="popover-grid"></div>
         </div>
