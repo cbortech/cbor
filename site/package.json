@@ -13,8 +13,6 @@
   "dependencies": {
     "@cbortech/cbor": "file:..",
     "@cbortech/hash-extension": "^0.2.3",
-    "@cbortech/set-map-extensions": "^0.1.0",
-    "@cbortech/uuid-extension": "^0.3.3",
     "@codemirror/commands": "^6.10.4",
     "@codemirror/lint": "^6.9.7",
     "@codemirror/state": "^6.7.1",
