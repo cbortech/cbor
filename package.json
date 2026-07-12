@@ -99,8 +99,7 @@
     "site:clean": "npm run --workspace site clean",
     "site:dev": "npm run build && npm run --workspace site dev",
     "site:build": "npm run build && npm run --workspace site build",
-    "site:preview": "npm run site:build && npm run --workspace site preview",
-    "site:deploy": "npm run site:build && npm run --workspace site deploy"
+    "site:preview": "npm run site:build && npm run --workspace site preview"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",

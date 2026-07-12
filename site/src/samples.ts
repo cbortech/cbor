@@ -96,10 +96,8 @@ export const SAMPLES: Sample[] = [
 }`,
   },
   {
-    name: 'App strings: UUID & datetime',
+    name: 'App strings: datetime',
     cdn: `{
-  # UUID (tag 37) — requires @cbortech/uuid-extension
-  "id": UUID'550e8400-e29b-41d4-a716-446655440000',
   # DT wraps the epoch in tag(1); dt gives a bare epoch number
   "created": DT'2026-06-14T00:00:00Z',
   "expires": dt'2027-01-01T00:00:00Z',
@@ -128,19 +126,6 @@ export const SAMPLES: Sample[] = [
   # hash'...' — requires @cbortech/hash-extension
   hash'SHA-256;base64url:47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU',
 ]`,
-  },
-  {
-    name: 'App sequences: Set & Map',
-    cdn: `{
-  # SET / MAP require @cbortech/set-map-extensions.
-  # SET uses tag 258 over an array; MAP uses tag 259 over a map.
-  "roles": SET<<["admin", "editor", "viewer"]>>,
-  "scores": MAP<<{
-    "alice": 98,
-    "bob": 72,
-    "carol": 85,
-  }>>,
-}`,
   },
   {
     name: 'App strings: t1/b1 & ilbs/ilts',
