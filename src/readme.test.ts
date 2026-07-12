@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import DefaultCBOR, { CBOR } from './index';
+import { CDDL } from './cddl/index';
 
 describe('README examples', () => {
   test('default import exposes the CBOR facade', () => {
@@ -312,5 +313,28 @@ describe('README examples', () => {
 `);
 
     expect(item.toCDN()).toBe('[1,2,3]');
+  });
+});
+
+describe('README examples: CDDL', () => {
+  test('compile a data model', () => {
+    const schema = CDDL.compile(`
+      person = { name: tstr, ? age: uint }
+    `);
+
+    expect(schema.root?.name).toBe('person');
+  });
+
+  test('strict: false collects semantic warnings', () => {
+    const schema = CDDL.compile('a = missing-name', { strict: false });
+
+    expect(schema.warnings?.[0]?.code).toBe('undefined-name');
+    expect(schema.warnings?.[0]).toMatchObject({ start: 4, end: 16 });
+  });
+
+  test('format normalizes spacing and keeps literal spelling', () => {
+    const text = CDDL.compile('a=0x10\nb   = { x :  tstr }').format();
+
+    expect(text).toBe('a = 0x10\nb = {x: tstr}\n');
   });
 });

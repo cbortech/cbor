@@ -874,6 +874,60 @@ Syntax errors thrown by `fromCDN`/`parse`/`tokenize` are `CdnSyntaxError`
 instances (a `SyntaxError` subclass, also exported from the main entry) and
 carry `offset`, `line`, `column`, and — where known — `endOffset`.
 
+## CDDL
+
+The `@cbortech/cbor/cddl` subpath contains a parser and compiler for CDDL
+(Concise Data Definition Language, [RFC 8610](https://www.rfc-editor.org/rfc/rfc8610)
+as updated by [RFC 9682](https://www.rfc-editor.org/rfc/rfc9682)) — the
+schema language for describing CBOR data structures. This is the grammar
+layer of the CDDL validation feature: it parses a data model, checks it
+statically, and can re-serialize it. Validating CBOR/CDN data against a
+compiled schema is planned as a follow-up.
+
+```ts
+import { CDDL } from '@cbortech/cbor/cddl';
+
+const schema = CDDL.compile(`
+  person = { name: tstr, ? age: uint }
+`);
+
+console.log(schema.root?.name);
+// person
+```
+
+`compile` throws a `CddlSyntaxError` (with `offset`, `line`, and `column`) on
+grammar errors, and a `CddlSemanticError` on semantic problems: undefined
+names (the RFC 8610 standard prelude — `uint`, `tstr`, `bool`, … — is always
+available), duplicate rule definitions, and generic-arity mismatches. Pass
+`{ strict: false }` to collect semantic problems into `schema.warnings`
+instead of throwing:
+
+```ts
+import { CDDL } from '@cbortech/cbor/cddl';
+
+const schema = CDDL.compile('a = missing-name', { strict: false });
+
+console.log(schema.warnings?.[0]?.code);
+// undefined-name
+```
+
+`schema.format()` re-serializes the model with normalized spacing (comments
+are not re-emitted; literal values keep their source spelling):
+
+```ts
+import { CDDL } from '@cbortech/cbor/cddl';
+
+const text = CDDL.compile('a=0x10\nb   = { x :  tstr }').format();
+
+console.log(text);
+// a = 0x10
+// b = {x: tstr}
+```
+
+The subpath also exports `tokenize` / `tokenizeLenient` for CDDL text,
+mirroring the CDN tokenization API above, plus the typed rule AST
+(`schema.ast`, `schema.rules`) with source offsets on every node.
+
 ## Public API
 
 The documented public exports are:
@@ -893,12 +947,19 @@ Lower-level CDN tokenization lives in `@cbortech/cbor/cdn`
 (`tokenize`, `tokenizeLenient`, `Token`, `TokenType`, `EdnComment`),
 and AST node classes in `@cbortech/cbor/ast`.
 
+The CDDL compiler lives in `@cbortech/cbor/cddl`
+(`CDDL`, `CddlSchema`, `CddlSyntaxError`, `CddlSemanticError`,
+`tokenize`, `tokenizeLenient`, and the CDDL AST types).
+
 ## Specifications
 
 This library targets:
 
 - [CBOR, RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)
 - [Concise Diagnostic Notation (CDN), draft-ietf-cbor-edn-literals-25](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/)
+- [CDDL, RFC 8610](https://www.rfc-editor.org/rfc/rfc8610) with the grammar
+  updates of [RFC 9682](https://www.rfc-editor.org/rfc/rfc9682) (parsing and
+  compilation; see [CDDL](#cddl))
 
 On top of draft -25, this library already incorporates parts of
 [draft -26](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/26/):

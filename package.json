@@ -5,6 +5,7 @@
   "keywords": [
     "cbor",
     "cdn",
+    "cddl",
     "cbor-edn",
     "diagnostic-notation",
     "json",
@@ -60,6 +61,16 @@
         "types": "./dist/cdn/index.d.ts",
         "default": "./dist/cdn/index.cjs"
       }
+    },
+    "./cddl": {
+      "import": {
+        "types": "./dist/cddl/index.d.ts",
+        "default": "./dist/cddl/index.js"
+      },
+      "require": {
+        "types": "./dist/cddl/index.d.ts",
+        "default": "./dist/cddl/index.cjs"
+      }
     }
   },
   "files": [
@@ -81,11 +92,12 @@
     "start": "node dist/index.js",
     "dev": "npm run build && npm start",
     "clean": "node -e \"['dist','coverage'].forEach(d=>require('fs').rmSync(d,{recursive:true,force:true}))\"",
-    "test": "vitest run --exclude src/cdn/edn-test-vectors.test.ts --exclude src/cdn/edn-abnf-vectors.test.ts",
+    "test": "vitest run --exclude src/cdn/edn-test-vectors.test.ts --exclude src/cdn/edn-abnf-vectors.test.ts --exclude src/cddl/cddl-corpus.test.ts",
     "test:exports": "npm run build && node scripts/check-package-exports.mjs",
-    "test:node": "vitest run --exclude src/cdn/edn-test-vectors.test.ts --exclude src/cdn/edn-abnf-vectors.test.ts",
+    "test:node": "vitest run --exclude src/cdn/edn-test-vectors.test.ts --exclude src/cdn/edn-abnf-vectors.test.ts --exclude src/cddl/cddl-corpus.test.ts",
     "test:edn-vectors": "vitest run src/cdn/edn-test-vectors.test.ts",
     "test:edn-abnf": "vitest run src/cdn/edn-abnf-vectors.test.ts",
+    "test:cddl-corpus": "vitest run src/cddl/cddl-corpus.test.ts",
     "test:chromium": "cross-env BROWSER=chromium vitest run --config vitest.browser.config.ts",
     "test:firefox": "cross-env BROWSER=firefox vitest run --config vitest.browser.config.ts",
     "test:webkit": "cross-env BROWSER=webkit vitest run --config vitest.browser.config.ts",

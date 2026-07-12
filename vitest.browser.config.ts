@@ -22,6 +22,7 @@ export default mergeConfig(
         'src/cdn/cdn-test-vectors.test.ts',
         'src/cdn/edn-test-vectors.test.ts',
         'src/cdn/edn-abnf-vectors.test.ts',
+        'src/cddl/cddl-corpus.test.ts',
       ],
       coverage: {
         provider: 'v8',

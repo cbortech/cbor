@@ -19,6 +19,7 @@ export default defineConfig({
         index: resolve(__dirname, 'src/index.ts'),
         'ast/index': resolve(__dirname, 'src/ast/index.ts'),
         'cdn/index': resolve(__dirname, 'src/cdn/index.ts'),
+        'cddl/index': resolve(__dirname, 'src/cddl/index.ts'),
       },
       name: 'CBOR',
       formats: ['es', 'cjs'],

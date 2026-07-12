@@ -865,6 +865,60 @@ const lenient = tokenizeLenient('[1, "ab');
 インスタンスで、`offset`・`line`・`column`、判明している場合は `endOffset` を
 保持します。
 
+## CDDL
+
+`@cbortech/cbor/cddl` サブパスには、CDDL(Concise Data Definition
+Language、[RFC 8610](https://www.rfc-editor.org/rfc/rfc8610) +
+[RFC 9682](https://www.rfc-editor.org/rfc/rfc9682) の文法更新)のパーサと
+コンパイラが入っています。CDDL は CBOR データ構造を記述するスキーマ言語です。
+現時点では CDDL 検証機能の文法レイヤーとして、データモデルのパース・静的
+チェック・再シリアライズができます。CBOR/CDN 値のスキーマ検証は今後の
+フェーズで追加予定です。
+
+```ts
+import { CDDL } from '@cbortech/cbor/cddl';
+
+const schema = CDDL.compile(`
+  person = { name: tstr, ? age: uint }
+`);
+
+console.log(schema.root?.name);
+// person
+```
+
+`compile` は、文法エラーでは `CddlSyntaxError`(`offset`・`line`・`column`
+付き)を、意味エラー — 未定義名(RFC 8610 standard prelude の `uint`・
+`tstr`・`bool` などは常に解決できます)、ルールの重複定義、ジェネリクス
+引数数の不一致 — では `CddlSemanticError` を throw します。
+`{ strict: false }` を渡すと、意味エラーは throw せずに `schema.warnings`
+に収集されます。
+
+```ts
+import { CDDL } from '@cbortech/cbor/cddl';
+
+const schema = CDDL.compile('a = missing-name', { strict: false });
+
+console.log(schema.warnings?.[0]?.code);
+// undefined-name
+```
+
+`schema.format()` は空白を正規化してモデルを再シリアライズします
+(コメントは再出力されません。リテラル値はソースの表記を保持します)。
+
+```ts
+import { CDDL } from '@cbortech/cbor/cddl';
+
+const text = CDDL.compile('a=0x10\nb   = { x :  tstr }').format();
+
+console.log(text);
+// a = 0x10
+// b = {x: tstr}
+```
+
+同じサブパスから、CDN と同形の CDDL 用 `tokenize` / `tokenizeLenient` と、
+全ノードにソースオフセットが付いた型付きルール AST(`schema.ast`,
+`schema.rules`)も利用できます。
+
 ## 公開 API
 
 ドキュメント化している公開 export は次のとおりです。
@@ -884,12 +938,19 @@ const lenient = tokenizeLenient('[1, "ab');
 (`tokenize`, `tokenizeLenient`, `Token`, `TokenType`, `EdnComment`)に、
 AST ノードクラスは `@cbortech/cbor/ast` にあります。
 
+CDDL コンパイラは `@cbortech/cbor/cddl`
+(`CDDL`, `CddlSchema`, `CddlSyntaxError`, `CddlSemanticError`,
+`tokenize`, `tokenizeLenient`, CDDL AST 型)にあります。
+
 ## 準拠している仕様
 
 このライブラリは次の仕様を対象にしています。
 
 - [CBOR, RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)
 - [Concise Diagnostic Notation (CDN), draft-ietf-cbor-edn-literals-25](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/)
+- [CDDL, RFC 8610](https://www.rfc-editor.org/rfc/rfc8610) +
+  [RFC 9682](https://www.rfc-editor.org/rfc/rfc9682) の文法更新
+  (パース・コンパイルまで。[CDDL](#cddl) 節を参照)
 
 draft -25 をベースに、
 [draft -26](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/26/)
