@@ -14,7 +14,13 @@ import { compile, CddlSchema, type CompileOptions } from './schema';
 
 export type { CddlToken, CddlTokenType, CddlComment } from './tokenizer';
 export { CddlSyntaxError, CddlSemanticError } from './errors';
-export type { CddlWarning } from './errors';
+export type {
+  CddlWarning,
+  CddlValidationError,
+  CddlValidationWarning,
+  ValidationResult,
+} from './errors';
+export type { ValidateOptions } from './validator';
 export { CddlSchema } from './schema';
 export type { CompileOptions } from './schema';
 export { parseCDDL } from './parser';

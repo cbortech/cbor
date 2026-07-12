@@ -10,7 +10,15 @@
 import { parseCDDL } from './parser';
 import { getPreludeRules } from './prelude';
 import { formatCddl } from './writer';
-import { CddlSemanticError, type CddlWarning } from './errors';
+import { validateItem, type ValidateOptions } from './validator';
+import { CborItem } from '../ast/CborItem';
+import { decodeCBOR } from '../cbor/decoder';
+import { parseCDN } from '../cdn/parser';
+import {
+  CddlSemanticError,
+  type CddlWarning,
+  type ValidationResult,
+} from './errors';
 import type {
   CddlGroup,
   CddlGroupEntry,
@@ -66,6 +74,31 @@ export class CddlSchema {
   /** Serialize the data model back to CDDL text (comments are not preserved). */
   format(): string {
     return formatCddl(this.ast);
+  }
+
+  /**
+   * Validate a data item against this schema's root rule.
+   *
+   * Accepts a CborItem, CBOR bytes (decoded with `decodeCBOR`), or CDN text
+   * (parsed with `parseCDN`). Validation failures are reported in the
+   * result, not thrown; decode/parse failures of the input throw as usual.
+   *
+   * @example
+   * const schema = CDDL.compile('person = { name: tstr, ? age: uint }');
+   * const result = schema.validate('{"name": "kudo", "age": 42}');
+   * result.valid; // true
+   */
+  validate(
+    input: CborItem | Uint8Array | string,
+    options?: ValidateOptions
+  ): ValidationResult {
+    const item =
+      input instanceof CborItem
+        ? input
+        : typeof input === 'string'
+          ? parseCDN(input)
+          : decodeCBOR(input);
+    return validateItem(this, item, options);
   }
 }
 

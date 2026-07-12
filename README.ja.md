@@ -869,11 +869,10 @@ const lenient = tokenizeLenient('[1, "ab');
 
 `@cbortech/cbor/cddl` サブパスには、CDDL(Concise Data Definition
 Language、[RFC 8610](https://www.rfc-editor.org/rfc/rfc8610) +
-[RFC 9682](https://www.rfc-editor.org/rfc/rfc9682) の文法更新)のパーサと
-コンパイラが入っています。CDDL は CBOR データ構造を記述するスキーマ言語です。
-現時点では CDDL 検証機能の文法レイヤーとして、データモデルのパース・静的
-チェック・再シリアライズができます。CBOR/CDN 値のスキーマ検証は今後の
-フェーズで追加予定です。
+[RFC 9682](https://www.rfc-editor.org/rfc/rfc9682) の文法更新)のパーサ・
+コンパイラ・バリデータが入っています。CDDL は CBOR データ構造を記述する
+スキーマ言語です。コンパイル済みスキーマで、CBOR バイト列・CDN テキスト・
+`CborItem` AST を検証できます。
 
 ```ts
 import { CDDL } from '@cbortech/cbor/cddl';
@@ -882,9 +881,34 @@ const schema = CDDL.compile(`
   person = { name: tstr, ? age: uint }
 `);
 
-console.log(schema.root?.name);
-// person
+console.log(schema.validate('{"name": "kudo", "age": 42}').valid);
+// true
 ```
+
+検証は throw せず結果オブジェクトを返します。失敗時は最深到達点の不一致を、
+インスタンス内のパス、**インスタンス側**のソースオフセット(CBOR 入力なら
+バイト位置、CDN 入力なら文字位置)、**スキーマ側**のソースオフセットとともに
+報告します。
+
+```ts
+import { CDDL } from '@cbortech/cbor/cddl';
+
+const schema = CDDL.compile('person = { name: tstr, ? age: uint }');
+const result = schema.validate('{"name": "kudo", "age": "x"}');
+
+console.log(result.valid, result.errors[0]?.path);
+// false /age
+```
+
+control operator は RFC 8610 の全演算子(`.size` `.bits` `.regexp` `.cbor`
+`.cborseq` `.within` `.and` `.lt`〜`.ne` `.default`)と RFC 9165 の
+`.plus` `.cat` `.feature` を実装しています。`.feature` の許可名は
+`validate(input, { features: [...] })` で指定します。未対応の演算子
+(`.abnf` など)は `result.warnings` に報告され、ターゲットのみで判定
+されます。`.regexp` は仕様上 XSD 正規表現ですが、アンカー付きの
+JavaScript `RegExp` で近似しています。`.default` は暗黙の `.ne` を適用
+します(RFC 8610 §3.8.6: デフォルト値はワイヤ上に送信されない)。参照
+実装の一部はこれを注釈のみとして扱う点に注意してください。
 
 `compile` は、文法エラーでは `CddlSyntaxError`(`offset`・`line`・`column`
 付き)を、意味エラー — 未定義名(RFC 8610 standard prelude の `uint`・

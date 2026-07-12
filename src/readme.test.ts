@@ -337,4 +337,20 @@ describe('README examples: CDDL', () => {
 
     expect(text).toBe('a = 0x10\nb = {x: tstr}\n');
   });
+
+  test('validate CDN text against a schema', () => {
+    const schema = CDDL.compile(`
+      person = { name: tstr, ? age: uint }
+    `);
+
+    expect(schema.validate('{"name": "kudo", "age": 42}').valid).toBe(true);
+  });
+
+  test('validation failures report the deepest mismatch', () => {
+    const schema = CDDL.compile('person = { name: tstr, ? age: uint }');
+    const result = schema.validate('{"name": "kudo", "age": "x"}');
+
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]?.path).toBe('/age');
+  });
 });

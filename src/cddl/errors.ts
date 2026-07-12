@@ -22,6 +22,43 @@ export interface CddlWarning {
   end?: number;
 }
 
+/**
+ * A single validation failure. When a data item does not match the schema,
+ * the reported error is the one recorded at the deepest point the matcher
+ * reached (failures discarded by backtracking are noise and are not kept).
+ */
+export interface CddlValidationError {
+  message: string;
+  /** Location inside the instance, e.g. '/claims/2/name' ('' = root). */
+  path: string;
+  /** Instance-side source offsets (byte offsets for CBOR input, character
+   *  offsets for CDN input), when the input carried them. */
+  start?: number;
+  end?: number;
+  /** The CDDL rule being matched when the failure was recorded. */
+  ruleName?: string;
+  /** Schema-side source offsets of the CDDL construct that failed to match. */
+  schemaStart?: number;
+  schemaEnd?: number;
+}
+
+/** A non-fatal observation made while validating (e.g. unsupported control
+ *  operators, whose targets are then matched without the constraint). */
+export interface CddlValidationWarning {
+  message: string;
+  schemaStart?: number;
+  schemaEnd?: number;
+}
+
+/** Result of {@link CddlSchema.validate}. */
+export interface ValidationResult {
+  valid: boolean;
+  /** Empty when valid; otherwise the deepest-reach failure(s). */
+  errors: CddlValidationError[];
+  /** Present when the validator had to approximate or skip constraints. */
+  warnings?: CddlValidationWarning[];
+}
+
 /** Syntax error thrown by the CDDL tokenizer and parser. */
 export class CddlSyntaxError extends SyntaxError {
   /** Character offset of the start of the offending range in the source input. */

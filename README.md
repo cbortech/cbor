@@ -876,13 +876,12 @@ carry `offset`, `line`, `column`, and — where known — `endOffset`.
 
 ## CDDL
 
-The `@cbortech/cbor/cddl` subpath contains a parser and compiler for CDDL
-(Concise Data Definition Language, [RFC 8610](https://www.rfc-editor.org/rfc/rfc8610)
-as updated by [RFC 9682](https://www.rfc-editor.org/rfc/rfc9682)) — the
-schema language for describing CBOR data structures. This is the grammar
-layer of the CDDL validation feature: it parses a data model, checks it
-statically, and can re-serialize it. Validating CBOR/CDN data against a
-compiled schema is planned as a follow-up.
+The `@cbortech/cbor/cddl` subpath contains a parser, compiler, and
+validator for CDDL (Concise Data Definition Language,
+[RFC 8610](https://www.rfc-editor.org/rfc/rfc8610) as updated by
+[RFC 9682](https://www.rfc-editor.org/rfc/rfc9682)) — the schema language
+for describing CBOR data structures. A compiled schema validates CBOR
+bytes, CDN text, or a `CborItem` AST:
 
 ```ts
 import { CDDL } from '@cbortech/cbor/cddl';
@@ -891,9 +890,35 @@ const schema = CDDL.compile(`
   person = { name: tstr, ? age: uint }
 `);
 
-console.log(schema.root?.name);
-// person
+console.log(schema.validate('{"name": "kudo", "age": 42}').valid);
+// true
 ```
+
+Validation returns a result object rather than throwing. On failure it
+reports the deepest mismatch with the instance path, source offsets into
+the _instance_ (byte offsets for CBOR input, character offsets for CDN
+input), and source offsets into the _schema_:
+
+```ts
+import { CDDL } from '@cbortech/cbor/cddl';
+
+const schema = CDDL.compile('person = { name: tstr, ? age: uint }');
+const result = schema.validate('{"name": "kudo", "age": "x"}');
+
+console.log(result.valid, result.errors[0]?.path);
+// false /age
+```
+
+Control operators from RFC 8610 (`.size`, `.bits`, `.regexp`, `.cbor`,
+`.cborseq`, `.within`, `.and`, `.lt`…`.ne`, `.default`) and RFC 9165
+(`.plus`, `.cat`, `.feature`) are implemented; `.feature` names are enabled
+via `validate(input, { features: [...] })`. Unsupported operators (such as
+`.abnf`) are reported in `result.warnings` and their targets are matched
+without the constraint. `.regexp` is approximated with an anchored
+JavaScript `RegExp` (the spec prescribes XSD regular expressions).
+`.default` applies its implied `.ne` (RFC 8610 §3.8.6): the default value
+itself does not validate. Note that some reference tools treat it as an
+annotation only.
 
 `compile` throws a `CddlSyntaxError` (with `offset`, `line`, and `column`) on
 grammar errors, and a `CddlSemanticError` on semantic problems: undefined
