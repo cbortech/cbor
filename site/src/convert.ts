@@ -18,6 +18,8 @@ export interface ConversionOk {
   bytes: Uint8Array;
   /** First (or only) CDN AST item — kept for backward compatibility. */
   cdnAst: CborItem;
+  /** All CDN AST items (length === seqLength), with source char offsets. */
+  cdnAsts: CborItem[];
   /** First (or only) binary AST item — kept for backward compatibility. */
   binAst: CborItem;
   /** All binary AST items (length === seqLength). */
@@ -98,6 +100,7 @@ export function convertCdn(text: string): Conversion {
       empty: false,
       bytes,
       cdnAst: cdnAsts[0]!,
+      cdnAsts,
       binAst: binAsts[0]!,
       binAsts,
       rows,

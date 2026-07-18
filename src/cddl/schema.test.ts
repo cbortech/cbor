@@ -4,6 +4,7 @@ import {
   CddlSemanticError,
   CddlSyntaxError,
   getPreludeRules,
+  positionAt,
   PRELUDE_CDDL,
 } from './index';
 
@@ -117,6 +118,29 @@ describe('CDDL.compile', () => {
   test('user rules shadow prelude names silently', () => {
     const schema = CDDL.compile('text = tstr .size (1..100)\nuse = text');
     expect(schema.warnings).toBeUndefined();
+  });
+});
+
+describe('CLI support surface', () => {
+  test('schema.source retains the compiled text', () => {
+    const text = 'person = { name: tstr }';
+    const schema = CDDL.compile(text);
+    expect(schema.source).toBe(text);
+    // Warning offsets index into schema.source.
+    const s2 = CDDL.compile('a = missing-name', { strict: false });
+    const w = s2.warnings![0]!;
+    expect(s2.source.slice(w.start!, w.end!)).toBe('missing-name');
+  });
+
+  test('positionAt converts offsets to 1-based line/column', () => {
+    const text = 'a = int\nbb = tstr\n';
+    expect(positionAt(text, 0)).toEqual({ line: 1, column: 1 });
+    expect(positionAt(text, 4)).toEqual({ line: 1, column: 5 });
+    expect(positionAt(text, 8)).toEqual({ line: 2, column: 1 });
+    expect(positionAt(text, 13)).toEqual({ line: 2, column: 6 });
+    // Clamps past the end; never throws.
+    expect(positionAt(text, 999)).toEqual({ line: 3, column: 1 });
+    expect(positionAt('', 5)).toEqual({ line: 1, column: 1 });
   });
 });
 

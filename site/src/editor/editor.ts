@@ -1,4 +1,4 @@
-import { EditorState } from '@codemirror/state';
+import { EditorState, type Extension } from '@codemirror/state';
 import {
   drawSelection,
   EditorView,
@@ -16,6 +16,7 @@ import {
 import { lintGutter, lintKeymap } from '@codemirror/lint';
 import { cdnHighlight } from './cdn-highlight';
 import { cdnLinter } from './cdn-lint';
+import { validationField } from './validation-deco';
 import { editorTheme } from './theme';
 
 export interface EditorCallbacks {
@@ -28,7 +29,9 @@ export interface EditorCallbacks {
 export function createEditor(
   parent: HTMLElement,
   initialText: string,
-  callbacks: EditorCallbacks
+  callbacks: EditorCallbacks,
+  // Language-specific highlight/lint extensions; default is the CDN pair.
+  langExtensions: Extension[] = [cdnHighlight, cdnLinter]
 ): EditorView {
   const view = new EditorView({
     parent,
@@ -46,8 +49,8 @@ export function createEditor(
           ...lintKeymap,
           indentWithTab,
         ]),
-        cdnHighlight,
-        cdnLinter,
+        ...langExtensions,
+        validationField,
         lintGutter(),
         editorTheme,
         EditorView.lineWrapping,

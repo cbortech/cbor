@@ -26,6 +26,7 @@ export type { CompileOptions } from './schema';
 export { parseCDDL } from './parser';
 export type { ParseCddlResult } from './parser';
 export { PRELUDE_CDDL, getPreludeRules } from './prelude';
+export { positionAt } from './position';
 export type {
   CddlRule,
   CddlType,

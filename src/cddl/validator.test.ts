@@ -297,9 +297,7 @@ describe('validate: control operators', () => {
     expectValid('t = uint .size ((100..200) .within int)', ['1']);
     expectValid('t = uint .size (999 .plus 1)', ['1']);
     expectValid('t = uint .size (999 .plus 1.5)', ['1']);
-    const featured = CDDL.compile(
-      't = uint .size (1000 .feature "large")'
-    );
+    const featured = CDDL.compile('t = uint .size (1000 .feature "large")');
     expect(featured.validate('1', { features: ['large'] }).valid).toBe(true);
     expect(featured.validate('1').valid).toBe(false);
     const featuredWithDetail = CDDL.compile(
@@ -375,6 +373,17 @@ describe('validate: control operators', () => {
     expectInvalid(cddl, ['{10: 1, 12: 2}']);
   });
 
+  test('.plus stays exact beyond 2^53 with a float controller', () => {
+    // floor(int + x) = int + floor(x): the big integer part must not be
+    // routed through double precision.
+    const cddl = 't = 9007199254740993 .plus 1.0';
+    expectValid(cddl, ['9007199254740994']);
+    expectInvalid(cddl, ['9007199254740992', '9007199254740993']);
+    expectValid('t = 9007199254740993 .plus 1', ['9007199254740994']);
+    expectValid('t = 9007199254740993 .plus 1.5', ['9007199254740994']);
+    expectValid('t = 9007199254740993 .plus -1.5', ['9007199254740991']);
+  });
+
   test('.cat (RFC 9165 §2.2)', () => {
     expectValid('t = "foo" .cat "bar"', ['"foobar"']);
     expectInvalid('t = "foo" .cat "bar"', ['"foo"', '"barfoo"']);
@@ -386,6 +395,23 @@ describe('validate: control operators', () => {
     expect(schema.validate('1').valid).toBe(false);
     expect(schema.validate('1').warnings?.[0]?.message).toContain('beta');
     expect(schema.validate('1', { features: ['beta'] }).valid).toBe(true);
+  });
+
+  test('.feature accepts parenthesized array controllers', () => {
+    // RFC 9165 §5: the controller may be [name, detail] — and either form
+    // may be parenthesized.
+    for (const cddl of [
+      't = uint .feature (["x", "detail"])',
+      't = uint .feature ["x", "detail"]',
+      't = uint .feature ("x")',
+    ]) {
+      const schema = CDDL.compile(cddl);
+      expect(schema.validate('1', { features: ['x'] }).valid, cddl).toBe(true);
+      expect(schema.validate('1').valid, cddl).toBe(false);
+      expect(schema.validate('1').errors[0]?.message, cddl).not.toContain(
+        'unresolvable'
+      );
+    }
   });
 
   test('unsupported operators warn and match the target only', () => {

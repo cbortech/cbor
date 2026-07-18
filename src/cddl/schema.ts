@@ -46,6 +46,12 @@ export interface CompileOptions {
  * prelude names; the prelude itself is available via `getPreludeRules()`.
  */
 export class CddlSchema {
+  /**
+   * The CDDL source text this schema was compiled from. AST node offsets
+   * (and validation errors' `schemaStart`/`schemaEnd`) index into it, so
+   * tooling can render positions without carrying the text separately.
+   */
+  readonly source: string;
   /** All rules in source order, as parsed (extensions unmerged). */
   readonly ast: readonly CddlRule[];
   /** Rule definitions by name (base definition first, then extensions). */
@@ -60,11 +66,13 @@ export class CddlSchema {
 
   /** @internal — use `CDDL.compile()`. */
   constructor(
+    source: string,
     ast: CddlRule[],
     rules: Map<string, CddlRule[]>,
     root: CddlRule | undefined,
     warnings: CddlWarning[]
   ) {
+    this.source = source;
     this.ast = ast;
     this.rules = rules;
     if (root) this.root = root;
@@ -203,7 +211,7 @@ export function compile(text: string, options?: CompileOptions): CddlSchema {
     throw new CddlSemanticError(warnings);
 
   // An empty model has no root; `no-rules` was already reported above.
-  return new CddlSchema(rules, table, root, warnings);
+  return new CddlSchema(text, rules, table, root, warnings);
 }
 
 /**

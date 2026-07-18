@@ -375,10 +375,15 @@ const plus: ControlHandler = (deps, item, target, controller, path, node) => {
       ? true
       : deps.fail(path, item, node, `expected ${sum} (.plus)`);
   }
+  // Integer target: compute in bigint so values beyond 2^53 stay exact.
+  // An integer CddlValue is only a `number` when within the safe range, so
+  // BigInt(tv) is lossless; for a float controller, floor(int + x) equals
+  // int + floor(x), keeping the big integer part untouched.
+  if (typeof cv === 'number' && !Number.isFinite(cv))
+    return deps.fail(path, item, node, '.plus controller is not finite');
   const sum =
-    typeof tv === 'bigint' && typeof cv === 'bigint'
-      ? tv + cv
-      : BigInt(Math.floor(Number(tv) + Number(cv)));
+    (typeof tv === 'bigint' ? tv : BigInt(tv)) +
+    (typeof cv === 'bigint' ? cv : BigInt(Math.floor(cv)));
   return deps.matchesLiteral(item, synthValue({ type: 'int', value: sum }))
     ? true
     : deps.fail(path, item, node, `expected ${sum} (.plus)`);
@@ -422,15 +427,27 @@ const cat: ControlHandler = (deps, item, target, controller, path, node) => {
     : deps.fail(path, item, node, 'byte string does not equal the .cat result');
 };
 
+/** Peel `( … )` layers off a type2 (single plain alternative only). */
+const stripParens = (t2: CddlType2): CddlType2 => {
+  while (
+    t2.kind === 'paren' &&
+    t2.type.alternatives.length === 1 &&
+    !t2.type.alternatives[0]!.op
+  )
+    t2 = t2.type.alternatives[0]!.target;
+  return t2;
+};
+
 /**
  * The .feature controller is a feature name, or an array whose first
- * element is the feature name and whose rest is detail (RFC 9165 §5).
+ * element is the feature name and whose rest is detail (RFC 9165 §5) —
+ * either form may be parenthesized, e.g. `.feature (["x", "detail"])`.
  */
 export const featureName = (
   deps: ControlDeps,
   controller: CddlType2
 ): string | undefined => {
-  let t2 = controller;
+  let t2 = stripParens(controller);
   if (t2.kind === 'array') {
     const first = t2.group.choices[0]?.[0];
     if (

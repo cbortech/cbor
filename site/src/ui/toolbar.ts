@@ -245,25 +245,42 @@ export function initModeTabs(onChange: (mode: BytesMode) => void): void {
 
 // ── Share-link fragment codec ────────────────────────────────────────────────
 
-export function encodeShareHash(cdnText: string): string {
-  const bytes = new TextEncoder().encode(cdnText);
-  let bin = '';
-  for (const b of bytes) bin += String.fromCharCode(b);
-  const b64 = btoa(bin)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-  return `#cdn=${b64}`;
+export interface ShareState {
+  cdn: string;
+  /** CDDL schema text; present when the CDDL pane is open and non-empty. */
+  cddl?: string;
 }
 
-export function decodeShareHash(hash: string): string | null {
-  const match = /^#cdn=([A-Za-z0-9_-]+)$/.exec(hash);
+function encodeB64url(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function decodeB64url(b64url: string): string {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(b64);
+  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+}
+
+export function encodeShareHash(state: ShareState): string {
+  let hash = `#cdn=${encodeB64url(state.cdn)}`;
+  if (state.cddl !== undefined && state.cddl.trim() !== '')
+    hash += `&cddl=${encodeB64url(state.cddl)}`;
+  return hash;
+}
+
+/** Decode `#cdn=…` (legacy) or `#cdn=…&cddl=…` share fragments. */
+export function decodeShareHash(hash: string): ShareState | null {
+  const match = /^#cdn=([A-Za-z0-9_-]*)(?:&cddl=([A-Za-z0-9_-]+))?$/.exec(hash);
   if (!match) return null;
   try {
-    const b64 = match[1]!.replace(/-/g, '+').replace(/_/g, '/');
-    const bin = atob(b64);
-    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    const cdn = decodeB64url(match[1]!);
+    return match[2] !== undefined
+      ? { cdn, cddl: decodeB64url(match[2]) }
+      : { cdn };
   } catch {
     return null;
   }

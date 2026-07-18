@@ -39,6 +39,14 @@
           >npm</a
         >
         <button
+          id="cddl-toggle-btn"
+          class="ctl cddl-toggle"
+          title="Show or hide the CDDL schema pane"
+          aria-pressed="false"
+        >
+          CDDL
+        </button>
+        <button
           id="theme-toggle"
           class="icon-btn toolbar-icon-btn"
           title="Toggle color theme"
@@ -128,6 +136,44 @@
     </section>
 
     <main class="playground">
+      <section class="pane pane-cddl" aria-label="CDDL schema editor" hidden>
+        <div class="pane-toolbar">
+          <span class="pane-title">CDDL</span>
+          <select id="cddl-samples" class="ctl" title="Load a CDDL sample">
+            <option value="" disabled selected>Samples…</option>
+          </select>
+          <span class="toolbar-spacer"></span>
+          <button
+            id="cddl-format-btn"
+            class="ctl"
+            title="Format the CDDL schema"
+          >
+            Format
+          </button>
+          <button
+            id="copy-cddl"
+            class="ctl toolbar-icon-btn"
+            title="Copy CDDL text to clipboard"
+            aria-label="Copy CDDL text to clipboard"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="9" y="9" width="11" height="11" rx="2" />
+              <path
+                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+              />
+            </svg>
+          </button>
+        </div>
+        <div id="cddl-editor" class="editor-host"></div>
+        <div id="cddl-status" class="bytes-status" hidden></div>
+      </section>
+      <div
+        class="pane-divider"
+        id="cddl-divider"
+        title="Drag to resize"
+        hidden
+      ></div>
+
       <section class="pane pane-cdn" aria-label="CDN editor">
         <div class="pane-toolbar">
           <span class="pane-title">CDN (CBOR-EDN)</span>

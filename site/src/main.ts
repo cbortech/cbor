@@ -12,6 +12,7 @@ import { HexView } from './hexview/hexview';
 import { rangeAtByte, rangeAtChar } from './mapping/lockstep';
 import { inspectJS } from './js-preview';
 import { DEFAULT_SAMPLE } from './samples';
+import { initCddlPane, type CddlPane } from './cddl-pane';
 import {
   type BytesMode,
   copyWithFeedback,
@@ -144,6 +145,7 @@ const update = (text: string): void => {
   conversion = convertCdn(text);
   renderBytesPane();
   updateCopyBytesBtn();
+  cddlPane?.revalidate(conversion);
 };
 
 const debouncedUpdate = debounce(update, 200);
@@ -157,8 +159,10 @@ const onCursorMoved = debounce((pos: number): void => {
   );
 }, 100);
 
-const initialText = decodeShareHash(location.hash) ?? DEFAULT_SAMPLE;
+const shared = decodeShareHash(location.hash);
+const initialText = shared?.cdn ?? DEFAULT_SAMPLE;
 let resetSamples = (): void => {};
+let cddlPane: CddlPane | undefined;
 
 const editor = createEditor(el('editor'), initialText, {
   onDocChanged(text) {
@@ -213,35 +217,49 @@ function initFileDrop(target: HTMLElement, onFile: (file: File) => void): void {
 
 // ── Pane resize ──────────────────────────────────────────────────────────────
 
-const divider = el<HTMLDivElement>('pane-divider');
-const playgroundEl = divider.parentElement!;
+const playgroundEl = document.querySelector<HTMLElement>('.playground')!;
+const cddlPaneEl = playgroundEl.querySelector<HTMLElement>('.pane-cddl')!;
 const cdnPane = playgroundEl.querySelector<HTMLElement>('.pane-cdn')!;
 const bytesPane = playgroundEl.querySelector<HTMLElement>('.pane-bytes')!;
 
-divider.addEventListener('pointerdown', (e) => {
-  e.preventDefault();
-  divider.setPointerCapture(e.pointerId);
-  divider.classList.add('is-dragging');
-  const startX = e.clientX;
-  const startCdn = cdnPane.getBoundingClientRect().width;
-  const startBytes = bytesPane.getBoundingClientRect().width;
-  const total = startCdn + startBytes;
+/** Make a divider resize its two adjacent panes by dragging. */
+function initPaneDivider(
+  divider: HTMLElement,
+  left: HTMLElement,
+  right: HTMLElement
+): void {
+  divider.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    divider.setPointerCapture(e.pointerId);
+    divider.classList.add('is-dragging');
+    const startX = e.clientX;
+    const startLeft = left.getBoundingClientRect().width;
+    const startRight = right.getBoundingClientRect().width;
+    const total = startLeft + startRight;
+    // The two flex weights being redistributed between the two panes.
+    const leftFlex = parseFloat(left.style.flex) || 1;
+    const rightFlex = parseFloat(right.style.flex) || 1;
+    const flexTotal = leftFlex + rightFlex;
 
-  const onMove = (ev: PointerEvent) => {
-    const delta = ev.clientX - startX;
-    const newCdn = Math.max(200, Math.min(total - 200, startCdn + delta));
-    const ratio = newCdn / total;
-    cdnPane.style.flex = `${ratio} 1 0`;
-    bytesPane.style.flex = `${1 - ratio} 1 0`;
-  };
-  const onUp = () => {
-    divider.classList.remove('is-dragging');
-    divider.removeEventListener('pointermove', onMove);
-    divider.removeEventListener('pointerup', onUp);
-  };
-  divider.addEventListener('pointermove', onMove);
-  divider.addEventListener('pointerup', onUp);
-});
+    const onMove = (ev: PointerEvent) => {
+      const delta = ev.clientX - startX;
+      const newLeft = Math.max(200, Math.min(total - 200, startLeft + delta));
+      const ratio = newLeft / total;
+      left.style.flex = `${flexTotal * ratio} 1 0`;
+      right.style.flex = `${flexTotal * (1 - ratio)} 1 0`;
+    };
+    const onUp = () => {
+      divider.classList.remove('is-dragging');
+      divider.removeEventListener('pointermove', onMove);
+      divider.removeEventListener('pointerup', onUp);
+    };
+    divider.addEventListener('pointermove', onMove);
+    divider.addEventListener('pointerup', onUp);
+  });
+}
+
+initPaneDivider(el('pane-divider'), cdnPane, bytesPane);
+initPaneDivider(el('cddl-divider'), cddlPaneEl, cdnPane);
 
 // ── Bytes edit mode: hex / annotated dump → CDN ──────────────────────────────
 
@@ -297,6 +315,22 @@ initModeTabs((next) => {
   mode = next;
   renderBytesPane();
   updateCopyBytesBtn();
+  // Re-render rebuilds the hex rows, dropping any validation highlight.
+  cddlPane?.revalidate(conversion);
+});
+
+// ── CDDL pane ────────────────────────────────────────────────────────────────
+
+cddlPane = initCddlPane({
+  cdnEditor: editor,
+  getConversion: () => conversion,
+  hexHighlight: (range) => hexView.highlightValidation(range),
+  setCdnText: (cdn) => {
+    resetSamples();
+    setEditorText(editor, cdn);
+  },
+  cdnIsDefaultSample: () => editor.state.doc.toString() === DEFAULT_SAMPLE,
+  initialCddl: shared?.cddl,
 });
 
 el('format-btn').addEventListener('click', () => {
@@ -438,7 +472,10 @@ copyBytesBtn.addEventListener('click', (e) => {
 });
 
 el('share-btn').addEventListener('click', (e) => {
-  const hash = encodeShareHash(editor.state.doc.toString());
+  const hash = encodeShareHash({
+    cdn: editor.state.doc.toString(),
+    ...(cddlPane?.isOpen() ? { cddl: cddlPane.getText() } : {}),
+  });
   history.replaceState(null, '', hash);
   void copyWithFeedback(e.currentTarget as HTMLElement, location.href);
 });

@@ -635,17 +635,14 @@ function findIntInRange(
       if (t2.ai !== undefined) return undefined;
       if (t2.major === 0) {
         const candidate = min > 0n ? min : 0n;
-        return (
-          candidate <= 0xffff_ffff_ffff_ffffn &&
+        return candidate <= 0xffff_ffff_ffff_ffffn &&
           (max === undefined || candidate <= max)
-        )
           ? candidate
           : null;
       }
       if (t2.major === 1) {
-        const candidate = min > -0x1_0000_0000_0000_0000n
-          ? min
-          : -0x1_0000_0000_0000_0000n;
+        const candidate =
+          min > -0x1_0000_0000_0000_0000n ? min : -0x1_0000_0000_0000_0000n;
         return candidate <= -1n && (max === undefined || candidate <= max)
           ? candidate
           : null;
@@ -779,7 +776,10 @@ function findIntInRangeType1(
       return fits === undefined ? undefined : fits ? candidate : null;
     }
     if (t1.op.name === 'feature') {
-      const name = featureName(makeControlDeps(env, ctx, depth), t1.controller!);
+      const name = featureName(
+        makeControlDeps(env, ctx, depth),
+        t1.controller!
+      );
       if (name === undefined) return undefined;
       if (!ctx.features.has(name)) {
         ctx.warnOnce(
@@ -976,7 +976,11 @@ function nextAllowedBitValue(
   if (min < 0n) min = 0n;
   if (min > max) return null;
 
-  const visit = (bit: number, greater: boolean, value: bigint): bigint | null => {
+  const visit = (
+    bit: number,
+    greater: boolean,
+    value: bigint
+  ): bigint | null => {
     if (bit < 0) return value <= max ? value : null;
     const minBit = Number((min >> BigInt(bit)) & 1n);
     for (let chosen = 0; chosen <= 1; chosen++) {

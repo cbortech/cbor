@@ -14,6 +14,7 @@
   --line-highlight: #ffffff0a;
   --error: #f44747;
   --warning: #cca700;
+  --ok: #89d185;
   --mono:
     'SF Mono', 'Cascadia Code', Consolas, 'Liberation Mono', Menlo, monospace;
 
@@ -52,6 +53,7 @@
   --line-highlight: #00000008;
   --error: #cd3131;
   --warning: #bf8803;
+  --ok: #107c10;
 
   --tok-num: #098658;
   --tok-str: #a31515;
@@ -246,6 +248,12 @@ code {
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
+}
+
+/* display:flex would defeat the hidden attribute (CDDL pane toggle). */
+.pane[hidden],
+.pane-divider[hidden] {
+  display: none;
 }
 
 .pane-toolbar {
@@ -545,6 +553,11 @@ select.ctl {
 .hex-bytes.is-active + .hex-comment {
   background: var(--selection);
 }
+/* CDDL validation failure range — independent of the cursor selection. */
+.hex-bytes.is-invalid,
+.hex-bytes.is-invalid + .hex-comment {
+  background: color-mix(in srgb, var(--error) 22%, transparent);
+}
 .hex-bytes {
   white-space: nowrap;
   padding-right: 2ch;
@@ -568,6 +581,9 @@ select.ctl {
 }
 .hex-plain .hex-span.is-active {
   background: var(--selection);
+}
+.hex-plain .hex-span.is-invalid {
+  background: color-mix(in srgb, var(--error) 22%, transparent);
 }
 .hex-addr {
   color: var(--fg-faint);
@@ -643,6 +659,27 @@ select.ctl {
 }
 .bytes-status.warning {
   color: var(--warning);
+}
+.bytes-status.ok {
+  color: var(--ok);
+}
+.bytes-status.info {
+  color: var(--fg-dim);
+}
+
+/* ── CDDL pane ──────────────────────────────────────────────────────────── */
+
+.cddl-toggle[aria-pressed='true'] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Validation-failure range set by the CDDL pane (both editors). Distinct
+   from lint squiggles: a tinted background anchored to the error color. */
+.validation-error {
+  background: color-mix(in srgb, var(--error) 22%, transparent);
+  border-bottom: 2px solid var(--error);
+  border-radius: 2px;
 }
 
 /* ── Footer ─────────────────────────────────────────────────────────────── */
