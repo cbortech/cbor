@@ -527,6 +527,23 @@ export interface ToCDNOptions {
   preserveByteString?: boolean;
 
   /**
+   * Re-emit text strings written as raw backtick literals (`` `...` ``,
+   * ``` ``...`` ```, …) using their original source text instead of
+   * converting them to double-quoted form.
+   *
+   * Applies to non-concatenated raw string literals; combine with
+   * `preserveConcatenation` to also keep the spelling of raw string parts
+   * inside a `+` chain. Preserved raw strings are emitted verbatim: they are
+   * never re-escaped, re-indented, or split by `splitCdn` / `splitNewline`.
+   *
+   * Raw byte string forms (e.g. `` h`...` ``) are covered by
+   * `preserveByteString`, not this option.
+   *
+   * @default false
+   */
+  preserveRawString?: boolean;
+
+  /**
    * Whether to emit commas between array/map elements.
    * - `'comma'`: emit commas (`[1, 2, 3]`)
    * - `'none'`: omit commas, use spaces only (`[1 2 3]`)
