@@ -2,7 +2,6 @@
 
 [![npm version](https://img.shields.io/npm/v/%40cbortech%2Fcbor)](https://www.npmjs.com/package/@cbortech/cbor)
 ![zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
-[![bundle size](https://img.shields.io/bundlejs/size/%40cbortech%2Fcbor)](https://bundlejs.com/?q=%40cbortech%2Fcbor)
 [![types](https://img.shields.io/npm/types/%40cbortech%2Fcbor)](https://www.npmjs.com/package/@cbortech/cbor)
 [![license](https://img.shields.io/npm/l/%40cbortech%2Fcbor)](./LICENSE)
 ![platform](https://img.shields.io/badge/platform-Node.js%20%7C%20Browser-blue)
@@ -30,6 +29,10 @@ available as [@cbortech/cbor-cli](https://www.npmjs.com/package/@cbortech/cbor-c
 ```bash
 npm install -g @cbortech/cbor-cli
 ```
+
+For editor integration, try the companion
+[VS Code extension](https://marketplace.visualstudio.com/items?itemName=cbortech.vscode-cdn-extension),
+which is built with this package.
 
 ## Import
 
