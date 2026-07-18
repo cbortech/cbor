@@ -226,6 +226,32 @@ console.log(text);
 // }
 ```
 
+### リーフコンテナを 1 行にまとめる
+
+`inlineLeafContainers` は、要素に配列・マップを含まず（タグで包まれて
+いる場合も含みます）、かつすべての要素が改行なしでシリアライズされる
+コンテナを 1 行のまま出力します。ネストした
+リーフコンテナはそれぞれ個別に 1 行へまとまるため、行列のようなデータが
+読みやすくなります。`indent` 指定時に適用されます。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const text = CBOR.format('{"m": [[1,2],[3,4]], "s": (_ "a", "b")}', {
+  indent: 2,
+  inlineLeafContainers: true,
+});
+
+console.log(text);
+// {
+//   "m": [
+//     [1, 2],
+//     [3, 4]
+//   ],
+//   "s": (_ "a", "b")
+// }
+```
+
 ### テキスト文字列を分割して整形する
 
 `splitNewline` を使うと、長いテキスト文字列を改行文字の位置で CDN の文字列連結として
@@ -267,6 +293,25 @@ console.log(text);
 //       "3" +
 //     "]"
 // }
+```
+
+### raw テキスト文字列を保持する
+
+デフォルトでは、`CBOR.format()` はバッククォートによる raw 文字列リテラル
+(`` `...` ``、` ``...`` ` など)をダブルクォート形式に変換します。
+`preserveRawString` を指定すると、元のソース表記のまま再出力します。保持された
+raw 文字列はそのまま(verbatim)出力され、再エスケープ・再インデント・
+`splitCdn` / `splitNewline` による分割の対象になりません。
+(`` h`...` `` のような raw バイト文字列形式は `preserveByteString` の対象です。)
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+CBOR.format('`\\d+`');
+// '"\\\\d+"'
+
+CBOR.format('`\\d+`', { preserveRawString: true });
+// '`\\d+`'
 ```
 
 ### `+` による文字列連結を保持する
@@ -483,7 +528,7 @@ import { CBOR } from '@cbortech/cbor';
 
 const v = CBOR.fromCDN("ilbs<<'Hello ', 'world'>>");
 console.log(v.toCDN({ appStrings: false }));
-// (_ 'Hello ', 'world')
+// (_ 'Hello ','world')
 ```
 
 > [!NOTE]

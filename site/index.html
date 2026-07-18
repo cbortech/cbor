@@ -121,18 +121,6 @@
             target="_blank"
             rel="noopener"
             >hash</a
-          >,
-          <a
-            href="https://www.npmjs.com/package/@cbortech/uuid-extension"
-            target="_blank"
-            rel="noopener"
-            >uuid</a
-          >, and
-          <a
-            href="https://www.npmjs.com/package/@cbortech/set-map-extensions"
-            target="_blank"
-            rel="noopener"
-            >set/map</a
           >
           support. Toggle any extension from the button above the CDN editor.
         </li>
@@ -340,6 +328,20 @@
           <label class="check">
             <input
               type="checkbox"
+              id="opt-inline-leaf"
+              aria-describedby="hint-opt-inline-leaf"
+              checked
+            />
+            Inline leaf containers
+            <span class="opt-hint" role="tooltip" id="hint-opt-inline-leaf"
+              >Keep arrays, maps, and (_ ...) chunks on one line when they
+              contain no nested array/map and every entry fits on a single
+              line</span
+            >
+          </label>
+          <label class="check">
+            <input
+              type="checkbox"
               id="opt-comments"
               aria-describedby="hint-opt-comments"
               checked
@@ -361,6 +363,19 @@
             <span class="opt-hint" role="tooltip" id="hint-opt-concat"
               >Keep + string concatenation boundaries from the input ("a" + "b")
               instead of joining the parts into one literal</span
+            >
+          </label>
+          <label class="check">
+            <input
+              type="checkbox"
+              id="opt-raw-string"
+              aria-describedby="hint-opt-raw-string"
+              checked
+            />
+            Keep raw strings
+            <span class="opt-hint" role="tooltip" id="hint-opt-raw-string"
+              >Keep raw backtick text strings in their original source form
+              instead of converting them to double-quoted strings</span
             >
           </label>
           <label class="check">

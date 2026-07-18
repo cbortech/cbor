@@ -87,6 +87,23 @@ describe('README examples', () => {
     );
   });
 
+  test('inlineLeafContainers keeps leaf containers on one line', () => {
+    const text = CBOR.format('{"m": [[1,2],[3,4]], "s": (_ "a", "b")}', {
+      indent: 2,
+      inlineLeafContainers: true,
+    });
+
+    expect(text).toBe(
+      '{\n' +
+        '  "m": [\n' +
+        '    [1, 2],\n' +
+        '    [3, 4]\n' +
+        '  ],\n' +
+        '  "s": (_ "a", "b")\n' +
+        '}'
+    );
+  });
+
   test('splitNewline splits text strings at newlines', () => {
     const text = CBOR.format('{"text": "line1\\nline2\\nline3"}', {
       indent: 2,
@@ -117,6 +134,11 @@ describe('README examples', () => {
         '    "]"\n' +
         '}'
     );
+  });
+
+  test('preserveRawString keeps raw backtick literals', () => {
+    expect(CBOR.format('`\\d+`')).toBe('"\\\\d+"');
+    expect(CBOR.format('`\\d+`', { preserveRawString: true })).toBe('`\\d+`');
   });
 
   test('preserveConcatenation keeps + string concatenation', () => {

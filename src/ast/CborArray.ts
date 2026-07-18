@@ -32,6 +32,10 @@ export class CborArray extends CborItem {
     this.encodingWidth = options?.encodingWidth;
   }
 
+  override get _containsCdnContainer(): boolean {
+    return true;
+  }
+
   override _encodeTo(writer: CborWriter, options?: ToCBOROptions): void {
     if (this.indefiniteLength) {
       writer.writeByte((MT_ARRAY << 5) | AI_INDEFINITE);
@@ -55,6 +59,7 @@ export class CborArray extends CborItem {
       encodingWidth: this.encodingWidth,
       hasEntryComments: () => this.items.some(hasPreservedComments),
       renderEntry: (i) => this.items[i]._toCDN(options, depth + 1),
+      entryIsLeaf: (i) => !this.items[i]._containsCdnContainer,
       entryLeadingNode: (i) => this.items[i],
       entryTrailing: (i, style) => formatTrailingComments(this.items[i], style),
     });

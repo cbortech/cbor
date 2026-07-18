@@ -12,9 +12,7 @@ import {
   h32,
   same,
 } from '@cbortech/cbor';
-import { uuid } from '@cbortech/uuid-extension';
 import { hash } from '@cbortech/hash-extension';
-import { set, map } from '@cbortech/set-map-extensions';
 
 /**
  * 'builtin': bundled by @cbortech/cbor and active by default without an
@@ -54,7 +52,4 @@ export const EXTENSION_ENTRIES: ExtensionEntry[] = [
   { key: 'same', label: 'same', ext: same, kind: 'extra' },
   { key: 'b32', label: 'b32', ext: b32, kind: 'extra' },
   { key: 'h32', label: 'h32', ext: h32, kind: 'extra' },
-  { key: 'set', label: 'SET', ext: set, kind: 'extra' },
-  { key: 'map', label: 'MAP', ext: map, kind: 'extra' },
-  { key: 'uuid', label: 'uuid / UUID', ext: uuid, kind: 'extra' },
 ];

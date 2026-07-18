@@ -34,6 +34,10 @@ export class CborTag extends CborItem {
     this.encodingWidth = options?.encodingWidth;
   }
 
+  override get _containsCdnContainer(): boolean {
+    return this.content._containsCdnContainer;
+  }
+
   override _encodeTo(writer: CborWriter, options?: ToCBOROptions): void {
     writeHeadTo(writer, MT_TAG, this.tag, this.encodingWidth);
     this.content._encode(writer, options);

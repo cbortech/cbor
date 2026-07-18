@@ -4,6 +4,11 @@ import type { AnnotatedLine } from './CborItem';
 import { CborByteString } from './CborByteString';
 import { MT_BYTES, AI_INDEFINITE, BREAK_CODE } from '../cbor/constants';
 import type { CborWriter } from '../cbor/encode';
+import {
+  formatTrailingComments,
+  hasPreservedComments,
+  serializeContainer,
+} from '../cdn/serialize-utils';
 import { byteToHexUpper } from '../utils/hex';
 
 /** CBOR Major Type 2 — indefinite-length byte string (chunked). */
@@ -22,7 +27,7 @@ export class CborIndefiniteByteString extends CborItem {
     writer.writeByte(BREAK_CODE);
   }
 
-  _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
+  _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     if ((options?.encodingIndicators ?? 'auto') === 'never') {
       const totalLen = this.chunks.reduce((sum, c) => sum + c.value.length, 0);
       const merged = new Uint8Array(totalLen);
@@ -31,11 +36,24 @@ export class CborIndefiniteByteString extends CborItem {
         merged.set(chunk.value, offset);
         offset += chunk.value.length;
       }
-      return new CborByteString(merged)._toCDN(options, 0);
+      return new CborByteString(merged)._toCDN(options, depth);
     }
     if (this.chunks.length === 0) return "''_";
-    const chunkStrs = this.chunks.map((c) => c._toCDN(options, 0));
-    return `(_ ${chunkStrs.join(', ')})`;
+    return serializeContainer({
+      node: this,
+      options,
+      depth,
+      openChar: '(',
+      closeChar: ')',
+      count: this.chunks.length,
+      indefiniteLength: true,
+      encodingWidth: undefined,
+      hasEntryComments: () => this.chunks.some(hasPreservedComments),
+      renderEntry: (i) => this.chunks[i]._toCDN(options, depth + 1),
+      entryLeadingNode: (i) => this.chunks[i],
+      entryTrailing: (i, style) =>
+        formatTrailingComments(this.chunks[i], style),
+    });
   }
 
   override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {

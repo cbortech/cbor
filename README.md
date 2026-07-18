@@ -228,6 +228,32 @@ console.log(text);
 // }
 ```
 
+### Keep leaf containers on one line
+
+`inlineLeafContainers` keeps a container on a single line when none of its
+entries contains an array or map (even wrapped in a tag) and every entry
+serializes without a line break. Nested leaf containers still collapse
+individually, so matrix-like data stays readable. It is applied when
+`indent` is specified.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const text = CBOR.format('{"m": [[1,2],[3,4]], "s": (_ "a", "b")}', {
+  indent: 2,
+  inlineLeafContainers: true,
+});
+
+console.log(text);
+// {
+//   "m": [
+//     [1, 2],
+//     [3, 4]
+//   ],
+//   "s": (_ "a", "b")
+// }
+```
+
 ### Split text strings while formatting
 
 `splitNewline` splits long text strings at newline characters using CDN
@@ -270,6 +296,25 @@ console.log(text);
 //       "3" +
 //     "]"
 // }
+```
+
+### Preserve raw text strings
+
+By default, `CBOR.format()` converts raw backtick string literals
+(`` `...` ``, ` ``...`` `, …) to double-quoted form. `preserveRawString`
+re-emits them using their original source text instead. Preserved raw
+strings are emitted verbatim: they are never re-escaped, re-indented, or
+split by `splitCdn` / `splitNewline`. (Raw byte string forms such as
+`` h`...` `` are covered by `preserveByteString`.)
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+CBOR.format('`\\d+`');
+// '"\\\\d+"'
+
+CBOR.format('`\\d+`', { preserveRawString: true });
+// '`\\d+`'
 ```
 
 ### Preserve `+` string concatenation
@@ -488,7 +533,7 @@ import { CBOR } from '@cbortech/cbor';
 
 const v = CBOR.fromCDN("ilbs<<'Hello ', 'world'>>");
 console.log(v.toCDN({ appStrings: false }));
-// (_ 'Hello ', 'world')
+// (_ 'Hello ','world')
 ```
 
 > [!NOTE]

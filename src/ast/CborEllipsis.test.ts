@@ -240,6 +240,7 @@ describe('CborEllipsis — toCDN', () => {
       new CborTextString('world'),
     ]);
     expect(e.toCDN()).toBe('"hello" + ... + "world"');
+    expect(e.toCDN({ indent: 2 })).toBe('"hello" +\n  ... +\n  "world"');
   });
 
   test('bytes elision → h fragments joined with " + "', () => {
@@ -249,5 +250,21 @@ describe('CborEllipsis — toCDN', () => {
       new CborByteString(new Uint8Array([0x08, 0x15])),
     ]);
     expect(e.toCDN()).toBe("h'4711' + ... + h'0815'");
+    expect(e.toCDN({ indent: 2, sqstr: 'none' })).toBe(
+      "h'4711' +\n  ... +\n  h'0815'"
+    );
+  });
+
+  test('string elision uses the containing depth for indentation', () => {
+    const node = new CborArray([
+      new CborEllipsis([
+        new CborTextString('hello'),
+        new CborEllipsis(),
+        new CborTextString('world'),
+      ]),
+    ]);
+    expect(node.toCDN({ indent: 2 })).toBe(
+      '[\n  "hello" +\n    ... +\n    "world"\n]'
+    );
   });
 });

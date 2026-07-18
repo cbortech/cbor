@@ -527,6 +527,23 @@ export interface ToCDNOptions {
   preserveByteString?: boolean;
 
   /**
+   * Re-emit text strings written as raw backtick literals (`` `...` ``,
+   * ``` ``...`` ```, …) using their original source text instead of
+   * converting them to double-quoted form.
+   *
+   * Applies to non-concatenated raw string literals; combine with
+   * `preserveConcatenation` to also keep the spelling of raw string parts
+   * inside a `+` chain. Preserved raw strings are emitted verbatim: they are
+   * never re-escaped, re-indented, or split by `splitCdn` / `splitNewline`.
+   *
+   * Raw byte string forms (e.g. `` h`...` ``) are covered by
+   * `preserveByteString`, not this option.
+   *
+   * @default false
+   */
+  preserveRawString?: boolean;
+
+  /**
    * Whether to emit commas between array/map elements.
    * - `'comma'`: emit commas (`[1, 2, 3]`)
    * - `'none'`: omit commas, use spaces only (`[1 2 3]`)
@@ -648,6 +665,20 @@ export interface ToCDNOptions {
    * @default false
    */
   preserveConcatenation?: boolean;
+
+  /**
+   * When pretty-printing with `indent`, keep a container on a single line
+   * when none of its entries contains an array or map (even wrapped in a
+   * tag) and every entry serializes without a line break (e.g. `[1, 2, 3]`,
+   * `{"a": 1}`, `(_ "a", "b")`). Nested leaf containers still collapse
+   * individually: `[[1, 2], [3, 4]]` renders with one inner array per line.
+   *
+   * Containers with preserved comments are always emitted in multi-line
+   * form. Has no effect when `indent` is omitted.
+   *
+   * @default false
+   */
+  inlineLeafContainers?: boolean;
 
   /**
    * Control whether CBOR encoding-width indicators (`_N`) are appended to CDN output.
