@@ -14,6 +14,7 @@ import { CborTag } from './CborTag';
 import { CborArray } from './CborArray';
 import { CborSimple } from './CborSimple';
 import type { CborItem } from './CborItem';
+import { joinConcatParts, resolveIndent } from '../cdn/serialize-utils';
 
 export const CPA888_TAG = 888n;
 
@@ -38,9 +39,11 @@ export class CborEllipsis extends CborTag {
     }
     if (this.content instanceof CborArray) {
       // String/bytes elision → frag + ... + frag
-      return this.content.items
-        .map((item) => item._toCDN(options, depth))
-        .join(' + ');
+      const parts = this.content.items.map((item) =>
+        item._toCDN(options, depth)
+      );
+      if (parts.length === 0) return '';
+      return joinConcatParts(parts, resolveIndent(options), depth);
     }
     return super._toCDN(options, depth);
   }
