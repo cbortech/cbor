@@ -828,6 +828,11 @@ class CDNParser {
       const ew = this.consumeEncodingIndicator(() =>
         BigInt(textEncoder.encode(tok.value).length)
       );
+      if (tok.type === 'RAWSTRING')
+        return new CborTextString(tok.value, {
+          ednSource: tok.raw,
+          ...(ew !== undefined ? { encodingWidth: ew } : {}),
+        });
       return new CborTextString(
         tok.value,
         ew !== undefined ? { encodingWidth: ew } : undefined
@@ -836,9 +841,12 @@ class CDNParser {
 
     // Concatenation chain — may include ellipsis, producing CborEllipsis
     let hasEllipsis = false;
-    const parts: Array<{ text: string } | { ellipsis: true }> = [
-      { text: tok.value },
-    ];
+    const parts: Array<{ text: string; source?: string } | { ellipsis: true }> =
+      [
+        tok.type === 'RAWSTRING'
+          ? { text: tok.value, source: tok.raw }
+          : { text: tok.value },
+      ];
 
     while (this.t.peek().type === 'PLUS') {
       this.t.consume(); // +
@@ -849,7 +857,11 @@ class CDNParser {
         hasEllipsis = true;
       } else if (next.type === 'TSTR' || next.type === 'RAWSTRING') {
         this.t.consume();
-        parts.push({ text: next.value });
+        parts.push(
+          next.type === 'RAWSTRING'
+            ? { text: next.value, source: next.raw }
+            : { text: next.value }
+        );
       } else if (this._isBytesToken(next.type)) {
         this.t.consume();
         parts.push({
@@ -867,31 +879,49 @@ class CDNParser {
       // No ellipsis — join all text fragments into a single CborTextString,
       // keeping the part boundaries for `preserveConcatenation`.
       const texts = parts.map((p) => ('text' in p ? p.text : ''));
+      const sources = parts.map((p) => ('text' in p ? p.source : undefined));
       const joined = texts.join('');
       const ew = this.consumeEncodingIndicator(() =>
         BigInt(textEncoder.encode(joined).length)
       );
       return new CborTextString(joined, {
         ednParts: texts,
+        ...(sources.some((s) => s !== undefined)
+          ? { ednPartSources: sources }
+          : {}),
         ...(ew !== undefined ? { encodingWidth: ew } : {}),
       });
     }
 
-    // Build 888([...]) with consolidated adjacent text fragments
+    // Build 888([...]) with consolidated adjacent text fragments, retaining
+    // the original boundaries and raw source spellings within each fragment.
     const items: CborItem[] = [];
-    let currentText = '';
+    const currentParts: Array<{ text: string; source?: string }> = [];
+    const flushCurrentParts = () => {
+      const texts = currentParts.map((part) => part.text);
+      const currentText = texts.join('');
+      if (currentText !== '') {
+        const sources = currentParts.map((part) => part.source);
+        items.push(
+          new CborTextString(currentText, {
+            ednParts: texts,
+            ...(sources.some((source) => source !== undefined)
+              ? { ednPartSources: sources }
+              : {}),
+          })
+        );
+      }
+      currentParts.length = 0;
+    };
     for (const part of parts) {
       if ('ellipsis' in part) {
-        if (currentText !== '') {
-          items.push(new CborTextString(currentText));
-          currentText = '';
-        }
+        flushCurrentParts();
         items.push(new CborEllipsis());
       } else {
-        currentText += part.text;
+        currentParts.push(part);
       }
     }
-    if (currentText !== '') items.push(new CborTextString(currentText));
+    flushCurrentParts();
 
     return new CborEllipsis(items);
   }

@@ -295,6 +295,25 @@ console.log(text);
 // }
 ```
 
+### raw テキスト文字列を保持する
+
+デフォルトでは、`CBOR.format()` はバッククォートによる raw 文字列リテラル
+(`` `...` ``、` ``...`` ` など)をダブルクォート形式に変換します。
+`preserveRawString` を指定すると、元のソース表記のまま再出力します。保持された
+raw 文字列はそのまま(verbatim)出力され、再エスケープ・再インデント・
+`splitCdn` / `splitNewline` による分割の対象になりません。
+(`` h`...` `` のような raw バイト文字列形式は `preserveByteString` の対象です。)
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+CBOR.format('`\\d+`');
+// '"\\\\d+"'
+
+CBOR.format('`\\d+`', { preserveRawString: true });
+// '`\\d+`'
+```
+
 ### `+` による文字列連結を保持する
 
 注意: `+` による文字列連結構文は draft-26 で削除されました。この節は legacy

@@ -136,6 +136,11 @@ describe('README examples', () => {
     );
   });
 
+  test('preserveRawString keeps raw backtick literals', () => {
+    expect(CBOR.format('`\\d+`')).toBe('"\\\\d+"');
+    expect(CBOR.format('`\\d+`', { preserveRawString: true })).toBe('`\\d+`');
+  });
+
   test('preserveConcatenation keeps + string concatenation', () => {
     expect(CBOR.format('"a" + "b"')).toBe('"ab"');
     expect(CBOR.format('"a" + "b"', { preserveConcatenation: true })).toBe(

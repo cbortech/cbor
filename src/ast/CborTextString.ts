@@ -24,18 +24,29 @@ export class CborTextString extends CborItem {
   encodingWidth: EncodingWidth | undefined;
   /** Part boundaries of the original `+` concatenation chain, if any. */
   readonly ednParts: readonly string[] | undefined;
+  /** Original raw-string source text, when parsed from a single backtick literal. */
+  readonly ednSource: string | undefined;
+  /**
+   * Original source text per `ednParts` entry, aligned by index; `undefined`
+   * for parts that were not raw backtick literals.
+   */
+  readonly ednPartSources: readonly (string | undefined)[] | undefined;
 
   constructor(
     value: string,
     options?: {
       encodingWidth?: EncodingWidth;
       ednParts?: readonly string[];
+      ednSource?: string;
+      ednPartSources?: readonly (string | undefined)[];
     }
   ) {
     super();
     this.value = value;
     this.encodingWidth = options?.encodingWidth;
     this.ednParts = options?.ednParts;
+    this.ednSource = options?.ednSource;
+    this.ednPartSources = options?.ednPartSources;
   }
 
   override _encodeTo(writer: CborWriter, _options?: ToCBOROptions): void {
@@ -46,7 +57,15 @@ export class CborTextString extends CborItem {
     const suffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(BigInt(textEncoder.encode(this.value).length))
     );
-    return formatTextString(this.value, suffix, options, depth, this.ednParts);
+    return formatTextString(
+      this.value,
+      suffix,
+      options,
+      depth,
+      this.ednParts,
+      this.ednSource,
+      this.ednPartSources
+    );
   }
 
   _toJS(_options?: ToJSOptions): unknown {
@@ -59,21 +78,36 @@ function formatTextString(
   suffix: string,
   options: ToCDNOptions | undefined,
   depth: number,
-  ednParts: readonly string[] | undefined
+  ednParts: readonly string[] | undefined,
+  ednSource: string | undefined,
+  ednPartSources: readonly (string | undefined)[] | undefined
 ): string {
+  // A preserved raw backtick literal is emitted verbatim — re-escaping,
+  // re-indenting, or splitting it would change its meaning or its
+  // deliberately chosen form.
+  if (options?.preserveRawString && ednSource !== undefined) {
+    return ednSource + suffix;
+  }
+  const partSources = options?.preserveRawString ? ednPartSources : undefined;
+  const hasPreservedRawPart =
+    partSources?.some((source) => source !== undefined) ?? false;
   const { cdn, newline } = resolveTextStringSplits(options);
   const indentStr = resolveIndent(options);
   const preservedParts =
     options?.preserveConcatenation &&
     ednParts !== undefined &&
-    ednParts.length > 1
+    (ednParts.length > 1 || hasPreservedRawPart)
       ? ednParts
       : undefined;
 
   if (indentStr === null) {
     if (preservedParts !== undefined) {
       return emitParts(
-        preservedParts.map((text) => ({ text, contentDepth: 0 })),
+        preservedParts.map((text, i) => ({
+          text,
+          contentDepth: 0,
+          source: partSources?.[i],
+        })),
         suffix,
         null,
         depth
@@ -89,11 +123,19 @@ function formatTextString(
 
   // Preserved concatenation applies unless CDN reflow is applicable (the
   // string content parses as CDN — then structure-aware indentation wins).
-  // `splitNewline` combines with it by further splitting the parts.
-  if (cdnBreakpoints === null && preservedParts !== undefined) {
+  // A preserved raw part takes precedence over CDN reflow because changing
+  // its spelling would violate preserveRawString. `splitNewline` combines
+  // with this path by further splitting only the non-raw parts.
+  if (
+    preservedParts !== undefined &&
+    (cdnBreakpoints === null || hasPreservedRawPart)
+  ) {
     const parts: StringPart[] = [];
-    for (const text of preservedParts) {
-      if (newline) {
+    for (const [i, text] of preservedParts.entries()) {
+      const source = partSources?.[i];
+      if (source !== undefined) {
+        parts.push({ text, contentDepth: 0, source });
+      } else if (newline) {
         const partBreakpoints = new Map<number, number>();
         for (const { point, contentDepth } of collectNewlineBreakpoints(
           text,
@@ -143,8 +185,8 @@ function emitParts(
   indentStr: string | null,
   depth: number
 ): string {
-  const literals = parts.map(({ text }, i) => {
-    const literal = escapeString(text);
+  const literals = parts.map(({ text, source }, i) => {
+    const literal = source ?? escapeString(text);
     return i === parts.length - 1 ? literal + suffix : literal;
   });
   if (indentStr === null) return literals.join(' + ');
@@ -200,6 +242,8 @@ interface StringBreakpoint {
 interface StringPart {
   text: string;
   contentDepth: number;
+  /** Preserved literal source; emitted verbatim instead of escaping `text`. */
+  source?: string;
 }
 
 function collectNewlineBreakpoints(

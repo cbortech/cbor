@@ -630,6 +630,89 @@ describe('CBOR.format()', () => {
     ).toBe("'hi'");
   });
 
+  test('preserves raw text string literals when requested', () => {
+    expect(CBOR.format('`hi there`', { preserveRawString: true })).toBe(
+      '`hi there`'
+    );
+    expect(CBOR.format('``a`b``', { preserveRawString: true })).toBe('``a`b``');
+    expect(CBOR.format('`hi`_3', { preserveRawString: true })).toBe('`hi`_3');
+    // Default output stays double-quoted.
+    expect(CBOR.format('`hi there`')).toBe('"hi there"');
+    expect(CBOR.format('``a`b``')).toBe('"a`b"');
+  });
+
+  test('emits preserved raw strings verbatim under indent', () => {
+    expect(
+      CBOR.format('{"k": `line1\nline2`}', {
+        indent: 2,
+        preserveRawString: true,
+      })
+    ).toBe('{\n  "k": `line1\nline2`\n}');
+  });
+
+  test('preserveRawString takes precedence over split options', () => {
+    expect(
+      CBOR.format('`[1, 2]`', {
+        indent: 2,
+        splitCdn: true,
+        preserveRawString: true,
+      })
+    ).toBe('`[1, 2]`');
+    expect(
+      CBOR.format('`a\nb`', {
+        indent: 2,
+        splitNewline: true,
+        preserveRawString: true,
+      })
+    ).toBe('`a\nb`');
+  });
+
+  test('preserves raw string part spelling with preserveRawString', () => {
+    expect(
+      CBOR.format('`a` + "b"', {
+        preserveConcatenation: true,
+        preserveRawString: true,
+      })
+    ).toBe('`a` + "b"');
+    // Without preserveConcatenation the chain is joined and normalised.
+    expect(CBOR.format('`a` + "b"', { preserveRawString: true })).toBe('"ab"');
+    // Without preserveRawString raw parts are normalised.
+    expect(CBOR.format('`a` + "b"', { preserveConcatenation: true })).toBe(
+      '"a" + "b"'
+    );
+  });
+
+  test('splitNewline does not split preserved raw string parts', () => {
+    expect(
+      CBOR.format('`a\nb` + "c\nd"', {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveRawString: true,
+        splitNewline: true,
+      })
+    ).toBe('`a\nb` +\n  "c\\n" +\n  "d"');
+  });
+
+  test('preserved raw string parts take precedence over splitCdn', () => {
+    expect(
+      CBOR.format('`[1,2]` + ""', {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveRawString: true,
+        splitCdn: true,
+      })
+    ).toBe('`[1,2]` +\n  ""');
+  });
+
+  test('preserves raw string parts around ellipsis', () => {
+    expect(
+      CBOR.format('`a` + "b" + ... + "c" + ``d`e``', {
+        preserveConcatenation: true,
+        preserveRawString: true,
+      })
+    ).toBe('`a` + "b" + ... + "c" + ``d`e``');
+  });
+
   test('joins text string concatenation by default', () => {
     expect(CBOR.format('"a" + "b"')).toBe('"ab"');
   });

@@ -298,6 +298,25 @@ console.log(text);
 // }
 ```
 
+### Preserve raw text strings
+
+By default, `CBOR.format()` converts raw backtick string literals
+(`` `...` ``, ` ``...`` `, …) to double-quoted form. `preserveRawString`
+re-emits them using their original source text instead. Preserved raw
+strings are emitted verbatim: they are never re-escaped, re-indented, or
+split by `splitCdn` / `splitNewline`. (Raw byte string forms such as
+`` h`...` `` are covered by `preserveByteString`.)
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+CBOR.format('`\\d+`');
+// '"\\\\d+"'
+
+CBOR.format('`\\d+`', { preserveRawString: true });
+// '`\\d+`'
+```
+
 ### Preserve `+` string concatenation
 
 Note: `+` string concatenation was removed in draft-26. This section is for

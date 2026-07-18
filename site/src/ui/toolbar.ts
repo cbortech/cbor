@@ -129,6 +129,8 @@ export function readFormatOptions(): FromCDNOptions & ToCDNOptions {
     options.preserveComments = true;
   if ((document.getElementById('opt-concat') as HTMLInputElement).checked)
     options.preserveConcatenation = true;
+  if ((document.getElementById('opt-raw-string') as HTMLInputElement).checked)
+    options.preserveRawString = true;
   if (!(document.getElementById('opt-app-strings') as HTMLInputElement).checked)
     options.appStrings = false;
   return options;
