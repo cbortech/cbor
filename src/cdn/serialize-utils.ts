@@ -166,7 +166,8 @@ export function resolveSeparators(
 // ─── Container serialization ─────────────────────────────────────────────────
 
 /**
- * Shared CDN serialization for bracketed containers (CborArray / CborMap):
+ * Shared CDN serialization for bracketed containers (CborArray / CborMap /
+ * indefinite-length string chunks `(_ ...)`):
  * encoding-indicator / `_` prefix resolution, single-line vs multi-line
  * selection (comments force multi-line), separators, and per-entry
  * leading/trailing plus container dangling comments.
@@ -181,14 +182,19 @@ export function serializeContainer(p: {
   node: Commented;
   options: ToCDNOptions | undefined;
   depth: number;
-  openChar: '[' | '{';
-  closeChar: ']' | '}';
+  openChar: '[' | '{' | '(';
+  closeChar: ']' | '}' | ')';
   count: number;
   indefiniteLength: boolean;
   encodingWidth: EncodingWidth | undefined;
   hasEntryComments: () => boolean;
   /** Render entry `i` at child depth (`item` or `key: value`). */
   renderEntry: (i: number, colSep: string) => string;
+  /**
+   * Whether entry `i` contains no nested array/map, so it may stay on the
+   * container's line under `inlineLeafContainers`. Omitted = always a leaf.
+   */
+  entryIsLeaf?: (i: number) => boolean;
   /** Node whose leading comments are emitted above entry `i` (item / map key). */
   entryLeadingNode: (i: number) => Commented;
   /** Pre-formatted trailing comment text for entry `i` (starts with ' ', or ''). */
@@ -219,13 +225,7 @@ export function serializeContainer(p: {
   const showIndef =
     p.indefiniteLength && (options?.encodingIndicators ?? 'auto') !== 'never';
 
-  if (indentStr === null || (count === 0 && !hasComments)) {
-    // single-line
-    let inner = '';
-    for (let i = 0; i < count; i++) {
-      if (i > 0) inner += inlineSep;
-      inner += p.renderEntry(i, colSep);
-    }
+  const singleLine = (inner: string): string => {
     if (p.indefiniteLength) {
       return showIndef
         ? count === 0
@@ -234,6 +234,40 @@ export function serializeContainer(p: {
         : `${openChar}${inner}${closeChar}`;
     }
     return `${openChar}${eiSuffix}${inner}${closeChar}`;
+  };
+
+  if (indentStr === null || (count === 0 && !hasComments)) {
+    // single-line
+    let inner = '';
+    for (let i = 0; i < count; i++) {
+      if (i > 0) inner += inlineSep;
+      inner += p.renderEntry(i, colSep);
+    }
+    return singleLine(inner);
+  }
+
+  // inlineLeafContainers: keep the container on one line when no entry holds
+  // a nested array/map and every entry renders without a line break.
+  // Entries rendered while probing are reused below if the probe fails, so a
+  // node is never serialized more than once per parent render.
+  let probed: string[] | null = null;
+  if (options?.inlineLeafContainers && count > 0 && !hasComments) {
+    const rendered: string[] = [];
+    let flat = true;
+    for (let i = 0; i < count; i++) {
+      if (p.entryIsLeaf && !p.entryIsLeaf(i)) {
+        flat = false;
+        break;
+      }
+      const s = p.renderEntry(i, colSep);
+      rendered.push(s);
+      if (s.includes('\n')) {
+        flat = false;
+        break;
+      }
+    }
+    if (flat) return singleLine(rendered.join(inlineSep));
+    probed = rendered;
   }
 
   // multi-line
@@ -256,8 +290,9 @@ export function serializeContainer(p: {
       );
     }
     const sep = i < count - 1 ? multilineSep : trailSep;
+    const entry = probed?.[i] ?? p.renderEntry(i, colSep);
     lines.push(
-      `${childIndent}${p.renderEntry(i, colSep)}${sep}${preserveComments ? p.entryTrailing(i, commentStyle) : ''}`
+      `${childIndent}${entry}${sep}${preserveComments ? p.entryTrailing(i, commentStyle) : ''}`
     );
   }
   if (preserveComments)

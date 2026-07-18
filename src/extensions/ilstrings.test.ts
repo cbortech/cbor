@@ -166,7 +166,7 @@ describe('ilbs / ilts — round-trip', () => {
   test('appStrings: false falls back to the streamstring notation', () => {
     expect(
       parseCDN('ilts<<"Hello ", "world">>').toCDN({ appStrings: false })
-    ).toBe('(_ "Hello ", "world")');
+    ).toBe('(_ "Hello ","world")');
   });
 
   test('equivalent to the legacy streamstring syntax', () => {

@@ -39,6 +39,10 @@ export class CborMap extends CborItem {
     this.encodingWidth = options?.encodingWidth;
   }
 
+  override get _containsCdnContainer(): boolean {
+    return true;
+  }
+
   override _encodeTo(writer: CborWriter, options?: ToCBOROptions): void {
     if (this.indefiniteLength) {
       writer.writeByte((MT_MAP << 5) | AI_INDEFINITE);
@@ -74,6 +78,10 @@ export class CborMap extends CborItem {
       renderEntry: (i, colSep) => {
         const [k, v] = this.entries[i];
         return `${k._toCDN(options, depth + 1)}${colSep}${v._toCDN(options, depth + 1)}`;
+      },
+      entryIsLeaf: (i) => {
+        const [k, v] = this.entries[i];
+        return !k._containsCdnContainer && !v._containsCdnContainer;
       },
       // Leading comments come from the key; the value's leading comments
       // render inline after the entry (see entryTrailing).
