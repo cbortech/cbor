@@ -2,7 +2,6 @@
 
 [![npm version](https://img.shields.io/npm/v/%40cbortech%2Fcbor)](https://www.npmjs.com/package/@cbortech/cbor)
 ![zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
-[![bundle size](https://img.shields.io/bundlejs/size/%40cbortech%2Fcbor)](https://bundlejs.com/?q=%40cbortech%2Fcbor)
 [![types](https://img.shields.io/npm/types/%40cbortech%2Fcbor)](https://www.npmjs.com/package/@cbortech/cbor)
 [![license](https://img.shields.io/npm/l/%40cbortech%2Fcbor)](./LICENSE)
 ![platform](https://img.shields.io/badge/platform-Node.js%20%7C%20Browser-blue)
@@ -30,6 +29,10 @@ available as [@cbortech/cbor-cli](https://www.npmjs.com/package/@cbortech/cbor-c
 ```bash
 npm install -g @cbortech/cbor-cli
 ```
+
+For editor integration, try the companion
+[VS Code extension](https://marketplace.visualstudio.com/items?itemName=cbortech.vscode-cdn-extension),
+which is built with this package.
 
 ## Import
 
@@ -228,6 +231,32 @@ console.log(text);
 // }
 ```
 
+### Keep leaf containers on one line
+
+`inlineLeafContainers` keeps a container on a single line when none of its
+entries contains an array or map (even wrapped in a tag) and every entry
+serializes without a line break. Nested leaf containers still collapse
+individually, so matrix-like data stays readable. It is applied when
+`indent` is specified.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const text = CBOR.format('{"m": [[1,2],[3,4]], "s": (_ "a", "b")}', {
+  indent: 2,
+  inlineLeafContainers: true,
+});
+
+console.log(text);
+// {
+//   "m": [
+//     [1, 2],
+//     [3, 4]
+//   ],
+//   "s": (_ "a", "b")
+// }
+```
+
 ### Split text strings while formatting
 
 `splitNewline` splits long text strings at newline characters using CDN
@@ -270,6 +299,25 @@ console.log(text);
 //       "3" +
 //     "]"
 // }
+```
+
+### Preserve raw text strings
+
+By default, `CBOR.format()` converts raw backtick string literals
+(`` `...` ``, ` ``...`` `, …) to double-quoted form. `preserveRawString`
+re-emits them using their original source text instead. Preserved raw
+strings are emitted verbatim: they are never re-escaped, re-indented, or
+split by `splitCdn` / `splitNewline`. (Raw byte string forms such as
+`` h`...` `` are covered by `preserveByteString`.)
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+CBOR.format('`\\d+`');
+// '"\\\\d+"'
+
+CBOR.format('`\\d+`', { preserveRawString: true });
+// '`\\d+`'
 ```
 
 ### Preserve `+` string concatenation
@@ -488,7 +536,7 @@ import { CBOR } from '@cbortech/cbor';
 
 const v = CBOR.fromCDN("ilbs<<'Hello ', 'world'>>");
 console.log(v.toCDN({ appStrings: false }));
-// (_ 'Hello ', 'world')
+// (_ 'Hello ','world')
 ```
 
 > [!NOTE]

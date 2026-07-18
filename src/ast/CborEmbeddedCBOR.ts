@@ -37,6 +37,10 @@ export class CborEmbeddedCBOR extends CborItem {
     this.encodingWidth = options?.encodingWidth;
   }
 
+  override get _containsCdnContainer(): boolean {
+    return this.items.some((item) => item._containsCdnContainer);
+  }
+
   /** The raw concatenated CBOR bytes of all contained items. */
   private _content(options?: ToCBOROptions): Uint8Array {
     const inner = new CborWriter();

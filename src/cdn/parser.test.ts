@@ -1909,7 +1909,7 @@ describe('toCDN — encodingIndicators option', () => {
         new CborByteString(new Uint8Array([0xaa])),
         new CborByteString(new Uint8Array([0xbb])),
       ]);
-      expect(n.toCDN()).toBe("(_ h'aa', h'bb')");
+      expect(n.toCDN()).toBe("(_ h'aa',h'bb')");
       expect(n.toCDN({ encodingIndicators: 'never' })).toBe("h'aabb'");
     });
     test("empty: auto → ''_, never → '' (sqstr applies to empty bytes)", () => {
@@ -1933,7 +1933,7 @@ describe('toCDN — encodingIndicators option', () => {
         new CborTextString('hello'),
         new CborTextString(' world'),
       ]);
-      expect(n.toCDN()).toBe('(_ "hello", " world")');
+      expect(n.toCDN()).toBe('(_ "hello"," world")');
       expect(n.toCDN({ encodingIndicators: 'never' })).toBe('"hello world"');
     });
     test('empty: auto → ""_, never → ""', () => {
