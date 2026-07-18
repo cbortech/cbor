@@ -147,11 +147,23 @@ describe('CborIndefiniteByteString.toCDN()', () => {
       new CborByteString(new Uint8Array([0x01, 0x02])),
       new CborByteString(new Uint8Array([0x03, 0x04, 0x05])),
     ]);
-    expect(toCDN(node)).toBe("(_ h'0102', h'030405')");
+    expect(toCDN(node)).toBe("(_ h'0102',h'030405')");
   });
 
   test('empty chunks', () => {
     expect(toCDN(new CborIndefiniteByteString([]))).toBe("''_");
+  });
+
+  test('two chunks with indent=2', () => {
+    const node = new CborIndefiniteByteString([
+      new CborByteString(new Uint8Array([0x01, 0x02])),
+      new CborByteString(new Uint8Array([0x03, 0x04, 0x05])),
+    ]);
+    expect(toCDN(node, { indent: 2 })).toBe("(_ \n  h'0102',\n  h'030405'\n)");
+  });
+
+  test('empty chunks with indent stays single-line', () => {
+    expect(toCDN(new CborIndefiniteByteString([]), { indent: 2 })).toBe("''_");
   });
 });
 
@@ -181,11 +193,31 @@ describe('CborIndefiniteTextString.toCDN()', () => {
       new CborTextString('strea'),
       new CborTextString('ming'),
     ]);
-    expect(toCDN(node)).toBe('(_ "strea", "ming")');
+    expect(toCDN(node)).toBe('(_ "strea","ming")');
   });
 
   test('empty', () => {
     expect(toCDN(new CborIndefiniteTextString([]))).toBe('""_');
+  });
+
+  test('two chunks with indent=2', () => {
+    const node = new CborIndefiniteTextString([
+      new CborTextString('strea'),
+      new CborTextString('ming'),
+    ]);
+    expect(toCDN(node, { indent: 2 })).toBe('(_ \n  "strea",\n  "ming"\n)');
+  });
+
+  test('nested in array with indent=2', () => {
+    const node = new CborArray([
+      new CborIndefiniteTextString([
+        new CborTextString('a'),
+        new CborTextString('b'),
+      ]),
+    ]);
+    expect(toCDN(node, { indent: 2 })).toBe(
+      '[\n  (_ \n    "a",\n    "b"\n  )\n]'
+    );
   });
 });
 
@@ -252,6 +284,96 @@ describe('CborArray.toCDN() — multi-line', () => {
 
   test('empty array with indent stays single-line', () => {
     expect(toCDN(new CborArray([]), { indent: 2 })).toBe('[]');
+  });
+});
+
+describe('toCDN() — inlineLeafContainers', () => {
+  const opts = { indent: 2, inlineLeafContainers: true };
+
+  test('array of primitives stays single-line', () => {
+    const node = new CborArray([
+      new CborUint(1n),
+      new CborUint(2n),
+      new CborUint(3n),
+    ]);
+    expect(toCDN(node, opts)).toBe('[1, 2, 3]');
+  });
+
+  test('matrix: outer breaks, inner rows inline', () => {
+    const node = new CborArray([
+      new CborArray([new CborUint(1n), new CborUint(2n)]),
+      new CborArray([new CborUint(3n), new CborUint(4n)]),
+    ]);
+    expect(toCDN(node, opts)).toBe('[\n  [1, 2],\n  [3, 4]\n]');
+  });
+
+  test('map of primitives stays single-line', () => {
+    const node = new CborMap([
+      [new CborUint(1n), new CborUint(2n)],
+      [new CborUint(3n), new CborUint(4n)],
+    ]);
+    expect(toCDN(node, opts)).toBe('{1: 2, 3: 4}');
+  });
+
+  test('map with container value breaks; leaf value inlines', () => {
+    const node = new CborMap([
+      [
+        new CborTextString('a'),
+        new CborArray([new CborUint(1n), new CborUint(2n)]),
+      ],
+    ]);
+    expect(toCDN(node, opts)).toBe('{\n  "a": [1, 2]\n}');
+  });
+
+  test('indefinite array of primitives stays single-line', () => {
+    const node = new CborArray([new CborUint(1n), new CborUint(2n)], {
+      indefiniteLength: true,
+    });
+    expect(toCDN(node, opts)).toBe('[_ 1, 2]');
+  });
+
+  test('indefinite string chunks stay single-line', () => {
+    const node = new CborIndefiniteTextString([
+      new CborTextString('a'),
+      new CborTextString('b'),
+    ]);
+    expect(toCDN(node, opts)).toBe('(_ "a", "b")');
+    const arr = new CborArray([node, new CborUint(1n)]);
+    expect(toCDN(arr, opts)).toBe('[(_ "a", "b"), 1]');
+  });
+
+  test('tag wrapping a container is not inlined in its parent', () => {
+    const node = new CborArray([
+      new CborTag(100n, new CborArray([new CborUint(1n), new CborUint(2n)])),
+    ]);
+    expect(toCDN(node, opts)).toBe('[\n  100([1, 2])\n]');
+  });
+
+  test('tag wrapping a primitive inlines', () => {
+    const node = new CborArray([
+      new CborTag(1n, new CborUint(2n)),
+      new CborTag(1n, new CborUint(3n)),
+    ]);
+    expect(toCDN(node, opts)).toBe('[1(2), 1(3)]');
+  });
+
+  test('entry rendering with a line break forces multi-line', () => {
+    const node = new CborArray([new CborTextString('a\nb')]);
+    expect(toCDN(node, { ...opts, splitNewline: true })).toBe(
+      '[\n  "a\\n" +\n    "b"\n]'
+    );
+  });
+
+  test('preserved comments force multi-line', () => {
+    const node = parseCDN('[1, 2] # trailing', { preserveComments: true });
+    expect(toCDN(node, { ...opts, preserveComments: true })).toBe(
+      '[\n  1,\n  2\n] # trailing'
+    );
+  });
+
+  test('no effect without indent (compact single-line as usual)', () => {
+    const node = new CborArray([new CborUint(1n), new CborUint(2n)]);
+    expect(toCDN(node, { inlineLeafContainers: true })).toBe('[1,2]');
   });
 });
 

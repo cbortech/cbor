@@ -226,6 +226,32 @@ console.log(text);
 // }
 ```
 
+### リーフコンテナを 1 行にまとめる
+
+`inlineLeafContainers` は、要素に配列・マップを含まず（タグで包まれて
+いる場合も含みます）、かつすべての要素が改行なしでシリアライズされる
+コンテナを 1 行のまま出力します。ネストした
+リーフコンテナはそれぞれ個別に 1 行へまとまるため、行列のようなデータが
+読みやすくなります。`indent` 指定時に適用されます。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const text = CBOR.format('{"m": [[1,2],[3,4]], "s": (_ "a", "b")}', {
+  indent: 2,
+  inlineLeafContainers: true,
+});
+
+console.log(text);
+// {
+//   "m": [
+//     [1, 2],
+//     [3, 4]
+//   ],
+//   "s": (_ "a", "b")
+// }
+```
+
 ### テキスト文字列を分割して整形する
 
 `splitNewline` を使うと、長いテキスト文字列を改行文字の位置で CDN の文字列連結として
@@ -483,7 +509,7 @@ import { CBOR } from '@cbortech/cbor';
 
 const v = CBOR.fromCDN("ilbs<<'Hello ', 'world'>>");
 console.log(v.toCDN({ appStrings: false }));
-// (_ 'Hello ', 'world')
+// (_ 'Hello ','world')
 ```
 
 > [!NOTE]

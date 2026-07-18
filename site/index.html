@@ -328,6 +328,20 @@
           <label class="check">
             <input
               type="checkbox"
+              id="opt-inline-leaf"
+              aria-describedby="hint-opt-inline-leaf"
+              checked
+            />
+            Inline leaf containers
+            <span class="opt-hint" role="tooltip" id="hint-opt-inline-leaf"
+              >Keep arrays, maps, and (_ ...) chunks on one line when they
+              contain no nested array/map and every entry fits on a single
+              line</span
+            >
+          </label>
+          <label class="check">
+            <input
+              type="checkbox"
               id="opt-comments"
               aria-describedby="hint-opt-comments"
               checked

@@ -22,6 +22,10 @@ export class CborAppSeqResult extends CborItem {
     super();
   }
 
+  override get _containsCdnContainer(): boolean {
+    return this.inner._containsCdnContainer;
+  }
+
   override _encodeTo(writer: CborWriter, options?: ToCBOROptions): void {
     this.inner._encode(writer, options);
   }

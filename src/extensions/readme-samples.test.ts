@@ -31,9 +31,9 @@ describe('README samples — t1 / b1', () => {
 });
 
 describe('README samples — ilbs / ilts', () => {
-  test("ilbs<<'Hello ', 'world'>> → (_ 'Hello ', 'world') with appStrings: false", () => {
+  test("ilbs<<'Hello ', 'world'>> → (_ 'Hello ','world') with appStrings: false", () => {
     const v = CBOR.fromCDN("ilbs<<'Hello ', 'world'>>");
-    expect(v.toCDN({ appStrings: false })).toBe("(_ 'Hello ', 'world')");
+    expect(v.toCDN({ appStrings: false })).toBe("(_ 'Hello ','world')");
   });
 });
 

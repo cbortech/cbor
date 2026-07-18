@@ -228,6 +228,32 @@ console.log(text);
 // }
 ```
 
+### Keep leaf containers on one line
+
+`inlineLeafContainers` keeps a container on a single line when none of its
+entries contains an array or map (even wrapped in a tag) and every entry
+serializes without a line break. Nested leaf containers still collapse
+individually, so matrix-like data stays readable. It is applied when
+`indent` is specified.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const text = CBOR.format('{"m": [[1,2],[3,4]], "s": (_ "a", "b")}', {
+  indent: 2,
+  inlineLeafContainers: true,
+});
+
+console.log(text);
+// {
+//   "m": [
+//     [1, 2],
+//     [3, 4]
+//   ],
+//   "s": (_ "a", "b")
+// }
+```
+
 ### Split text strings while formatting
 
 `splitNewline` splits long text strings at newline characters using CDN
@@ -488,7 +514,7 @@ import { CBOR } from '@cbortech/cbor';
 
 const v = CBOR.fromCDN("ilbs<<'Hello ', 'world'>>");
 console.log(v.toCDN({ appStrings: false }));
-// (_ 'Hello ', 'world')
+// (_ 'Hello ','world')
 ```
 
 > [!NOTE]

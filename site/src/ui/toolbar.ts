@@ -123,6 +123,8 @@ export function readFormatOptions(): FromCDNOptions & ToCDNOptions {
     options.splitNewline = true;
   if ((document.getElementById('opt-split-cdn') as HTMLInputElement).checked)
     options.splitCdn = true;
+  if ((document.getElementById('opt-inline-leaf') as HTMLInputElement).checked)
+    options.inlineLeafContainers = true;
   if ((document.getElementById('opt-comments') as HTMLInputElement).checked)
     options.preserveComments = true;
   if ((document.getElementById('opt-concat') as HTMLInputElement).checked)

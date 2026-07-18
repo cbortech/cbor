@@ -401,7 +401,7 @@ describe('Complex nested structures — 4-way round-trip', () => {
 
     // Also round-trips through EDN
     const edn = toCDN(ast);
-    expect(edn).toBe("(_ h'0102', h'030405')");
+    expect(edn).toBe("(_ h'0102',h'030405')");
     const reparsed = parseCDN(edn);
     expect(toHex(reparsed.toCBOR())).toBe(toHex(ast.toCBOR()));
   });

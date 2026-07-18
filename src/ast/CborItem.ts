@@ -62,6 +62,17 @@ export abstract class CborItem {
    */
   _defaults?: CBOROptions;
 
+  /**
+   * @internal
+   * True when this node is, or contains through wrapper nodes (tags,
+   * embedded CBOR, app-sequence results), an array or map.
+   * `inlineLeafContainers` never inlines a container whose entries contain
+   * another container, even one that renders on a single line.
+   */
+  get _containsCdnContainer(): boolean {
+    return false;
+  }
+
   // ─── Public template methods ────────────────────────────────────────────────
 
   /** Serialize this node to CBOR binary. */
