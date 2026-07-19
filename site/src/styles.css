@@ -411,7 +411,7 @@ select.ctl {
   justify-content: flex-start;
   gap: 6px;
 }
-.popover-grid label.check:has(input:disabled) {
+.popover label.check:has(input:disabled) {
   color: var(--fg-dim);
   cursor: default;
 }
