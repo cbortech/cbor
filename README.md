@@ -351,6 +351,37 @@ CBOR.format("h'68' + b64'aQ'", {
 // "h'68' + b64'aQ'"
 ```
 
+### Validate CBOR / CDN / hex dump
+
+`validate` checks input for well-formedness and validity without throwing.
+Recoverable violations (e.g. duplicate map keys) are collected into
+`warnings` instead of stopping decoding; truly malformed data is reported via
+`error` instead (for CDN syntax errors, a `CdnSyntaxError` with its position
+fields intact). Informational hints — e.g. an app-string prefix that matches
+a known optional extension which isn't registered — never affect `valid` and
+are collected separately into `hints`. `type` selects the input format:
+`'cbor'` (default), `'cdn'`, or `'hex'`.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+// CBOR bytes — duplicate map key "a" is a recoverable violation
+CBOR.validate(new Uint8Array([0xa2, 0x61, 0x61, 0x01, 0x61, 0x61, 0x02]), {
+  type: 'cbor',
+});
+// { valid: false, count: 1, warnings: [{ message: 'duplicate map key at offset 4', offset: 4 }], hints: [] }
+
+// CDN text — well-formed input
+CBOR.validate('{"a": 1}', { type: 'cdn' });
+// { valid: true, count: 1, warnings: [], hints: [] }
+
+// Annotated hex dump text — truncated array (length 3, only 2 elements present)
+CBOR.validate('83  -- Array of length 3\n   01     -- 1\n   02     -- 2', {
+  type: 'hex',
+});
+// { valid: false, count: 0, warnings: [], hints: [], error: Error(...) }
+```
+
 ## Working With The AST
 
 `CBOR.fromCBOR()`, `CBOR.fromCDN()`, and `CBOR.fromJS()` return a CBOR item.
