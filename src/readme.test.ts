@@ -143,15 +143,16 @@ describe('README examples', () => {
 
   test('preserveConcatenation keeps + string concatenation', () => {
     expect(CBOR.format('"a" + "b"')).toBe('"ab"');
-    expect(CBOR.format('"a" + "b"', { preserveConcatenation: true })).toBe(
-      '"a" + "b"'
-    );
+    expect(
+      CBOR.format('"a" + "b"', { indent: 2, preserveConcatenation: true })
+    ).toBe('"a" +\n  "b"');
     expect(
       CBOR.format("h'68' + b64'aQ'", {
+        indent: 2,
         preserveConcatenation: true,
         preserveByteString: true,
       })
-    ).toBe("h'68' + b64'aQ'");
+    ).toBe("h'68' +\n  b64'aQ'");
   });
 
   test('AST item methods', () => {

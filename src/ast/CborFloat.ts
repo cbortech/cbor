@@ -2,7 +2,11 @@ import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
 import { CborItem } from './CborItem';
 import { MT_SIMPLE, AI_2BYTE, AI_4BYTE, AI_8BYTE } from '../cbor/constants';
 import { autoSelectFloatPrecision, type CborWriter } from '../cbor/encode';
-import { floatValueToString, floatSuffix } from '../cdn/serialize-utils';
+import {
+  floatValueToString,
+  floatSuffix,
+  resolveIndent,
+} from '../cdn/serialize-utils';
 import { floatToHexFloat } from '../utils/hexfloat';
 
 export type FloatPrecision = 'half' | 'single' | 'double';
@@ -75,16 +79,24 @@ export class CborFloat extends CborItem {
 
   _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
     const mode = options?.encodingIndicators ?? 'auto';
-    if (options?.appStrings !== false && this.ednSource !== undefined) {
-      if (mode === 'never') return this.ednSource.replace(/_[0-3i]$/, '');
+    // In single-line output (no `indent`), a source spelling that spans
+    // multiple lines (e.g. a `float<<...>>` app-sequence written across
+    // lines) cannot be re-emitted, so it falls back to normal serialization.
+    if (
+      options?.appStrings !== false &&
+      this.ednSource !== undefined &&
+      (resolveIndent(options) !== null || !/[\r\n]/.test(this.ednSource))
+    ) {
+      const ednSource = this.ednSource;
+      if (mode === 'never') return ednSource.replace(/_[0-3i]$/, '');
       if (mode === 'always') {
-        if (/_[0-3i]$/.test(this.ednSource)) return this.ednSource;
+        if (/_[0-3i]$/.test(ednSource)) return ednSource;
         const actual = this.precision ?? autoSelectFloatPrecision(this.value);
         const suffix =
           actual === 'half' ? '_1' : actual === 'single' ? '_2' : '_3';
-        return this.ednSource + suffix;
+        return ednSource + suffix;
       }
-      return this.ednSource;
+      return ednSource;
     }
     const autoSelected = autoSelectFloatPrecision(this.value);
     const numStr =

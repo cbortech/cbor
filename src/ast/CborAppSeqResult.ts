@@ -1,6 +1,7 @@
 import type { ToCDNOptions, ToCBOROptions, ToJSOptions } from '../types';
 import { CborItem } from './CborItem';
 import type { CborWriter } from '../cbor/encode';
+import { resolveIndent } from '../cdn/serialize-utils';
 
 /**
  * Wraps a resolved app-sequence result and preserves the original EDN source
@@ -10,6 +11,9 @@ import type { CborWriter } from '../cbor/encode';
  * stored source text verbatim. For `'always'` and `'never'`, it delegates to
  * the resolved item so the option is applied recursively to every data item;
  * preserving the source verbatim would leave nested indicators unchanged.
+ * In single-line output (no `indent`), a source spelling that spans multiple
+ * lines also delegates to the inner item, since it cannot be re-emitted
+ * without breaking the single-line guarantee.
  *
  * CBOR encoding and JS conversion always delegate to the inner item so the
  * wrapper is fully transparent for those operations.
@@ -32,7 +36,12 @@ export class CborAppSeqResult extends CborItem {
 
   _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     const mode = options?.encodingIndicators ?? 'auto';
-    if (options?.appStrings !== false && mode === 'auto') return this.ednSource;
+    if (
+      options?.appStrings !== false &&
+      mode === 'auto' &&
+      (resolveIndent(options) !== null || !/[\r\n]/.test(this.ednSource))
+    )
+      return this.ednSource;
     return this.inner._toCDN(options, depth);
   }
 

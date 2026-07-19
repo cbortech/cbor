@@ -52,6 +52,12 @@ describe('README samples — float (enabled by default)', () => {
     const v = CBOR.fromCDN("float<<h'3f800000'>>");
     expect(v.toCDN({ appStrings: false })).toBe('1.0_2');
   });
+
+  test('multi-line float<<...>> source falls back in single-line mode', () => {
+    const v = CBOR.fromCDN("float<<\n h'3f800000'\n>>");
+    expect(v.toCDN({ indent: 2 })).toBe("float<<\n h'3f800000'\n>>");
+    expect(v.toCDN()).toBe('1.0_2');
+  });
 });
 
 describe('README samples — same', () => {

@@ -328,7 +328,9 @@ handling legacy syntax.
 By default, `CBOR.format()` joins `+` string concatenation into a single
 literal. `preserveConcatenation` keeps the original part boundaries for both
 text strings and byte strings; add `preserveByteString` to also keep the
-original spelling of byte string parts.
+original spelling of byte string parts. Like the split options, it only
+takes effect when `indent` enables pretty-printing — single-line output
+always joins the parts.
 
 `preserveConcatenation` interacts with the split options: `splitCdn` takes
 precedence when the string content parses as CDN, while `splitNewline`
@@ -341,14 +343,17 @@ import { CBOR } from '@cbortech/cbor';
 CBOR.format('"a" + "b"');
 // '"ab"'
 
-CBOR.format('"a" + "b"', { preserveConcatenation: true });
-// '"a" + "b"'
+CBOR.format('"a" + "b"', { indent: 2, preserveConcatenation: true });
+// "a" +
+//   "b"
 
 CBOR.format("h'68' + b64'aQ'", {
+  indent: 2,
   preserveConcatenation: true,
   preserveByteString: true,
 });
-// "h'68' + b64'aQ'"
+// h'68' +
+//   b64'aQ'
 ```
 
 ### Validate CBOR / CDN / hex dump

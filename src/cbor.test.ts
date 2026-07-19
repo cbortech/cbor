@@ -591,22 +591,26 @@ describe('CBOR.format()', () => {
     );
     expect(
       CBOR.format("h'01 # first\n 02'", {
+        indent: 2,
         preserveByteString: true,
       })
     ).toBe("h'01 # first\n 02'");
     expect(
       CBOR.format("b64' aGk # greeting\n '", {
+        indent: 2,
         preserveByteString: true,
       })
     ).toBe("b64' aGk # greeting\n '");
     expect(
       CBOR.format("b32' NBUQ # b32\n '", {
+        indent: 2,
         preserveByteString: true,
         extensions: [b32],
       })
     ).toBe("b32' NBUQ # b32\n '");
     expect(
       CBOR.format("h32' D1KG # h32\n '", {
+        indent: 2,
         preserveByteString: true,
         extensions: [h32],
       })
@@ -614,9 +618,20 @@ describe('CBOR.format()', () => {
     expect(CBOR.format("'hi'", { preserveByteString: true })).toBe("'hi'");
   });
 
+  test('multi-line byte string spellings fall back in single-line mode', () => {
+    expect(
+      CBOR.format("h'01 # first\n 02'", { preserveByteString: true })
+    ).toBe("h'0102'");
+    // Single-line spellings (including interior block comments) are kept.
+    expect(CBOR.format("h'01 / mid / 02'", { preserveByteString: true })).toBe(
+      "h'01 / mid / 02'"
+    );
+  });
+
   test('preserves raw byte string literals when requested', () => {
     expect(
       CBOR.format('h`01 # first\n 02`', {
+        indent: 2,
         preserveByteString: true,
       })
     ).toBe('h`01 # first\n 02`');
@@ -670,16 +685,24 @@ describe('CBOR.format()', () => {
   test('preserves raw string part spelling with preserveRawString', () => {
     expect(
       CBOR.format('`a` + "b"', {
+        indent: 2,
         preserveConcatenation: true,
         preserveRawString: true,
       })
-    ).toBe('`a` + "b"');
+    ).toBe('`a` +\n  "b"');
     // Without preserveConcatenation the chain is joined and normalised.
     expect(CBOR.format('`a` + "b"', { preserveRawString: true })).toBe('"ab"');
     // Without preserveRawString raw parts are normalised.
-    expect(CBOR.format('`a` + "b"', { preserveConcatenation: true })).toBe(
-      '"a" + "b"'
-    );
+    expect(
+      CBOR.format('`a` + "b"', { indent: 2, preserveConcatenation: true })
+    ).toBe('"a" +\n  "b"');
+    // Single-line output always joins, regardless of either option.
+    expect(
+      CBOR.format('`a` + "b"', {
+        preserveConcatenation: true,
+        preserveRawString: true,
+      })
+    ).toBe('"ab"');
   });
 
   test('splitNewline does not split preserved raw string parts', () => {
@@ -707,10 +730,19 @@ describe('CBOR.format()', () => {
   test('preserves raw string parts around ellipsis', () => {
     expect(
       CBOR.format('`a` + "b" + ... + "c" + ``d`e``', {
+        indent: 2,
         preserveConcatenation: true,
         preserveRawString: true,
       })
-    ).toBe('`a` + "b" + ... + "c" + ``d`e``');
+    ).toBe('`a` +\n  "b" +\n  ... +\n  "c" +\n  ``d`e``');
+    // Single-line output joins each fragment, but the ellipsis itself
+    // (not a layout feature) is still ` + `-joined between fragments.
+    expect(
+      CBOR.format('`a` + "b" + ... + "c" + ``d`e``', {
+        preserveConcatenation: true,
+        preserveRawString: true,
+      })
+    ).toBe('"ab" + ... + "cd`e"');
   });
 
   test('joins text string concatenation by default', () => {
@@ -718,11 +750,20 @@ describe('CBOR.format()', () => {
   });
 
   test('preserves text string concatenation when requested', () => {
+    expect(
+      CBOR.format('"a" + "b"', { indent: 2, preserveConcatenation: true })
+    ).toBe('"a" +\n  "b"');
+    expect(
+      CBOR.format("'a' + 'b'", { indent: 2, preserveConcatenation: true })
+    ).toBe("'a' +\n  'b'");
+  });
+
+  test('single-line output joins preserved concatenation', () => {
     expect(CBOR.format('"a" + "b"', { preserveConcatenation: true })).toBe(
-      '"a" + "b"'
+      '"ab"'
     );
     expect(CBOR.format("'a' + 'b'", { preserveConcatenation: true })).toBe(
-      "'a' + 'b'"
+      "'ab'"
     );
   });
 
@@ -736,40 +777,54 @@ describe('CBOR.format()', () => {
   });
 
   test('preserves byte string concatenation when requested', () => {
-    expect(CBOR.format("h'01' + h'02'", { preserveConcatenation: true })).toBe(
-      "h'01' + h'02'"
-    );
+    expect(
+      CBOR.format("h'01' + h'02'", { indent: 2, preserveConcatenation: true })
+    ).toBe("h'01' +\n  h'02'");
     // Each part is re-serialized with the normal rules (sqstr, bstrEncoding).
-    expect(CBOR.format("h'68' + h'69'", { preserveConcatenation: true })).toBe(
-      "'h' + 'i'"
-    );
+    expect(
+      CBOR.format("h'68' + h'69'", { indent: 2, preserveConcatenation: true })
+    ).toBe("'h' +\n  'i'");
     expect(
       CBOR.format("h'68' + b64'aQ'", {
+        indent: 2,
         preserveConcatenation: true,
         sqstr: 'none',
       })
-    ).toBe("h'68' + h'69'");
+    ).toBe("h'68' +\n  h'69'");
   });
 
   test('preserves byte string part spelling with preserveByteString', () => {
     expect(
       CBOR.format("h'68' + b64'aQ'", {
+        indent: 2,
         preserveConcatenation: true,
         preserveByteString: true,
       })
-    ).toBe("h'68' + b64'aQ'");
+    ).toBe("h'68' +\n  b64'aQ'");
   });
 
   test('normalizes byte string parts in preserved text concatenation', () => {
-    expect(CBOR.format('"a" + h\'62\'', { preserveConcatenation: true })).toBe(
-      '"a" + "b"'
-    );
+    expect(
+      CBOR.format('"a" + h\'62\'', { indent: 2, preserveConcatenation: true })
+    ).toBe('"a" +\n  "b"');
   });
 
   test('keeps encoding indicator at the end of a preserved chain', () => {
-    expect(CBOR.format('"a" + "b"_3', { preserveConcatenation: true })).toBe(
-      '"a" + "b"_3'
+    expect(
+      CBOR.format('"a" + "b"_3', { indent: 2, preserveConcatenation: true })
+    ).toBe('"a" +\n  "b"_3');
+  });
+
+  test('single-line output joins preserved byte string concatenation', () => {
+    expect(CBOR.format("h'01' + h'02'", { preserveConcatenation: true })).toBe(
+      "h'0102'"
     );
+    expect(
+      CBOR.format("h'68' + b64'aQ'", {
+        preserveConcatenation: true,
+        preserveByteString: true,
+      })
+    ).toBe("'hi'");
   });
 
   test('splitNewline combines with preserved concatenation', () => {
@@ -871,21 +926,31 @@ describe('CBOR.format()', () => {
   });
 
   test('preserves comments on the root item', () => {
-    expect(CBOR.format('42 # end', { preserveComments: true })).toBe(
+    expect(CBOR.format('42 # end', { indent: 2, preserveComments: true })).toBe(
       '42 # end'
     );
-    expect(CBOR.format('# start\n42 # end', { preserveComments: true })).toBe(
-      '# start\n42 # end'
-    );
+    expect(
+      CBOR.format('# start\n42 # end', { indent: 2, preserveComments: true })
+    ).toBe('# start\n42 # end');
   });
 
-  test('root leading comments do not force compact containers to multiline', () => {
+  test('single-line output ignores preserveComments', () => {
+    expect(CBOR.format('42 # end', { preserveComments: true })).toBe('42');
     expect(CBOR.format('# before\n[1, 2]', { preserveComments: true })).toBe(
-      '# before\n[1,2]'
+      '[1,2]'
     );
-    expect(CBOR.format('# before\n{1: 2}', { preserveComments: true })).toBe(
-      '# before\n{1:2}'
+    expect(CBOR.format('[# a\n1, 2 # b\n]', { preserveComments: true })).toBe(
+      '[1,2]'
     );
+    expect(
+      CBOR.format('# before\n{1: 2}', { indent: 0, preserveComments: true })
+    ).toBe('{1:2}');
+  });
+
+  test('indent 0 and the empty string mean single-line output', () => {
+    expect(CBOR.format('[1, 2]', { indent: 0 })).toBe('[1,2]');
+    expect(CBOR.format('[1, 2]', { indent: '' })).toBe('[1,2]');
+    expect(CBOR.format('{1: [2, 3]}', { indent: 0 })).toBe('{1:[2,3]}');
   });
 
   test('preserves array comments when requested', () => {

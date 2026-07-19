@@ -274,9 +274,10 @@ describe('CBOR.fromCDNSeq', () => {
   // ── Comment preservation (preserveComments) ───────────────────────────────
 
   describe('preserveComments', () => {
+    // Comments are only emitted when indent enables pretty-printing.
     const roundtrip = (text: string): string[] =>
       [...CBOR.fromCDNSeq(text, { preserveComments: true })].map((item) =>
-        item.toCDN({ preserveComments: true })
+        item.toCDN({ preserveComments: true, indent: 2 })
       );
 
     test('leading comment before the first item is preserved', () => {
@@ -313,6 +314,16 @@ describe('CBOR.fromCDNSeq', () => {
     test('without preserveComments comments are still skipped', () => {
       const items = [...CBOR.fromCDNSeq('# a\n1\n# b\n2')];
       expect(items.map((i) => i.toCDN())).toEqual(['1', '2']);
+    });
+
+    test('single-line output (no indent) strips comments', () => {
+      const items = [
+        ...CBOR.fromCDNSeq('# a\n1 # b\n2', { preserveComments: true }),
+      ];
+      expect(items.map((i) => i.toCDN({ preserveComments: true }))).toEqual([
+        '1',
+        '2',
+      ]);
     });
 
     test('unterminated comment after last item still throws in strict mode', () => {

@@ -502,6 +502,11 @@ export interface ToCDNOptions {
    * - `number`: number of spaces
    * - `string`: literal indent string (e.g. `'\t'`)
    * - omit for single-line output
+   *
+   * Like `JSON.stringify`, `0` and `''` are equivalent to omitting the
+   * option: the output is a single line. Single-line output is guaranteed
+   * to contain no newlines; layout-dependent options (`preserveComments`,
+   * `splitCdn`, `splitNewline`, `preserveConcatenation`) are ignored.
    */
   indent?: number | string;
 
@@ -517,8 +522,9 @@ export interface ToCDNOptions {
    *   kept as-is.
    * - `false` / omitted: strip all comments from the output.
    *
-   * When enabled for containers, comment-bearing arrays/maps are emitted in
-   * multi-line form even if `indent` is omitted.
+   * Only effective when `indent` enables pretty-printing: single-line
+   * output strips all comments, since line comments (`#`, `//`) can only
+   * be terminated by a newline.
    *
    * @default false
    */
@@ -538,6 +544,10 @@ export interface ToCDNOptions {
    * When enabled, this takes precedence over `bstrEncoding` and `sqstr` for
    * byte strings that carry original EDN source text.
    *
+   * In single-line output (no `indent`), an original spelling that spans
+   * multiple lines (e.g. a byte string literal with interior line comments)
+   * falls back to normal serialization; single-line spellings are kept.
+   *
    * @default false
    */
   preserveByteString?: boolean;
@@ -554,6 +564,9 @@ export interface ToCDNOptions {
    *
    * Raw byte string forms (e.g. `` h`...` ``) are covered by
    * `preserveByteString`, not this option.
+   *
+   * In single-line output (no `indent`), a spelling that spans multiple
+   * lines falls back to normal escaping; single-line spellings are kept.
    *
    * @default false
    */
@@ -617,7 +630,7 @@ export interface ToCDNOptions {
 
   /**
    * Split long text strings using CDN string concatenation syntax (`"a" + "b"`).
-   * Only effective when `indent` is specified.
+   * Only effective when `indent` enables pretty-printing.
    *
    * - `'newline'`: split at newline characters
    * - `'cdn'`: split according to CDN structure when the string content
@@ -676,7 +689,8 @@ export interface ToCDNOptions {
    * text strings whose content parses as CDN, while `splitNewline` combines
    * with this option by further splitting the preserved parts at newline
    * characters. Has no effect on values that did not originate from a CDN
-   * concatenation.
+   * concatenation, and only takes effect when `indent` enables
+   * pretty-printing (single-line output joins the parts into one literal).
    *
    * @default false
    */
