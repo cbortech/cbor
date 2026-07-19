@@ -22,7 +22,7 @@ import { cddlLinter } from './editor/cddl-lint';
 import { setValidationRange } from './editor/validation-deco';
 import { rangeAtChar } from './mapping/lockstep';
 import { CDDL_SAMPLES, DEFAULT_CDDL_SAMPLE } from './cddl-samples';
-import { copyWithFeedback } from './ui/toolbar';
+import { copyWithFeedback, readFormatOptions } from './ui/toolbar';
 
 const OPEN_KEY = 'cbor-site-cddl';
 
@@ -229,7 +229,16 @@ export function initCddlPane(opts: CddlPaneOptions): CddlPane {
     const text = editor.state.doc.toString();
     if (text.trim() === '') return;
     try {
-      setEditorText(editor, CDDL.compile(text, { strict: false }).format());
+      // Share the Indent setting from the CDN Format-options popover;
+      // "Compact" (no indent) yields single-line rules.
+      const { indent } = readFormatOptions();
+      setEditorText(
+        editor,
+        CDDL.compile(text, { strict: false }).format({
+          ...(indent !== undefined ? { indent } : {}),
+          preserveComments: true,
+        })
+      );
     } catch {
       // Invalid CDDL: the lint squiggle already explains the problem.
     }

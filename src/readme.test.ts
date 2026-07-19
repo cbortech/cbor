@@ -338,6 +338,16 @@ describe('README examples: CDDL', () => {
     expect(text).toBe('a = 0x10\nb = {x: tstr}\n');
   });
 
+  test('format supports indent and preserveComments', () => {
+    const text = CDDL.compile(
+      '; a person\nperson = {name: tstr, ? age: uint}'
+    ).format({ indent: 2, preserveComments: true });
+
+    expect(text).toBe(
+      '; a person\nperson = {\n  name: tstr,\n  ? age: uint\n}\n'
+    );
+  });
+
   test('validate CDN text against a schema', () => {
     const schema = CDDL.compile(`
       person = { name: tstr, ? age: uint }

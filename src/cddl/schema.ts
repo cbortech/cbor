@@ -9,7 +9,8 @@
 
 import { parseCDDL } from './parser';
 import { getPreludeRules } from './prelude';
-import { formatCddl } from './writer';
+import { formatCddl, type CddlFormatOptions } from './writer';
+import type { CddlComment } from './tokenizer';
 import { validateItem, type ValidateOptions } from './validator';
 import { CborItem } from '../ast/CborItem';
 import { decodeCBOR } from '../cbor/decoder';
@@ -52,6 +53,8 @@ export class CddlSchema {
    * tooling can render positions without carrying the text separately.
    */
   readonly source: string;
+  /** `;` comments collected while parsing, in source order. */
+  readonly comments: readonly CddlComment[];
   /** All rules in source order, as parsed (extensions unmerged). */
   readonly ast: readonly CddlRule[];
   /** Rule definitions by name (base definition first, then extensions). */
@@ -67,21 +70,36 @@ export class CddlSchema {
   /** @internal — use `CDDL.compile()`. */
   constructor(
     source: string,
+    comments: readonly CddlComment[],
     ast: CddlRule[],
     rules: Map<string, CddlRule[]>,
     root: CddlRule | undefined,
     warnings: CddlWarning[]
   ) {
     this.source = source;
+    this.comments = comments;
     this.ast = ast;
     this.rules = rules;
     if (root) this.root = root;
     if (warnings.length > 0) this.warnings = warnings;
   }
 
-  /** Serialize the data model back to CDDL text (comments are not preserved). */
-  format(): string {
-    return formatCddl(this.ast);
+  /**
+   * Serialize the data model back to CDDL text.
+   *
+   * Compact one-rule-per-line output by default; pass `indent` for a
+   * pretty layout (one group entry per line) and `preserveComments` to
+   * re-emit `;` comments.
+   *
+   * @example
+   * CDDL.compile(text).format({ indent: 2, preserveComments: true });
+   */
+  format(options?: CddlFormatOptions): string {
+    return formatCddl(this.ast, {
+      ...options,
+      source: this.source,
+      comments: this.comments,
+    });
   }
 
   /**
@@ -118,7 +136,7 @@ export class CddlSchema {
  * into `schema.warnings` instead.
  */
 export function compile(text: string, options?: CompileOptions): CddlSchema {
-  const { rules } = parseCDDL(text);
+  const { rules, comments } = parseCDDL(text);
   const warnings: CddlWarning[] = [];
   const prelude = getPreludeRules();
 
@@ -211,7 +229,7 @@ export function compile(text: string, options?: CompileOptions): CddlSchema {
     throw new CddlSemanticError(warnings);
 
   // An empty model has no root; `no-rules` was already reported above.
-  return new CddlSchema(text, rules, table, root, warnings);
+  return new CddlSchema(text, comments, rules, table, root, warnings);
 }
 
 /**

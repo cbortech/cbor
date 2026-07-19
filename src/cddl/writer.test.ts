@@ -107,6 +107,191 @@ socketed = {$$ext}
   });
 });
 
+describe('CDDL formatter: pretty layout (indent)', () => {
+  /** Pretty round trip: parse → format({indent}) → parse, same AST. */
+  const prettyRoundtrips = (text: string): string => {
+    const first = parseCDDL(text).rules;
+    const formatted = CDDL.compile(text, { strict: false }).format({
+      indent: 2,
+      preserveComments: true,
+    });
+    const second = parseCDDL(formatted).rules;
+    expect(stripPositions(second)).toEqual(stripPositions(first));
+    return formatted;
+  };
+
+  test('multi-entry groups get one entry per line', () => {
+    expect(prettyRoundtrips('person = {name: tstr, ? age: uint}')).toBe(
+      'person = {\n  name: tstr,\n  ? age: uint\n}\n'
+    );
+  });
+
+  test('single-entry groups stay inline', () => {
+    expect(prettyRoundtrips('t = [* int]\nu = {a: int}')).toBe(
+      't = [* int]\nu = {a: int}\n'
+    );
+  });
+
+  test('nesting indents accumulate; blank lines separate multiline rules', () => {
+    expect(
+      prettyRoundtrips(
+        'a = int\nt = {meta: {version: uint, tags: [* tstr]}, body: bstr}\nb = int'
+      )
+    ).toBe(
+      `a = int
+
+t = {
+  meta: {
+    version: uint,
+    tags: [* tstr]
+  },
+  body: bstr
+}
+
+b = int
+`
+    );
+  });
+
+  test('group choices are separated by a // line', () => {
+    expect(prettyRoundtrips('t = [a // b, c]\na = 1\nb = 2\nc = 3')).toBe(
+      `t = [
+  a,
+  //
+  b,
+  c
+]
+
+a = 1
+b = 2
+c = 3
+`
+    );
+  });
+
+  test('trailing commas are preserved in both layouts', () => {
+    expect(prettyRoundtrips('t = {a: int, b: tstr,}')).toBe(
+      't = {\n  a: int,\n  b: tstr,\n}\n'
+    );
+    expect(prettyRoundtrips('g = (int,)')).toBe('g = (int,)\n');
+  });
+
+  test('indent accepts a literal string', () => {
+    const out = CDDL.compile('t = {a: int, b: tstr}').format({
+      indent: '\t',
+    });
+    expect(out).toBe('t = {\n\ta: int,\n\tb: tstr\n}\n');
+  });
+
+  test('pretty formatting is idempotent', () => {
+    const opts = { indent: 2 as const, preserveComments: true };
+    const once = CDDL.compile(
+      'person = {name: tstr, ? age: uint / nil, addr: {street: tstr, zip: uint}}'
+    ).format(opts);
+    const twice = CDDL.compile(once).format(opts);
+    expect(twice).toBe(once);
+  });
+});
+
+describe('CDDL formatter: comments (preserveComments)', () => {
+  test('the default playground sample formats to itself', () => {
+    const text = `; CDDL (RFC 8610) — the schema language for CBOR. Edit me!
+person = {
+  name: tstr,
+  ? age: uint,
+  ? email: tstr .regexp "[^@]+@[^@]+",
+}
+`;
+    const out = CDDL.compile(text).format({
+      indent: 2,
+      preserveComments: true,
+    });
+    expect(out).toBe(text);
+  });
+
+  test('rule-level comments survive both layouts', () => {
+    const text = '; header\na = int ; trailing\nb = tstr\n';
+    expect(CDDL.compile(text).format({ preserveComments: true })).toBe(
+      '; header\na = int ; trailing\nb = tstr\n'
+    );
+    expect(
+      CDDL.compile(text).format({ indent: 2, preserveComments: true })
+    ).toBe('; header\na = int ; trailing\nb = tstr\n');
+  });
+
+  test('entry-level comments attach to their entries in pretty layout', () => {
+    const text = `g = (
+  "name": tstr, ; key comment
+  ; leading note
+  age: int,
+)
+`;
+    const out = CDDL.compile(text, { strict: false }).format({
+      indent: 2,
+      preserveComments: true,
+    });
+    expect(out).toBe(text);
+  });
+
+  test('a comment forces its single-entry group onto multiple lines', () => {
+    const out = CDDL.compile('t = [\n  ; only entry\n  int\n]').format({
+      indent: 2,
+      preserveComments: true,
+    });
+    expect(out).toBe('t = [\n  ; only entry\n  int\n]\n');
+  });
+
+  test('comments before a rule body are kept (pretty) or hoisted (compact)', () => {
+    const source = 'a = ; important\n  int';
+    expect(
+      CDDL.compile(source).format({ indent: 2, preserveComments: true })
+    ).toBe('a =\n  ; important\n  int\n');
+    expect(CDDL.compile(source).format({ preserveComments: true })).toBe(
+      '; important\na = int\n'
+    );
+  });
+
+  test('comments after the last entry sit before the group closer', () => {
+    const text = `t = {
+  a: int,
+  ; last
+}
+`;
+    expect(
+      CDDL.compile(text).format({ indent: 2, preserveComments: true })
+    ).toBe(text);
+  });
+
+  test('comments in empty groups stay inside the delimiters', () => {
+    const text = `t = [
+  ; nothing yet
+]
+`;
+    expect(
+      CDDL.compile(text).format({ indent: 2, preserveComments: true })
+    ).toBe(text);
+  });
+
+  test('comments between inline type choices move to the rule line end', () => {
+    const out = CDDL.compile('a = int /\n  ; note\n  tstr').format({
+      indent: 2,
+      preserveComments: true,
+    });
+    expect(out).toBe('a = int / tstr ; note\n');
+  });
+
+  test('comments after the last rule are kept at the end', () => {
+    const out = CDDL.compile('a = int\n; the end').format({
+      preserveComments: true,
+    });
+    expect(out).toBe('a = int\n; the end\n');
+  });
+
+  test('comments are dropped without preserveComments', () => {
+    expect(CDDL.compile('; note\na = int').format()).toBe('a = int\n');
+  });
+});
+
 describe('CDDL formatter: fixed points', () => {
   test('formatting is idempotent', () => {
     const once = CDDL.compile('person = {name: tstr, ? age: uint / nil}\n', {

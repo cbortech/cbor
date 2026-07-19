@@ -936,8 +936,10 @@ console.log(schema.warnings?.[0]?.code);
 // undefined-name
 ```
 
-`schema.format()` re-serializes the model with normalized spacing (comments
-are not re-emitted; literal values keep their source spelling):
+`schema.format(options?)` re-serializes the model (literal values keep
+their source spelling). By default the output is compact — one rule per
+line; pass `indent` for a pretty layout with one group entry per line, and
+`preserveComments` to re-emit `;` comments:
 
 ```ts
 import { CDDL } from '@cbortech/cbor/cddl';
@@ -947,6 +949,21 @@ const text = CDDL.compile('a=0x10\nb   = { x :  tstr }').format();
 console.log(text);
 // a = 0x10
 // b = {x: tstr}
+```
+
+```ts
+import { CDDL } from '@cbortech/cbor/cddl';
+
+const text = CDDL.compile(
+  '; a person\nperson = {name: tstr, ? age: uint}'
+).format({ indent: 2, preserveComments: true });
+
+console.log(text);
+// ; a person
+// person = {
+//   name: tstr,
+//   ? age: uint
+// }
 ```
 
 The subpath also exports `tokenize` / `tokenizeLenient` for CDDL text,

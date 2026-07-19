@@ -58,10 +58,17 @@ for (const subdir of ['data', 'test']) {
       const { rules } = parseCDDL(text);
       expect(rules.length).toBeGreaterThan(0);
 
-      // 2. Round-trips through the formatter.
+      // 2. Round-trips through the formatter, in both layouts.
       const schema = CDDL.compile(text, { strict: false });
       const reparsed = parseCDDL(schema.format()).rules;
       expect(stripPositions(reparsed)).toEqual(stripPositions(rules));
+      const pretty = schema.format({ indent: 2, preserveComments: true });
+      const prettyParsed = parseCDDL(pretty);
+      expect(stripPositions(prettyParsed.rules)).toEqual(stripPositions(rules));
+      // Comment texts survive pretty formatting (order may shift).
+      expect(prettyParsed.comments.map((c) => c.text).sort()).toEqual(
+        schema.comments.map((c) => c.text).sort()
+      );
 
       // 3. No syntax-level surprises from compile: semantic warnings are
       //    expected for standalone RFC fragments and are only shape-checked.

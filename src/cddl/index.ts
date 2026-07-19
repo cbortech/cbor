@@ -27,6 +27,7 @@ export { parseCDDL } from './parser';
 export type { ParseCddlResult } from './parser';
 export { PRELUDE_CDDL, getPreludeRules } from './prelude';
 export { positionAt } from './position';
+export type { CddlFormatOptions } from './writer';
 export type {
   CddlRule,
   CddlType,

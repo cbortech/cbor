@@ -926,8 +926,10 @@ console.log(schema.warnings?.[0]?.code);
 // undefined-name
 ```
 
-`schema.format()` は空白を正規化してモデルを再シリアライズします
-(コメントは再出力されません。リテラル値はソースの表記を保持します)。
+`schema.format(options?)` はモデルを再シリアライズします(リテラル値は
+ソースの表記を保持)。既定は 1 ルール 1 行のコンパクト出力で、`indent` を
+渡すと group エントリごとに改行する pretty レイアウト、`preserveComments`
+で `;` コメントも再出力されます。
 
 ```ts
 import { CDDL } from '@cbortech/cbor/cddl';
@@ -937,6 +939,21 @@ const text = CDDL.compile('a=0x10\nb   = { x :  tstr }').format();
 console.log(text);
 // a = 0x10
 // b = {x: tstr}
+```
+
+```ts
+import { CDDL } from '@cbortech/cbor/cddl';
+
+const text = CDDL.compile(
+  '; a person\nperson = {name: tstr, ? age: uint}'
+).format({ indent: 2, preserveComments: true });
+
+console.log(text);
+// ; a person
+// person = {
+//   name: tstr,
+//   ? age: uint
+// }
 ```
 
 同じサブパスから、CDN と同形の CDDL 用 `tokenize` / `tokenizeLenient` と、
