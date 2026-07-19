@@ -93,6 +93,32 @@ export class CddlSyntaxError extends SyntaxError {
 }
 
 /**
+ * Error thrown when a data item does not match a CDDL schema supplied via
+ * the `cddl` option of a throwing entry point (`CBOR.parse`, `CBOR.decode`,
+ * `CBOR.fromCDN`, `CBOR.encode`, …). Non-throwing checks (`CBOR.validate`,
+ * `CddlSchema.validate`) report the same failures in their result instead.
+ */
+export class CddlMismatchError extends Error {
+  /** The deepest-reach validation failure(s). */
+  readonly errors: CddlValidationError[];
+  /** Non-fatal validator observations (approximated/skipped constraints). */
+  readonly warnings: CddlValidationWarning[];
+
+  constructor(
+    errors: CddlValidationError[],
+    warnings: CddlValidationWarning[] = []
+  ) {
+    const head = errors[0];
+    const loc = head?.path ? ` at ${head.path}` : '';
+    const rest = errors.length > 1 ? ` (and ${errors.length - 1} more)` : '';
+    super(`CDDL validation failed${loc}: ${head?.message ?? 'unknown'}${rest}`);
+    this.name = 'CddlMismatchError';
+    this.errors = errors;
+    this.warnings = warnings;
+  }
+}
+
+/**
  * Semantic error thrown by `CDDL.compile` in strict mode (the default) when
  * a syntactically valid file has semantic problems: undefined names,
  * duplicate rule definitions, generic arity mismatches, and the like.

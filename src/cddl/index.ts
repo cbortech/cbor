@@ -13,7 +13,11 @@ import { CddlSyntaxError } from './errors';
 import { compile, CddlSchema, type CompileOptions } from './schema';
 
 export type { CddlToken, CddlTokenType, CddlComment } from './tokenizer';
-export { CddlSyntaxError, CddlSemanticError } from './errors';
+export {
+  CddlSyntaxError,
+  CddlSemanticError,
+  CddlMismatchError,
+} from './errors';
 export type {
   CddlWarning,
   CddlValidationError,

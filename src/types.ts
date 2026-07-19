@@ -18,6 +18,15 @@ export const CBOR_OMIT: unique symbol = Symbol('cbor.omit');
 export type { CborExtension } from './extensions/types';
 import type { CborExtension } from './extensions/types';
 
+// ─── CDDL ─────────────────────────────────────────────────────────────────────
+// Type-only imports; note however that supporting CDDL source text as the
+// `cddl` option makes the facade (cbor.ts) import the compiler at runtime,
+// so the main entry loads the CDDL chunks as well. Accepting only compiled
+// schemas would keep the compiler exclusive to the `/cddl` subpath.
+import type { CddlSchema } from './cddl/schema';
+import type { ValidateOptions as CddlValidateOptions } from './cddl/validator';
+import type { CddlValidationError, CddlValidationWarning } from './cddl/errors';
+
 // ─── Options ──────────────────────────────────────────────────────────────────
 
 export interface ToHexDumpOptions {
@@ -242,6 +251,29 @@ export interface FromCBOROptions {
    * @default false
    */
   silent?: boolean;
+
+  /**
+   * CDDL schema to validate decoded items against: either a compiled schema
+   * (`CDDL.compile()` from `@cbortech/cbor/cddl`) or CDDL source text.
+   * Source text is compiled on first use with default compile options and
+   * cached, so passing the same string repeatedly does not recompile; pass a
+   * compiled schema to control `CompileOptions` yourself. Invalid CDDL text
+   * throws `CddlSyntaxError` / `CddlSemanticError` at the call site.
+   *
+   * Each decoded item is validated against the schema's root rule after
+   * decoding; a mismatch throws {@link CddlMismatchError}. Sequence entry
+   * points (`fromCBORSeq`, `decodeSeq`, …) validate each item of the
+   * sequence individually. `CBOR.validate()` collects mismatches into
+   * `ValidateResult.cddlErrors` instead of throwing.
+   */
+  cddl?: CddlSchema | string;
+
+  /**
+   * Options forwarded to the CDDL validator when `cddl` is supplied
+   * (`features` for the `.feature` control operator, `maxDepth`,
+   * `maxSteps`). Ignored without `cddl`.
+   */
+  cddlValidationOptions?: CddlValidateOptions;
 }
 
 /**
@@ -284,6 +316,18 @@ export interface FromHexDumpOptions {
    * @default false
    */
   silent?: boolean;
+
+  /**
+   * Compiled CDDL schema to validate decoded items against.
+   * Mirrors `FromCBOROptions.cddl`.
+   */
+  cddl?: CddlSchema | string;
+
+  /**
+   * Options forwarded to the CDDL validator.
+   * Mirrors `FromCBOROptions.cddlValidationOptions`.
+   */
+  cddlValidationOptions?: CddlValidateOptions;
 }
 
 export interface FromCDNOptions {
@@ -427,6 +471,18 @@ export interface FromCDNOptions {
    * @default false
    */
   silent?: boolean;
+
+  /**
+   * Compiled CDDL schema to validate parsed items against.
+   * Mirrors `FromCBOROptions.cddl`.
+   */
+  cddl?: CddlSchema | string;
+
+  /**
+   * Options forwarded to the CDDL validator.
+   * Mirrors `FromCBOROptions.cddlValidationOptions`.
+   */
+  cddlValidationOptions?: CddlValidateOptions;
 }
 
 /**
@@ -494,6 +550,18 @@ export interface FromJSOptions {
    * @default false
    */
   undefinedOmits?: boolean;
+
+  /**
+   * Compiled CDDL schema to validate the constructed item against, before
+   * encoding/serialization. Mirrors `FromCBOROptions.cddl`.
+   */
+  cddl?: CddlSchema | string;
+
+  /**
+   * Options forwarded to the CDDL validator.
+   * Mirrors `FromCBOROptions.cddlValidationOptions`.
+   */
+  cddlValidationOptions?: CddlValidateOptions;
 }
 
 export interface ToCDNOptions {
@@ -783,6 +851,29 @@ export interface ValidateOptions {
    * @default 'cpa999'
    */
   unresolvedExtension?: 'cpa999' | 'error';
+
+  /**
+   * CDDL schema to validate each decoded/parsed item against: either a
+   * compiled schema (`CDDL.compile()` from `@cbortech/cbor/cddl`) or CDDL
+   * source text (compiled on first use and cached; mirrors
+   * `FromCBOROptions.cddl`).
+   *
+   * Unlike the throwing entry points, `CBOR.validate()` does not throw on a
+   * mismatch: failures are collected into `ValidateResult.cddlErrors` (and
+   * validator observations into `ValidateResult.cddlWarnings`), and any
+   * mismatch makes `valid` `false`. Each item of a sequence is validated
+   * individually against the schema's root rule. Note that invalid CDDL
+   * source text itself still throws (`CddlSyntaxError` /
+   * `CddlSemanticError`): the schema is part of the call, not the data
+   * being validated.
+   */
+  cddl?: CddlSchema | string;
+
+  /**
+   * Options forwarded to the CDDL validator.
+   * Mirrors `FromCBOROptions.cddlValidationOptions`.
+   */
+  cddlValidationOptions?: CddlValidateOptions;
 }
 
 /**
@@ -824,6 +915,20 @@ export interface ValidateResult {
    * `CdnSyntaxError`, position fields intact.
    */
   error?: Error;
+
+  /**
+   * CDDL validation failures, collected per decoded item. Only present when
+   * `ValidateOptions.cddl` was supplied (empty array when every item
+   * matched). Any entry makes `valid` `false`.
+   */
+  cddlErrors?: CddlValidationError[];
+
+  /**
+   * Non-fatal CDDL validator observations (e.g. unsupported control
+   * operators whose constraints were skipped). Only present when
+   * `ValidateOptions.cddl` was supplied. Never affects `valid`.
+   */
+  cddlWarnings?: CddlValidationWarning[];
 }
 
 /** `fromCBORSeq()` の options（`offset`/`allowTrailing` はジェネレータが管理するため除外）。 */
