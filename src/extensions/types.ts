@@ -78,7 +78,9 @@ export interface CborExtension {
   /**
    * When `true`, the CDN parser wraps the result of `parseAppSequence` in a
    * `CborAppSeqResult` so that `toCDN()` round-trips the original
-   * `prefix<<...>>` notation when `appStrings !== false`.
+   * `prefix<<...>>` notation when `appStrings !== false`. In single-line
+   * output (no `indent`), a source spelling that spans multiple lines falls
+   * back to serializing the resolved item instead.
    *
    * Extensions whose result is already a subclass that handles source
    * preservation itself (e.g. `CborFloat` via its `ednSource` property) should

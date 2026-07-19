@@ -99,8 +99,33 @@ function wirePopoverToggle(buttonId: string, popoverId: string): void {
   });
 }
 
+/**
+ * Checkboxes for layout-dependent `ToCDNOptions` that the library ignores in
+ * single-line output (Indent: Compact); they are greyed out to make that
+ * visible. `opt-raw-string` is deliberately excluded: single-line raw
+ * spellings are still kept in compact mode, only multi-line ones fall back.
+ */
+const LAYOUT_OPTION_IDS = [
+  'opt-split-newline',
+  'opt-split-cdn',
+  'opt-inline-leaf',
+  'opt-comments',
+  'opt-concat',
+] as const;
+
 export function initFormatPopover(): void {
   wirePopoverToggle('format-opts-btn', 'format-popover');
+  const indentSelect = document.getElementById(
+    'opt-indent'
+  ) as HTMLSelectElement;
+  const syncLayoutOptions = () => {
+    const compact = indentSelect.value === '';
+    for (const id of LAYOUT_OPTION_IDS) {
+      (document.getElementById(id) as HTMLInputElement).disabled = compact;
+    }
+  };
+  indentSelect.addEventListener('change', syncLayoutOptions);
+  syncLayoutOptions();
 }
 
 export function readFormatOptions(): FromCDNOptions & ToCDNOptions {

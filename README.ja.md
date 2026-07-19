@@ -324,7 +324,8 @@ syntax を扱う場合のためのものです。
 デフォルトでは、`CBOR.format()` は `+` による文字列連結を 1 つのリテラルに
 結合します。`preserveConcatenation` を指定すると、テキスト文字列・バイト文字列とも
 元の連結の区切りを保持します。`preserveByteString` を併用すると、バイト文字列の
-各パートの元の表記も保持されます。
+各パートの元の表記も保持されます。分割オプションと同様に `indent` で整形出力が
+有効な場合のみ効果があり、1 行出力では常に 1 つのリテラルに結合されます。
 
 分割オプションとの関係: 文字列の中身が CDN としてパースできる場合は `splitCdn` が
 `preserveConcatenation` より優先されます。`splitNewline` は共存し、保持した各パートに
@@ -336,14 +337,17 @@ import { CBOR } from '@cbortech/cbor';
 CBOR.format('"a" + "b"');
 // '"ab"'
 
-CBOR.format('"a" + "b"', { preserveConcatenation: true });
-// '"a" + "b"'
+CBOR.format('"a" + "b"', { indent: 2, preserveConcatenation: true });
+// "a" +
+//   "b"
 
 CBOR.format("h'68' + b64'aQ'", {
+  indent: 2,
   preserveConcatenation: true,
   preserveByteString: true,
 });
-// "h'68' + b64'aQ'"
+// h'68' +
+//   b64'aQ'
 ```
 
 ### CBOR / CDN / hex dump のバリデーション
