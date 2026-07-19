@@ -900,6 +900,28 @@ console.log(result.valid, result.errors[0]?.path);
 // false /age
 ```
 
+検証は既定でスキーマの root — ソース中で最初に定義されたルール
+(RFC 8610 §3.1)— に対して行われます。別のルールを対象にしたい場合は
+`{ rule: 'ルール名' }` を渡してください — 型として使用可能な非 generic
+ルールを、スキーマ内・prelude 名(`'uint'` など)を問わず指定できます。
+generic なルール(`g<T> = ...`)は、型引数を束縛する呼び出し元がない
+ため、この方法では選択できません。group 専用ルールも、型の位置で参照
+した場合と同様に拒否されます。
+
+```ts
+import { CDDL } from '@cbortech/cbor/cddl';
+
+const schema = CDDL.compile(`
+  p1 = { name: tstr, ? addr: tstr }
+  p2 = { name: tstr, ? age: uint }
+`);
+
+console.log(
+  schema.validate('{"name": "kudo", "age": 42}', { rule: 'p2' }).valid
+);
+// true
+```
+
 control operator は RFC 8610 の全演算子(`.size` `.bits` `.regexp` `.cbor`
 `.cborseq` `.within` `.and` `.lt`〜`.ne` `.default`)と RFC 9165 の
 `.plus` `.cat` `.feature` を実装しています。`.feature` の許可名は
@@ -909,6 +931,47 @@ control operator は RFC 8610 の全演算子(`.size` `.bits` `.regexp` `.cbor`
 JavaScript `RegExp` で近似しています。`.default` は暗黙の `.ne` を適用
 します(RFC 8610 §3.8.6: デフォルト値はワイヤ上に送信されない)。参照
 実装の一部はこれを注釈のみとして扱う点に注意してください。
+
+スキーマ検証はメインの `CBOR` facade からも実行できます。デコード・パース
+系の全エントリポイントが `cddl` オプションを受け付け、コンパイル済み
+スキーマまたは CDDL ソーステキストを渡せます(文字列は初回使用時に既定の
+コンパイルオプションでコンパイルされ、キャッシュされます)。throw 系の
+エントリポイント(`parse`・`decode`・`fromCDN`・`encode` など)は、item が
+スキーマに一致しないと `CddlMismatchError` を throw します。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const value = CBOR.parse('{"name": "kudo"}', {
+  cddl: 'person = { name: tstr, ? age: uint }',
+});
+// { name: 'kudo' } — 不一致なら CddlMismatchError を throw
+```
+
+`CBOR.validate()` は throw せず、不一致を `result.cddlErrors` に収集
+します。シーケンス入力は既定で各 item を個別にルートルールへ照合します。
+バリデータのオプション — `.feature` の `features`、`maxDepth`、
+`maxSteps`、そして root 以外のルールを対象にする `rule`(上記の
+`schema.validate()` と同様、型として使用可能な非 generic ルールを
+スキーマ内・prelude 名を問わず指定可能)— は `cddlValidationOptions`
+で渡せます。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+import { CDDL } from '@cbortech/cbor/cddl';
+
+const schema = CDDL.compile('person = { name: tstr, ? age: uint }');
+const result = CBOR.validate('{"name": "kudo"} {"name": 1}', {
+  type: 'cdn',
+  cddl: schema,
+});
+
+console.log(result.valid, result.cddlErrors?.[0]?.path);
+// false /name
+```
+
+`cddl` オプションはインスタンスのデフォルト(`new CBOR({ cddl: … })`)
+としても指定でき、そのインスタンスの全呼び出しに適用されます。
 
 `compile` は、文法エラーでは `CddlSyntaxError`(`offset`・`line`・`column`
 付き)を、意味エラー — 未定義名(RFC 8610 standard prelude の `uint`・
@@ -966,6 +1029,7 @@ console.log(text);
 
 - `CBOR`
 - `CdnSyntaxError`
+- `CddlMismatchError`(`cddl` オプションが throw。[CDDL](#cddl) 節を参照)
 
 `CBOR` ファサードからは次にもアクセスできます。
 
@@ -981,7 +1045,8 @@ AST ノードクラスは `@cbortech/cbor/ast` にあります。
 
 CDDL コンパイラは `@cbortech/cbor/cddl`
 (`CDDL`, `CddlSchema`, `CddlSyntaxError`, `CddlSemanticError`,
-`tokenize`, `tokenizeLenient`, CDDL AST 型)にあります。
+`CddlMismatchError`, `tokenize`, `tokenizeLenient`, CDDL AST 型)に
+あります。
 
 ## 準拠している仕様
 

@@ -440,6 +440,76 @@ describe('validate: inputs and elision', () => {
   });
 });
 
+describe('validate: rule option', () => {
+  const schema = CDDL.compile(`
+    p1 = { name: tstr, ? addr: tstr }
+    p2 = { name: tstr, ? age: uint }
+  `);
+
+  test('defaults to the root (first) rule', () => {
+    expect(schema.validate('{"name": "kudo", "addr": "home"}').valid).toBe(
+      true
+    );
+    expect(schema.validate('{"name": "kudo", "age": 42}').valid).toBe(false);
+  });
+
+  test('{ rule } selects a different named rule', () => {
+    const result = schema.validate('{"name": "kudo", "age": 42}', {
+      rule: 'p2',
+    });
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  test('a mismatch against the selected rule is reported normally', () => {
+    const result = schema.validate('{"name": "kudo", "age": "x"}', {
+      rule: 'p2',
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]!.path).toBe('/age');
+    expect(result.errors[0]!.ruleName).toBe('p2');
+  });
+
+  test('an unknown rule name fails validation instead of throwing', () => {
+    const result = schema.validate('{"name": "kudo"}', { rule: 'missing' });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]!.message).toBe("'missing' is not defined");
+  });
+
+  test('a prelude name can be selected too', () => {
+    expect(schema.validate('42', { rule: 'uint' }).valid).toBe(true);
+    expect(schema.validate('"x"', { rule: 'uint' }).valid).toBe(false);
+  });
+
+  test('an empty string is treated as a (missing) rule name, not "no root"', () => {
+    const result = schema.validate('{"name": "kudo"}', { rule: '' });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]!.message).toBe("'' is not defined");
+  });
+
+  test('a group-only rule cannot be selected directly', () => {
+    const withGroup = CDDL.compile('t = { g }\ng = ( a: int, b: tstr )');
+    const result = withGroup.validate('{"a": 1, "b": "x"}', { rule: 'g' });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]!.message).toBe(
+      "group rule 'g' cannot be used as a type"
+    );
+  });
+
+  test('a generic rule cannot be selected directly', () => {
+    const generic = CDDL.compile('t = int\ng<A> = A');
+
+    const result = generic.validate('1', { rule: 'g' });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]!.message).toContain("rule 'g' takes 1 generic");
+
+    // A generic parameter that goes unused would otherwise validate
+    // "successfully" without ever checking anything meaningful.
+    const unused = CDDL.compile('t = int\ng<A> = int');
+    expect(unused.validate('1', { rule: 'g' }).valid).toBe(false);
+  });
+});
+
 describe('validate: error reporting', () => {
   test('reports path, instance offsets, and schema offsets', () => {
     const cddl = 'person = { name: tstr, ? age: uint }';

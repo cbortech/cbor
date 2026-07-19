@@ -57,6 +57,22 @@ export interface ValidateOptions {
   maxSteps?: number;
   /** Feature names accepted by the `.feature` control operator. */
   features?: string[];
+  /**
+   * Name of the rule to validate against, in place of the schema's root
+   * (the first rule in source order — RFC 8610 §3.1 defines only one root
+   * per model). Any non-generic rule usable as a type can be selected,
+   * defined in the schema or its prelude — e.g. a variant used only as a
+   * component elsewhere.
+   *
+   * An unknown name fails validation (`errors[0].message` is `'<name>' is
+   * not defined`) rather than throwing, matching how an unresolved `$ref`
+   * inside the schema is reported. A generic rule (`g<T> = ...`) also fails
+   * validation rather than throwing: there is no `genericArgs` site to bind
+   * its parameters from here, so it cannot be selected directly. Likewise a
+   * group-only rule fails with `group rule '<name>' cannot be used as a
+   * type`, exactly as when such a rule is referenced in type position.
+   */
+  rule?: string;
 }
 
 // ─── Context ──────────────────────────────────────────────────────────────────
@@ -160,8 +176,8 @@ export function validateItem(
   item: CborItem,
   options?: ValidateOptions
 ): ValidationResult {
-  const root = schema.root;
-  if (!root)
+  const ruleName = options?.rule ?? schema.root?.name;
+  if (ruleName === undefined)
     return {
       valid: false,
       errors: [
@@ -177,9 +193,27 @@ export function validateItem(
     options?.maxSteps ?? 1_000_000,
     new Set(options?.features ?? [])
   );
+  // A generic rule's parameters are only ever bound from a referencing
+  // site's `genericArgs` (see `bindGenericsForDef`); neither the schema
+  // root nor `{ rule }` has one to supply, so selecting a generic rule here
+  // would either leave its parameter names unresolved (reported as
+  // undefined names, misleadingly) or silently ignore them if unused.
+  // Reject it explicitly instead.
+  const defs = ruleDefs(ctx, ruleName);
+  const genericCount = defs?.[0]?.generics?.length ?? 0;
+  if (genericCount > 0)
+    return {
+      valid: false,
+      errors: [
+        {
+          message: `rule '${ruleName}' takes ${genericCount} generic argument${genericCount === 1 ? '' : 's'} and cannot be used as a validation target directly; reference it with concrete arguments from another rule instead`,
+          path: '/',
+        },
+      ],
+    };
   let valid: boolean;
   try {
-    valid = matchRuleName(item, root.name, undefined, [], ctx, 0);
+    valid = matchRuleName(item, ruleName, undefined, [], ctx, 0);
   } catch (e) {
     if (!(e instanceof LimitExceeded)) throw e;
     return {
@@ -198,7 +232,7 @@ export function validateItem(
     ? [(({ depth: _d, startKey: _s, ...rest }) => rest)(ctx.best)]
     : [
         {
-          message: `value does not match rule '${root.name}'`,
+          message: `value does not match rule '${ruleName}'`,
           path: '/',
           ...(item.start !== undefined
             ? { start: item.start, end: item.end }

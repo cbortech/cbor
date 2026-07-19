@@ -909,6 +909,28 @@ console.log(result.valid, result.errors[0]?.path);
 // false /age
 ```
 
+By default validation matches the schema's root — the first rule in
+source order (RFC 8610 §3.1). Pass `{ rule: 'name' }` to validate against
+a different rule instead — any non-generic rule usable as a type, defined
+in the schema or its prelude (e.g. `'uint'`). A generic rule
+(`g<T> = ...`) cannot be selected this way, since there is no call site to
+bind its type argument from; a group-only rule is rejected just as it
+would be in type position.
+
+```ts
+import { CDDL } from '@cbortech/cbor/cddl';
+
+const schema = CDDL.compile(`
+  p1 = { name: tstr, ? addr: tstr }
+  p2 = { name: tstr, ? age: uint }
+`);
+
+console.log(
+  schema.validate('{"name": "kudo", "age": 42}', { rule: 'p2' }).valid
+);
+// true
+```
+
 Control operators from RFC 8610 (`.size`, `.bits`, `.regexp`, `.cbor`,
 `.cborseq`, `.within`, `.and`, `.lt`…`.ne`, `.default`) and RFC 9165
 (`.plus`, `.cat`, `.feature`) are implemented; `.feature` names are enabled
@@ -919,6 +941,48 @@ JavaScript `RegExp` (the spec prescribes XSD regular expressions).
 `.default` applies its implied `.ne` (RFC 8610 §3.8.6): the default value
 itself does not validate. Note that some reference tools treat it as an
 annotation only.
+
+Schema checks can also run from the main `CBOR` facade: every decode/parse
+entry point accepts a `cddl` option holding a compiled schema or CDDL
+source text (source text is compiled on first use with default compile
+options, then cached). Throwing entry points (`parse`, `decode`,
+`fromCDN`, `encode`, …) throw a `CddlMismatchError` when an item does not
+match:
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const value = CBOR.parse('{"name": "kudo"}', {
+  cddl: 'person = { name: tstr, ? age: uint }',
+});
+// { name: 'kudo' } — a mismatch would throw CddlMismatchError
+```
+
+`CBOR.validate()` collects mismatches into `result.cddlErrors` instead of
+throwing. Sequence inputs validate each item individually against the
+schema's root rule by default, and validator options — `features` for
+`.feature`, `maxDepth`, `maxSteps`, and `rule` to validate against a rule
+other than the root (any non-generic type rule in the schema or its
+prelude, same as `schema.validate()` above) — can be forwarded via
+`cddlValidationOptions`:
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+import { CDDL } from '@cbortech/cbor/cddl';
+
+const schema = CDDL.compile('person = { name: tstr, ? age: uint }');
+const result = CBOR.validate('{"name": "kudo"} {"name": 1}', {
+  type: 'cdn',
+  cddl: schema,
+});
+
+console.log(result.valid, result.cddlErrors?.[0]?.path);
+// false /name
+```
+
+The option is also accepted as an instance default
+(`new CBOR({ cddl: … })`), applying the schema to every call on that
+instance.
 
 `compile` throws a `CddlSyntaxError` (with `offset`, `line`, and `column`) on
 grammar errors, and a `CddlSemanticError` on semantic problems: undefined
@@ -976,6 +1040,7 @@ The documented public exports are:
 
 - `CBOR`
 - `CdnSyntaxError`
+- `CddlMismatchError` (thrown by the `cddl` option; see [CDDL](#cddl))
 
 The `CBOR` facade also exposes:
 
@@ -991,7 +1056,8 @@ and AST node classes in `@cbortech/cbor/ast`.
 
 The CDDL compiler lives in `@cbortech/cbor/cddl`
 (`CDDL`, `CddlSchema`, `CddlSyntaxError`, `CddlSemanticError`,
-`tokenize`, `tokenizeLenient`, and the CDDL AST types).
+`CddlMismatchError`, `tokenize`, `tokenizeLenient`, and the CDDL AST
+types).
 
 ## Specifications
 

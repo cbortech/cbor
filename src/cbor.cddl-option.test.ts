@@ -157,6 +157,24 @@ describe('cddl option', () => {
       ];
       expect(values).toEqual([1, 2]);
     });
+
+    test('rule selects a non-root rule to validate against', () => {
+      const variants = CDDL.compile(`
+        p1 = { name: tstr, ? addr: tstr }
+        p2 = { name: tstr, ? age: uint }
+      `);
+
+      expect(
+        CBOR.parse('{"name": "kudo", "age": 42}', {
+          cddl: variants,
+          cddlValidationOptions: { rule: 'p2' },
+        })
+      ).toEqual({ name: 'kudo', age: 42 });
+
+      expect(() =>
+        CBOR.parse('{"name": "kudo", "age": 42}', { cddl: variants })
+      ).toThrow(CddlMismatchError);
+    });
   });
 
   describe('CDDL source text as the cddl option', () => {

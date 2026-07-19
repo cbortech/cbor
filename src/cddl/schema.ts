@@ -103,7 +103,13 @@ export class CddlSchema {
   }
 
   /**
-   * Validate a data item against this schema's root rule.
+   * Validate a data item against this schema's root rule — the first rule
+   * in source order (RFC 8610 §3.1). Pass `{ rule: 'otherName' }` to
+   * validate against a different rule instead: any non-generic rule usable
+   * as a type, defined in the schema or its prelude (e.g. `'uint'`).
+   * Generic rules (`g<T> = ...`) and group-only rules are reported as
+   * validation failures, as is an unknown name (see
+   * {@link ValidateOptions.rule}).
    *
    * Accepts a CborItem, CBOR bytes (decoded with `decodeCBOR`), or CDN text
    * (parsed with `parseCDN`). Validation failures are reported in the
@@ -113,6 +119,14 @@ export class CddlSchema {
    * const schema = CDDL.compile('person = { name: tstr, ? age: uint }');
    * const result = schema.validate('{"name": "kudo", "age": 42}');
    * result.valid; // true
+   *
+   * @example
+   * // Validate against a rule other than the root.
+   * const schema = CDDL.compile(`
+   *   p1 = { name: tstr, ? addr: tstr }
+   *   p2 = { name: tstr, ? age: uint }
+   * `);
+   * schema.validate('{"name": "kudo", "age": 42}', { rule: 'p2' }).valid; // true
    */
   validate(
     input: CborItem | Uint8Array | string,

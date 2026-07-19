@@ -260,18 +260,20 @@ export interface FromCBOROptions {
    * compiled schema to control `CompileOptions` yourself. Invalid CDDL text
    * throws `CddlSyntaxError` / `CddlSemanticError` at the call site.
    *
-   * Each decoded item is validated against the schema's root rule after
-   * decoding; a mismatch throws {@link CddlMismatchError}. Sequence entry
-   * points (`fromCBORSeq`, `decodeSeq`, …) validate each item of the
-   * sequence individually. `CBOR.validate()` collects mismatches into
-   * `ValidateResult.cddlErrors` instead of throwing.
+   * Each decoded item is validated after decoding, against the schema's
+   * root rule by default (or `cddlValidationOptions.rule`, if set); a
+   * mismatch throws {@link CddlMismatchError}. Sequence entry points
+   * (`fromCBORSeq`, `decodeSeq`, …) validate each item of the sequence
+   * individually against that same rule. `CBOR.validate()` collects
+   * mismatches into `ValidateResult.cddlErrors` instead of throwing.
    */
   cddl?: CddlSchema | string;
 
   /**
    * Options forwarded to the CDDL validator when `cddl` is supplied
    * (`features` for the `.feature` control operator, `maxDepth`,
-   * `maxSteps`). Ignored without `cddl`.
+   * `maxSteps`, and `rule` to validate against a rule other than the
+   * schema's root). Ignored without `cddl`.
    */
   cddlValidationOptions?: CddlValidateOptions;
 }
@@ -862,10 +864,10 @@ export interface ValidateOptions {
    * mismatch: failures are collected into `ValidateResult.cddlErrors` (and
    * validator observations into `ValidateResult.cddlWarnings`), and any
    * mismatch makes `valid` `false`. Each item of a sequence is validated
-   * individually against the schema's root rule. Note that invalid CDDL
-   * source text itself still throws (`CddlSyntaxError` /
-   * `CddlSemanticError`): the schema is part of the call, not the data
-   * being validated.
+   * individually against the schema's root rule by default (or
+   * `cddlValidationOptions.rule`, if set). Note that invalid CDDL source
+   * text itself still throws (`CddlSyntaxError` / `CddlSemanticError`): the
+   * schema is part of the call, not the data being validated.
    */
   cddl?: CddlSchema | string;
 
