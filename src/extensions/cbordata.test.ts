@@ -47,11 +47,41 @@ describe('tag 24: embedded CBOR (RFC 8949 §3.4.5.1)', () => {
   });
 
   test('strict: false: invalid inner CBOR falls back to CborByteString', () => {
-    // In non-strict mode the extension catches the inner error and returns
-    // a plain CborTag wrapping the raw bytes.
-    const r = decodeCBOR(hex('d81841ff'), { strict: false }) as CborTag;
+    // d8 18 41 ff: tag(24, byte-string len 1) with payload 0xff at outer
+    // offset 3 — a break code, not a valid CBOR item start. In non-strict
+    // mode the extension catches the inner error and returns a plain CborTag
+    // wrapping the raw bytes, but still reports the violation via onWarning
+    // so it isn't silently lost. The offset must point at the payload's
+    // position in the *outer* input (3), not the byte-string header (2) or
+    // the inner-buffer-relative position (0).
+    const warnings: { message: string; offset: number }[] = [];
+    const r = decodeCBOR(hex('d81841ff'), {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborTag;
     expect(r.tag).toBe(24n);
     expect(r.content).toBeInstanceOf(CborByteString);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.message).toContain('tag 24');
+    expect(warnings[0]!.offset).toBe(3);
+  });
+
+  test('strict: false: an inner recoverable warning is forwarded with its outer offset', () => {
+    // d8 18 42 61 ff: tag(24, byte-string len 2) with payload [0x61, 0xff].
+    // The inner decode succeeds (text string of length 1) but the payload
+    // byte 0xff is invalid UTF-8 at outer offset 4 (inner offset 1, plus the
+    // payload's outer start at 3). The extension must translate that inner
+    // offset back to the outer position before forwarding to onWarning.
+    const warnings: { message: string; offset: number }[] = [];
+    const r = decodeCBOR(hex('d8184261ff'), {
+      strict: false,
+      onWarning: (w) => warnings.push(w),
+    }) as CborTag;
+    expect(r.tag).toBe(24n);
+    expect(r.content).toBeInstanceOf(CborEmbeddedCBOR);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.message).toBe('invalid UTF-8 sequence in text string');
+    expect(warnings[0]!.offset).toBe(4);
   });
 
   test('tag(24, byte-string with 2-byte length for 1-byte content) → 24(<<1>>_1)', () => {

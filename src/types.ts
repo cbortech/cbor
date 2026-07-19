@@ -131,6 +131,22 @@ export interface ParseWarning {
    * fatal warnings as errors.
    */
   fatal?: boolean;
+
+  /**
+   * `true` when this entry is an informational hint (e.g. an app-string
+   * prefix matches a known optional extension that isn't registered) rather
+   * than a validity violation. Parsing is unaffected either way, but tooling
+   * that treats `onWarning` calls as failures (see `CBOR.validate()`) should
+   * not count these against validity.
+   */
+  hint?: boolean;
+
+  /**
+   * For a `fatal` warning built from a caught syntax error (see
+   * `CdnSyntaxError`), the original error object with its position fields
+   * intact. `CBOR.validate()` promotes this into `ValidateResult.error`.
+   */
+  cause?: Error;
 }
 
 export interface FromCBOROptions {
@@ -720,6 +736,80 @@ export interface CborComments {
   leading?: CborComment[];
   trailing?: CborComment[];
   dangling?: CborComment[];
+}
+
+/**
+ * Options for `CBOR.validate()`.
+ */
+export interface ValidateOptions {
+  /**
+   * Input format.
+   * - `'cbor'`: binary CBOR, decoded as a CBOR Sequence (RFC 8742).
+   * - `'cdn'`: CDN text, parsed as a CDN Sequence.
+   * - `'hex'`: annotated hex dump text, decoded as a CBOR Sequence.
+   * @default 'cbor'
+   */
+  type?: 'cbor' | 'cdn' | 'hex';
+
+  /**
+   * Extension plugins used while decoding/parsing.
+   * Mirrors `FromCBOROptions.extensions` / `FromCDNOptions.extensions`.
+   */
+  extensions?: CborExtension[];
+
+  /**
+   * Override the default set of bundled application-oriented extensions.
+   * Mirrors `FromCBOROptions.builtinExtensions`.
+   */
+  builtinExtensions?: CborExtension[] | false;
+
+  /**
+   * How to handle unrecognised application-extension identifiers.
+   * Only applies when `type` is `'cdn'`; mirrors `FromCDNOptions.unresolvedExtension`.
+   * @default 'cpa999'
+   */
+  unresolvedExtension?: 'cpa999' | 'error';
+}
+
+/**
+ * Result of `CBOR.validate()`.
+ */
+export interface ValidateResult {
+  /**
+   * `true` when every item decoded/parsed without error and without any
+   * warnings. `false` when the input was malformed (see `error`) or
+   * well-formed but in violation of a validity constraint (see `warnings`).
+   */
+  valid: boolean;
+
+  /** Number of items successfully decoded/parsed before any error. */
+  count: number;
+
+  /**
+   * Validity violations encountered while decoding/parsing in non-strict
+   * mode (recoverable — decoding continued after each one). Excludes
+   * informational hints (see `hints`) and the fatal CDN warning that
+   * `error` is built from, if any.
+   */
+  warnings: (DecodeWarning | ParseWarning)[];
+
+  /**
+   * Informational hints (`ParseWarning.hint`) encountered while parsing,
+   * e.g. an app-string prefix that matches a known optional extension which
+   * isn't registered. Hints never affect `valid`; they are collected here so
+   * tooling can still surface them.
+   */
+  hints: ParseWarning[];
+
+  /**
+   * Set when decoding/parsing failed outright: either it threw (e.g.
+   * truncated CBOR data), or — for CDN input — `fromCDNSeq()` abandoned the
+   * rest of the sequence after a hard syntax error (reported internally as a
+   * `fatal` warning, which `validate()` promotes to `error` rather than
+   * including in `warnings`). For a CDN syntax error this is the original
+   * `CdnSyntaxError`, position fields intact.
+   */
+  error?: Error;
 }
 
 /** `fromCBORSeq()` の options（`offset`/`allowTrailing` はジェネレータが管理するため除外）。 */

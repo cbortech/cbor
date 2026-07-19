@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'vitest';
 import { CBOR } from './cbor';
+import { CdnSyntaxError } from './cdn/errors';
 import { CborUint } from './ast/CborUint';
 import { CborMap } from './ast/CborMap';
 
@@ -718,5 +719,112 @@ describe('CBOR.fromHex', () => {
     const dump = CBOR.toHex(bytes);
     expect(CBOR.fromHex(dump)).toEqual(bytes);
     expect(cbor.fromHex(dump)).toEqual(bytes);
+  });
+});
+
+// ─── CBOR.validate ───────────────────────────────────────────────────────────
+
+describe('CBOR.validate', () => {
+  test('valid single-item CBOR', () => {
+    const result = CBOR.validate(hex('01')); // uint 1
+    expect(result).toEqual({ valid: true, count: 1, warnings: [], hints: [] });
+  });
+
+  test('valid CBOR Sequence counts every item', () => {
+    const bytes = new Uint8Array([...CBOR.encode(1), ...CBOR.encode('two')]);
+    const result = CBOR.validate(bytes);
+    expect(result.valid).toBe(true);
+    expect(result.count).toBe(2);
+    expect(result.warnings).toEqual([]);
+    expect(result.error).toBeUndefined();
+  });
+
+  test('malformed CBOR reports error and no warnings', () => {
+    const result = CBOR.validate(hex('830102')); // array of 3, only 2 elements present
+    expect(result.valid).toBe(false);
+    expect(result.count).toBe(0);
+    expect(result.warnings).toEqual([]);
+    expect(result.error).toBeInstanceOf(Error);
+  });
+
+  test('well-formed CBOR with a duplicate map key reports a warning', () => {
+    // {"a": 1, "a": 2} — duplicate key "a"
+    const result = CBOR.validate(hex('a2616101616102'));
+    expect(result.valid).toBe(false);
+    expect(result.count).toBe(1);
+    expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.error).toBeUndefined();
+  });
+
+  test('valid CDN text', () => {
+    const result = CBOR.validate('{"a": 1}', { type: 'cdn' });
+    expect(result).toEqual({ valid: true, count: 1, warnings: [], hints: [] });
+  });
+
+  test('malformed CDN text promotes the fatal syntax warning to error', () => {
+    // fromCDNSeq() reports a hard syntax error as a `fatal: true` warning
+    // and abandons the rest of the sequence rather than throwing; validate()
+    // promotes that into `error` instead of leaving it in `warnings`.
+    const result = CBOR.validate('{"a": }', { type: 'cdn' });
+    expect(result.valid).toBe(false);
+    expect(result.count).toBe(0);
+    expect(result.warnings).toEqual([]);
+    // The original CdnSyntaxError is promoted as-is, position fields intact.
+    expect(result.error).toBeInstanceOf(CdnSyntaxError);
+    const error = result.error as CdnSyntaxError;
+    expect(error.line).toBe(1);
+    expect(error.column).toBeDefined();
+  });
+
+  test('unterminated comment reports a CdnSyntaxError with its position', () => {
+    const result = CBOR.validate('1 /* dangling', { type: 'cdn' });
+    expect(result.valid).toBe(false);
+    expect(result.count).toBe(0);
+    expect(result.warnings).toEqual([]);
+    expect(result.error).toBeInstanceOf(CdnSyntaxError);
+    expect((result.error as CdnSyntaxError).offset).toBe(4);
+  });
+
+  test('embedded CBOR (tag 24) with invalid inner content reports a warning', () => {
+    // 0xff inside the tag-24 byte string is a break code, not a valid CBOR
+    // item — the cbordata extension falls back to a plain byte string in
+    // non-strict mode, but must still surface the violation, with the
+    // offset translated to the payload's position in the outer input (3),
+    // not the byte-string header (2) or the inner-buffer-relative position (0).
+    const result = CBOR.validate(hex('d81841ff'));
+    expect(result.valid).toBe(false);
+    expect(result.count).toBe(1);
+    expect(result.error).toBeUndefined();
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]!.message).toContain('tag 24');
+    expect((result.warnings[0] as { offset: number }).offset).toBe(3);
+  });
+
+  test('CDN app-string prefix hint for an unregistered optional extension is not a violation', () => {
+    // b32'...' resolves fine via the default unresolvedExtension: 'cpa999'
+    // handling; the parser's missing-extension hint must not count as one,
+    // but it is still surfaced via `hints`.
+    const result = CBOR.validate("b32'AA'", { type: 'cdn' });
+    expect(result.valid).toBe(true);
+    expect(result.count).toBe(1);
+    expect(result.warnings).toEqual([]);
+    expect(result.hints).toHaveLength(1);
+    expect(result.hints[0]!.message).toContain("app-string prefix 'b32'");
+  });
+
+  test('valid hex dump text', () => {
+    const result = CBOR.validate('01 -- uint 1', { type: 'hex' });
+    expect(result).toEqual({ valid: true, count: 1, warnings: [], hints: [] });
+  });
+
+  test('instance validate merges defaults', () => {
+    const cbor = new CBOR({ extensions: [CBOR.dt_as_Date] });
+    const text = "DT'2024-01-01T00:00:00Z'";
+    expect(cbor.validate(text, { type: 'cdn' })).toEqual({
+      valid: true,
+      count: 1,
+      warnings: [],
+      hints: [],
+    });
   });
 });
