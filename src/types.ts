@@ -140,6 +140,13 @@ export interface ParseWarning {
    * not count these against validity.
    */
   hint?: boolean;
+
+  /**
+   * For a `fatal` warning built from a caught syntax error (see
+   * `CdnSyntaxError`), the original error object with its position fields
+   * intact. `CBOR.validate()` promotes this into `ValidateResult.error`.
+   */
+  cause?: Error;
 }
 
 export interface FromCBOROptions {
@@ -781,17 +788,26 @@ export interface ValidateResult {
   /**
    * Validity violations encountered while decoding/parsing in non-strict
    * mode (recoverable — decoding continued after each one). Excludes
-   * informational hints (`ParseWarning.hint`) and the fatal CDN warning that
+   * informational hints (see `hints`) and the fatal CDN warning that
    * `error` is built from, if any.
    */
   warnings: (DecodeWarning | ParseWarning)[];
+
+  /**
+   * Informational hints (`ParseWarning.hint`) encountered while parsing,
+   * e.g. an app-string prefix that matches a known optional extension which
+   * isn't registered. Hints never affect `valid`; they are collected here so
+   * tooling can still surface them.
+   */
+  hints: ParseWarning[];
 
   /**
    * Set when decoding/parsing failed outright: either it threw (e.g.
    * truncated CBOR data), or — for CDN input — `fromCDNSeq()` abandoned the
    * rest of the sequence after a hard syntax error (reported internally as a
    * `fatal` warning, which `validate()` promotes to `error` rather than
-   * including in `warnings`).
+   * including in `warnings`). For a CDN syntax error this is the original
+   * `CdnSyntaxError`, position fields intact.
    */
   error?: Error;
 }

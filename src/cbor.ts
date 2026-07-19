@@ -615,7 +615,8 @@ export class CBOR {
    * (e.g. truncated data, hard syntax errors — including a CDN Sequence
    * abandoned after a hard syntax error) is reported via `error`.
    * Informational hints about optional extensions that aren't registered
-   * (`ParseWarning.hint`) are not treated as violations.
+   * (`ParseWarning.hint`) are not treated as violations; they are collected
+   * separately into `hints`.
    *
    * @example
    * const result = CBOR.validate(bytes);
@@ -633,13 +634,17 @@ export class CBOR {
     options?: ValidateOptions
   ): ValidateResult {
     const warnings: (DecodeWarning | ParseWarning)[] = [];
+    const hints: ParseWarning[] = [];
     let fatal: ParseWarning | undefined;
     const seqOptions = {
       strict: false,
       extensions: options?.extensions,
       builtinExtensions: options?.builtinExtensions,
       onWarning: (w: DecodeWarning | ParseWarning) => {
-        if ('hint' in w && w.hint) return;
+        if ('hint' in w && w.hint) {
+          hints.push(w);
+          return;
+        }
         if ('fatal' in w && w.fatal) {
           fatal = w;
           return;
@@ -671,13 +676,21 @@ export class CBOR {
         valid: false,
         count,
         warnings,
+        hints,
         error: err instanceof Error ? err : new Error(String(err)),
       };
     }
     if (fatal) {
-      return { valid: false, count, warnings, error: new Error(fatal.message) };
+      // Prefer the original syntax error (position fields intact); the
+      // unterminated-comment fatals are emitted without one, so rebuild a
+      // CdnSyntaxError carrying at least the warning's offset.
+      const error =
+        fatal.cause instanceof Error
+          ? fatal.cause
+          : new CdnSyntaxError(fatal.message, { offset: fatal.offset });
+      return { valid: false, count, warnings, hints, error };
     }
-    return { valid: warnings.length === 0, count, warnings };
+    return { valid: warnings.length === 0, count, warnings, hints };
   }
 
   /**
@@ -912,6 +925,7 @@ function emitCDNSeqWarning(
   const offset = cause?.offset ?? fallbackOffset;
   const w: ParseWarning = { message: msg, offset };
   if (fatal) w.fatal = true;
+  if (cause) w.cause = cause;
   if (cause?.offset !== undefined) {
     w.line = cause.line;
     w.column = cause.column;

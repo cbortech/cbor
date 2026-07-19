@@ -350,8 +350,10 @@ CBOR.format("h'68' + b64'aQ'", {
 
 `validate` は入力の well-formedness と validity を、例外を投げずにチェックします。
 重複したマップキーなど回復可能な違反は例外にせず `warnings` に集約され、真に不正な
-データのみ `error` として報告されます。`type` で入力形式を指定します:
-`'cbor'`(デフォルト)、`'cdn'`、`'hex'`。
+データのみ `error` として報告されます(CDN の構文エラーの場合は位置情報を保持した
+`CdnSyntaxError`)。未登録のオプション拡張に一致する app-string prefix などの
+情報ヒントは `valid` に影響せず、`hints` に分けて集約されます。`type` で入力形式を
+指定します: `'cbor'`(デフォルト)、`'cdn'`、`'hex'`。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -360,17 +362,17 @@ import { CBOR } from '@cbortech/cbor';
 CBOR.validate(new Uint8Array([0xa2, 0x61, 0x61, 0x01, 0x61, 0x61, 0x02]), {
   type: 'cbor',
 });
-// { valid: false, count: 1, warnings: [{ message: 'duplicate map key at offset 4', offset: 4 }] }
+// { valid: false, count: 1, warnings: [{ message: 'duplicate map key at offset 4', offset: 4 }], hints: [] }
 
 // CDN テキスト — well-formed な入力
 CBOR.validate('{"a": 1}', { type: 'cdn' });
-// { valid: true, count: 1, warnings: [] }
+// { valid: true, count: 1, warnings: [], hints: [] }
 
 // アノテーション付き hex dump テキスト — 長さ3の配列なのに要素が2つしかない
 CBOR.validate('83  -- Array of length 3\n   01     -- 1\n   02     -- 2', {
   type: 'hex',
 });
-// { valid: false, count: 0, warnings: [], error: Error(...) }
+// { valid: false, count: 0, warnings: [], hints: [], error: Error(...) }
 ```
 
 ## AST を扱う
