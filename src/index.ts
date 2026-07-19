@@ -16,6 +16,8 @@ export type {
   ToJSOptions,
   FromHexDumpOptions,
   ToHexDumpOptions,
+  ValidateOptions,
+  ValidateResult,
 } from './types';
 
 // Structured syntax error thrown by fromCDN/parse

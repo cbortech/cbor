@@ -1589,7 +1589,7 @@ class CDNParser {
     this._hintedPrefixes.add(prefix);
     const message = `app-string prefix '${prefix}' requires an extension that is not enabled; ${hint}`;
     if (this._options.onWarning) {
-      this._options.onWarning({ message, ...tokenPosition(tok) });
+      this._options.onWarning({ message, ...tokenPosition(tok), hint: true });
     } else if (!this._options.silent) {
       console.warn(`CDN: ${message}`);
     }

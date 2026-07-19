@@ -1,6 +1,7 @@
 import type { CborItem } from './ast/CborItem';
 import type {
   CBOROptions,
+  DecodeWarning,
   FromCBOROptions,
   FromCBORSeqOptions,
   FromCDNOptions,
@@ -12,6 +13,8 @@ import type {
   ToCDNOptions,
   ToHexDumpOptions,
   ToJSOptions,
+  ValidateOptions,
+  ValidateResult,
 } from './types';
 import { CBOR_OMIT } from './types';
 import { decodeCBOR } from './cbor/decoder';
@@ -197,6 +200,17 @@ export class CBOR {
     options?: FromHexDumpOptions & ToCBOROptions
   ): Uint8Array {
     return CBOR.fromHex(text, this.#merge(options));
+  }
+
+  /**
+   * Check CBOR / CDN / hex dump input for well-formedness and validity,
+   * without throwing.
+   */
+  validate(
+    input: ArrayBufferView | ArrayBufferLike | string,
+    options?: ValidateOptions
+  ): ValidateResult {
+    return CBOR.validate(input, this.#merge(options));
   }
 
   /** @deprecated Use `decompile()` instead. */
@@ -589,6 +603,81 @@ export class CBOR {
       off += b.length;
     }
     return result;
+  }
+
+  /**
+   * Check CBOR / CDN / hex dump input for well-formedness and validity,
+   * without throwing.
+   *
+   * Decodes/parses the input as a sequence (CBOR Sequence per RFC 8742, or a
+   * CDN Sequence) in non-strict mode: recoverable violations are collected
+   * into `warnings` instead of stopping decoding, while malformed input
+   * (e.g. truncated data, hard syntax errors — including a CDN Sequence
+   * abandoned after a hard syntax error) is reported via `error`.
+   * Informational hints about optional extensions that aren't registered
+   * (`ParseWarning.hint`) are not treated as violations.
+   *
+   * @example
+   * const result = CBOR.validate(bytes);
+   * if (!result.valid) {
+   *   if (result.error) console.error(`invalid: ${result.error.message}`);
+   *   for (const w of result.warnings) console.warn(w.message);
+   * }
+   *
+   * @example
+   * // CDN text input
+   * CBOR.validate('{"a": 1}', { type: 'cdn' });
+   */
+  static validate(
+    input: ArrayBufferView | ArrayBufferLike | string,
+    options?: ValidateOptions
+  ): ValidateResult {
+    const warnings: (DecodeWarning | ParseWarning)[] = [];
+    let fatal: ParseWarning | undefined;
+    const seqOptions = {
+      strict: false,
+      extensions: options?.extensions,
+      builtinExtensions: options?.builtinExtensions,
+      onWarning: (w: DecodeWarning | ParseWarning) => {
+        if ('hint' in w && w.hint) return;
+        if ('fatal' in w && w.fatal) {
+          fatal = w;
+          return;
+        }
+        warnings.push(w);
+      },
+    };
+    let count = 0;
+    try {
+      const type = options?.type ?? 'cbor';
+      if (type === 'cdn') {
+        const cdnOptions: FromCDNSeqOptions = {
+          ...seqOptions,
+          unresolvedExtension: options?.unresolvedExtension,
+        };
+        for (const _ of CBOR.fromCDNSeq(input as string, cdnOptions)) count++;
+      } else if (type === 'hex') {
+        for (const _ of CBOR.fromHexDumpSeq(input as string, seqOptions))
+          count++;
+      } else {
+        for (const _ of CBOR.fromCBORSeq(
+          input as ArrayBufferView | ArrayBufferLike,
+          seqOptions
+        ))
+          count++;
+      }
+    } catch (err) {
+      return {
+        valid: false,
+        count,
+        warnings,
+        error: err instanceof Error ? err : new Error(String(err)),
+      };
+    }
+    if (fatal) {
+      return { valid: false, count, warnings, error: new Error(fatal.message) };
+    }
+    return { valid: warnings.length === 0, count, warnings };
   }
 
   /**
