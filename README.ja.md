@@ -6,13 +6,13 @@
 [![license](https://img.shields.io/npm/l/%40cbortech%2Fcbor)](./LICENSE)
 ![platform](https://img.shields.io/badge/platform-Node.js%20%7C%20Browser-blue)
 
-[CBOR](#準拠している仕様)、[CDN (CBOR-EDN)](#準拠している仕様)、JavaScript 値を相互変換するための TypeScript ライブラリです。
-
-![CBOR、CDN、JavaScript 値の関係図](./assets/cbor-cdn-js.png)
+[CBOR](#準拠している仕様)、[CDN (CBOR-EDN)](#準拠している仕様)、JavaScript 値の相互変換に加え、[CDDL](#準拠している仕様) スキーマのパース・整形・検証に対応する TypeScript ライブラリです。
 
 プレイグラウンドを **https://cbor.tech/cbor/** で公開しています。
 
-このパッケージは `CBOR` ファサードに加えて、extension の実装に必要な CBOR AST ノードクラス用の entrypoint を公開します。
+![CBOR、CDN、JavaScript 値の関係図](./assets/cbor-cdn-js.png)
+
+このパッケージは CBOR ファサードに加えて、tooling や extension 向けに CDN、CDDL、AST の各 entrypoint を公開します。
 低レベルのパーサー、エンコーダー内部は、ドキュメント上の公開 API には含めていません。
 
 ## インストール
@@ -70,6 +70,20 @@ const value = CBOR.decode(
 
 console.log(value);
 // { hello: 'world', n: 42 }
+```
+
+### CDDL で検証する
+
+CDDLスキーマをコンパイルし、CBOR バイト列、CDN テキスト、`CborItem` AST を検証できます。
+
+```ts
+import { CDDL } from '@cbortech/cbor/cddl';
+
+const schema = CDDL.compile('point = { x: int, y: int }');
+const result = schema.validate('{"x": 12, "y": -3}');
+
+console.log(result.valid);
+// true
 ```
 
 ### CBOR Sequence から JavaScript へ
@@ -867,161 +881,53 @@ const lenient = tokenizeLenient('[1, "ab');
 
 ## CDDL
 
-`@cbortech/cbor/cddl` サブパスには、CDDL(Concise Data Definition
-Language、[RFC 8610](https://www.rfc-editor.org/rfc/rfc8610) +
-[RFC 9682](https://www.rfc-editor.org/rfc/rfc9682) の文法更新)のパーサ・
-コンパイラ・バリデータが入っています。CDDL は CBOR データ構造を記述する
-スキーマ言語です。コンパイル済みスキーマで、CBOR バイト列・CDN テキスト・
-`CborItem` AST を検証できます。
+`@cbortech/cbor/cddl` サブパスには、CDDL のパーサ・コンパイラ・バリデータが
+入っています。CDDL は CBOR データ構造を記述するスキーマ言語です。
+コンパイル済みスキーマで、CBOR バイト列・CDN テキスト・`CborItem` AST を
+検証できます。
 
 ```ts
 import { CDDL } from '@cbortech/cbor/cddl';
 
-const schema = CDDL.compile(`
-  person = { name: tstr, ? age: uint }
-`);
+const schema = CDDL.compile('point = { x: int, y: int }');
 
-console.log(schema.validate('{"name": "kudo", "age": 42}').valid);
+console.log(schema.validate('{"x": 12, "y": -3}').valid);
 // true
 ```
 
-検証は throw せず結果オブジェクトを返します。失敗時は最深到達点の不一致を、
-インスタンス内のパス、**インスタンス側**のソースオフセット(CBOR 入力なら
-バイト位置、CDN 入力なら文字位置)、**スキーマ側**のソースオフセットとともに
-報告します。
+検証は throw せず結果オブジェクトを返し、失敗時は入力内のパスと入力・
+スキーマ双方のソース位置を報告します。既定では最初のルールを使い、`rule`
+で別の非 generic 型ルールを指定できます。このほか `features`、`maxDepth`、
+`maxSteps` を指定できます。
 
-```ts
-import { CDDL } from '@cbortech/cbor/cddl';
+[RFC 8610](https://www.rfc-editor.org/rfc/rfc8610) の全 control operator と、
+[RFC 9165](https://www.rfc-editor.org/rfc/rfc9165) の `.plus`、`.cat`、
+`.feature` を実装しています。`.feature` の許可名は `features` オプションで
+指定します。`.abnf` などの未対応演算子は `result.warnings` に報告され、
+制約なしで判定されます。
 
-const schema = CDDL.compile('person = { name: tstr, ? age: uint }');
-const result = schema.validate('{"name": "kudo", "age": "x"}');
-
-console.log(result.valid, result.errors[0]?.path);
-// false /age
-```
-
-検証は既定でスキーマの root — ソース中で最初に定義されたルール
-(RFC 8610 §3.1)— に対して行われます。別のルールを対象にしたい場合は
-`{ rule: 'ルール名' }` を渡してください — 型として使用可能な非 generic
-ルールを、スキーマ内・prelude 名(`'uint'` など)を問わず指定できます。
-generic なルール(`g<T> = ...`)は、型引数を束縛する呼び出し元がない
-ため、この方法では選択できません。group 専用ルールも、型の位置で参照
-した場合と同様に拒否されます。
-
-```ts
-import { CDDL } from '@cbortech/cbor/cddl';
-
-const schema = CDDL.compile(`
-  p1 = { name: tstr, ? addr: tstr }
-  p2 = { name: tstr, ? age: uint }
-`);
-
-console.log(
-  schema.validate('{"name": "kudo", "age": 42}', { rule: 'p2' }).valid
-);
-// true
-```
-
-control operator は RFC 8610 の全演算子(`.size` `.bits` `.regexp` `.cbor`
-`.cborseq` `.within` `.and` `.lt`〜`.ne` `.default`)と RFC 9165 の
-`.plus` `.cat` `.feature` を実装しています。`.feature` の許可名は
-`validate(input, { features: [...] })` で指定します。未対応の演算子
-(`.abnf` など)は `result.warnings` に報告され、ターゲットのみで判定
-されます。`.regexp` は仕様上 XSD 正規表現ですが、アンカー付きの
-JavaScript `RegExp` で近似しています。`.default` は暗黙の `.ne` を適用
-します(RFC 8610 §3.8.6: デフォルト値はワイヤ上に送信されない)。参照
-実装の一部はこれを注釈のみとして扱う点に注意してください。
-
-スキーマ検証はメインの `CBOR` facade からも実行できます。デコード・パース
-系の全エントリポイントが `cddl` オプションを受け付け、コンパイル済み
-スキーマまたは CDDL ソーステキストを渡せます(文字列は初回使用時に既定の
-コンパイルオプションでコンパイルされ、キャッシュされます)。throw 系の
-エントリポイント(`parse`・`decode`・`fromCDN`・`encode` など)は、item が
-スキーマに一致しないと `CddlMismatchError` を throw します。
+メインの `CBOR` facade でも、`cddl` オプションにコンパイル済みスキーマ
+または CDDL ソーステキストを渡して検証できます。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
-const value = CBOR.parse('{"name": "kudo"}', {
-  cddl: 'person = { name: tstr, ? age: uint }',
+const value = CBOR.parse('{"x": 12, "y": -3}', {
+  cddl: 'point = { x: int, y: int }',
 });
-// { name: 'kudo' } — 不一致なら CddlMismatchError を throw
+// { x: 12, y: -3 }
 ```
 
-`CBOR.validate()` は throw せず、不一致を `result.cddlErrors` に収集
-します。シーケンス入力は既定で各 item を個別にルートルールへ照合します。
-バリデータのオプション — `.feature` の `features`、`maxDepth`、
-`maxSteps`、そして root 以外のルールを対象にする `rule`(上記の
-`schema.validate()` と同様、型として使用可能な非 generic ルールを
-スキーマ内・prelude 名を問わず指定可能)— は `cddlValidationOptions`
-で渡せます。
+`parse`・`decode`・`encode` などは不一致時に `CddlMismatchError` を throw
+します。`CBOR.validate()` は代わりに `result.cddlErrors` へ収集します。
+検証オプションは `cddlValidationOptions` で渡せます。`cddl` は
+`new CBOR({ cddl: … })` のようにインスタンスのデフォルトにもできます。
 
-```ts
-import { CBOR } from '@cbortech/cbor';
-import { CDDL } from '@cbortech/cbor/cddl';
-
-const schema = CDDL.compile('person = { name: tstr, ? age: uint }');
-const result = CBOR.validate('{"name": "kudo"} {"name": 1}', {
-  type: 'cdn',
-  cddl: schema,
-});
-
-console.log(result.valid, result.cddlErrors?.[0]?.path);
-// false /name
-```
-
-`cddl` オプションはインスタンスのデフォルト(`new CBOR({ cddl: … })`)
-としても指定でき、そのインスタンスの全呼び出しに適用されます。
-
-`compile` は、文法エラーでは `CddlSyntaxError`(`offset`・`line`・`column`
-付き)を、意味エラー — 未定義名(RFC 8610 standard prelude の `uint`・
-`tstr`・`bool` などは常に解決できます)、ルールの重複定義、ジェネリクス
-引数数の不一致 — では `CddlSemanticError` を throw します。
-`{ strict: false }` を渡すと、意味エラーは throw せずに `schema.warnings`
-に収集されます。
-
-```ts
-import { CDDL } from '@cbortech/cbor/cddl';
-
-const schema = CDDL.compile('a = missing-name', { strict: false });
-
-console.log(schema.warnings?.[0]?.code);
-// undefined-name
-```
-
-`schema.format(options?)` はモデルを再シリアライズします(リテラル値は
-ソースの表記を保持)。既定は 1 ルール 1 行のコンパクト出力で、`indent` を
-渡すと group エントリごとに改行する pretty レイアウト、`preserveComments`
-で `;` コメントも再出力されます。
-
-```ts
-import { CDDL } from '@cbortech/cbor/cddl';
-
-const text = CDDL.compile('a=0x10\nb   = { x :  tstr }').format();
-
-console.log(text);
-// a = 0x10
-// b = {x: tstr}
-```
-
-```ts
-import { CDDL } from '@cbortech/cbor/cddl';
-
-const text = CDDL.compile(
-  '; a person\nperson = {name: tstr, ? age: uint}'
-).format({ indent: 2, preserveComments: true });
-
-console.log(text);
-// ; a person
-// person = {
-//   name: tstr,
-//   ? age: uint
-// }
-```
-
-同じサブパスから、CDN と同形の CDDL 用 `tokenize` / `tokenizeLenient` と、
-全ノードにソースオフセットが付いた型付きルール AST(`schema.ast`,
-`schema.rules`)も利用できます。
+`CDDL.compile()` は `CddlSyntaxError` または `CddlSemanticError` を throw
+します。`{ strict: false }` を指定すると、意味上の問題を
+`schema.warnings` に収集できます。コンパイル済みスキーマは
+`schema.format()` で整形できます。同じサブパスから `tokenize`、
+`tokenizeLenient`、`schema.ast`、`schema.rules` も利用できます。
 
 ## 公開 API
 
@@ -1050,39 +956,27 @@ CDDL コンパイラは `@cbortech/cbor/cddl`
 
 ## 準拠している仕様
 
-このライブラリは次の仕様を対象にしています。
+- CBOR
+  - [RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)
+- CDN (CBOR-EDN)
+  - [draft-ietf-cbor-edn-literals-25](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/)
+  - [draft-ietf-cbor-edn-literals-26](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/26/)
+- CDDL
+  - [RFC 8610](https://www.rfc-editor.org/rfc/rfc8610)
+  - [RFC 9682](https://www.rfc-editor.org/rfc/rfc9682)
+  - [RFC 9165](https://www.rfc-editor.org/rfc/rfc9165)
 
-- [CBOR, RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)
-- [Concise Diagnostic Notation (CDN), draft-ietf-cbor-edn-literals-25](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/)
-- [CDDL, RFC 8610](https://www.rfc-editor.org/rfc/rfc8610) +
-  [RFC 9682](https://www.rfc-editor.org/rfc/rfc9682) の文法更新
-  (パース・コンパイルまで。[CDDL](#cddl) 節を参照)
+補足:
 
-draft -25 をベースに、
-[draft -26](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/26/)
-の一部仕様も先行して取り込んでいます。
-
-- 文字列連結 extension `t1` / `b1`(§3.4)
-- 不定長文字列 extension `ilbs` / `ilts`(§3.5)
-- `float` extension のデフォルト有効化(§3.7)
-- draft-26 の raw string 規則(§2.5.4): 終端デリミタは開始デリミタと
-  同数のバッククォートに限られ、スペース除去規則がすべてのデリミタ長に
-  適用されます
-
-draft -26 で削除された `+` による文字列連結構文と、非推奨となった
-`(_ ...)` streamstring 構文は、引き続き受理します。CDN は Internet-Draft
-として策定中の仕様であり、今後も変更される可能性がある点に注意して
-ください(たとえば extension 名 `t1` / `b1` は暫定とされています)。
-
-CDN は、CBOR データを人間が読み書きしやすいテキストとして表現するための記法です。
-サンプル、テストベクター、デバッグ、fixture、設定ファイルに近い用途など、CBOR のバイト列をそのまま扱うと読みにくい場面で役立ちます。
-
-通常の配列、マップ、文字列、数値、真偽値、null は JSON に近い見た目で書けます。
-一方で、CBOR 固有の byte string、tag、simple value、不定長 item、文字列以外の map key、
-`dt'2026-05-06T00:00:00Z'` のような application literal も表現できます。
-
-CDN は JSON / JSONC の上位互換なので、通常の JSON データやコメント付きの JSON 風データも、
-特別な変換なしに CDN としてパース・整形できます。
+- CDN は draft-26 に準拠しつつ、draft-25 の `(_ ...)` streamstring 構文と
+  `+` による文字列連結構文も引き続きサポートしています。
+- CDDL は RFC 8610 のすべての control operator と、RFC 9165 の `.plus`、
+  `.cat`、`.feature` をサポートしています。
+- RFC 9682 の更新内容である文字列リテラル文法(`\u{...}` を含む)、構文上の
+  空データモデル(ルールなしのモデルはコンパイル時に意味エラー)、非リテラルの
+  `#6.<type>` / `#7.<type>` head number に対応しています。コメントの `PCHAR`
+  検証、単独 CR の改行、EOF で終わるコメントは、collected ABNF よりも意図的に
+  寛容に受理します。
 
 ## ライセンス
 
