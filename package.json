@@ -1,6 +1,6 @@
 {
   "name": "@cbortech/cbor",
-  "version": "0.26.5",
+  "version": "0.26.6",
   "description": "Convert between CBOR, CDN (CBOR-EDN), and JavaScript values with CDDL validation",
   "keywords": [
     "cbor",
