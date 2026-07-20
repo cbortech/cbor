@@ -440,6 +440,25 @@ describe('validate: inputs and elision', () => {
   });
 });
 
+describe('validate: app-string sequence results', () => {
+  test('t1/b1/ilbs/ilts results match their underlying string types', () => {
+    expect(check('t = tstr', 't1<<"Hello ", "world">>')).toBe(true);
+    expect(check('t = bstr', "b1<<'Hello ', h'776f726c64'>>")).toBe(true);
+    expect(check('t = bstr', "ilbs<<h'0011', h'2233'>>")).toBe(true);
+    expect(check('t = tstr', 'ilts<<"chunked ", "text">>')).toBe(true);
+    expect(check('t = bstr', 't1<<"Hello ", "world">>')).toBe(false);
+  });
+
+  test('control operators see the unwrapped item', () => {
+    expect(check('t = tstr .size 11', 't1<<"Hello ", "world">>')).toBe(true);
+    expect(check('t = tstr .size 5', 't1<<"Hello ", "world">>')).toBe(false);
+  });
+
+  test('a wrapped map key still matches a bareword member key', () => {
+    expect(check('t = { key: int }', '{t1<<"k", "ey">>: 1}')).toBe(true);
+  });
+});
+
 describe('validate: rule option', () => {
   const schema = CDDL.compile(`
     p1 = { name: tstr, ? addr: tstr }

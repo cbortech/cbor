@@ -21,7 +21,6 @@ import { cddlHighlight } from './editor/cddl-highlight';
 import { cddlLinter } from './editor/cddl-lint';
 import { setValidationRange } from './editor/validation-deco';
 import { rangeAtChar } from './mapping/lockstep';
-import { CDDL_SAMPLES, DEFAULT_CDDL_SAMPLE } from './cddl-samples';
 import { copyWithFeedback, readFormatOptions } from './ui/toolbar';
 
 const OPEN_KEY = 'cbor-site-cddl';
@@ -29,6 +28,11 @@ const OPEN_KEY = 'cbor-site-cddl';
 export interface CddlPane {
   isOpen(): boolean;
   getText(): string;
+  /**
+   * Replace the schema text (sample selection from the CDN pane). Compiles
+   * immediately; validation still only runs while the pane is open.
+   */
+  setText(text: string): void;
   /** Re-run validation against the given conversion result. */
   revalidate(conversion: Conversion): void;
 }
@@ -38,12 +42,11 @@ export interface CddlPaneOptions {
   getConversion(): Conversion;
   /** Set/clear the hex view's validation-failure byte range. */
   hexHighlight(range: { byteStart: number; byteEnd: number } | null): void;
-  /** Replace the CDN editor text (sample demos). */
-  setCdnText(text: string): void;
-  /** True while the CDN editor still shows the untouched default sample. */
-  cdnIsDefaultSample(): boolean;
-  /** CDDL text restored from the share hash, if any. */
-  initialCddl?: string;
+  /** Schema shown initially: from the share hash, or the default sample. */
+  initialCddl: string;
+  /** Open the pane on load regardless of the persisted toggle state
+   *  (share links that carry a CDDL schema). */
+  forceOpen?: boolean;
 }
 
 export function initCddlPane(opts: CddlPaneOptions): CddlPane {
@@ -167,7 +170,7 @@ export function initCddlPane(opts: CddlPaneOptions): CddlPane {
 
   const editor = createEditor(
     el('cddl-editor'),
-    opts.initialCddl ?? '',
+    opts.initialCddl,
     {
       onDocChanged(text) {
         clearTimeout(revalidateTimer);
@@ -189,13 +192,6 @@ export function initCddlPane(opts: CddlPaneOptions): CddlPane {
     toggleBtn.setAttribute('aria-pressed', String(open));
     if (persist) localStorage.setItem(OPEN_KEY, open ? '1' : '0');
     if (open) {
-      if (editor.state.doc.length === 0) {
-        // First open: load the default schema — and its matching CDN
-        // instance too, but only when the CDN editor is still untouched.
-        setEditorText(editor, DEFAULT_CDDL_SAMPLE.cddl);
-        if (DEFAULT_CDDL_SAMPLE.cdn !== undefined && opts.cdnIsDefaultSample())
-          opts.setCdnText(DEFAULT_CDDL_SAMPLE.cdn);
-      }
       compile(editor.state.doc.toString());
       revalidate(opts.getConversion());
     } else {
@@ -210,20 +206,6 @@ export function initCddlPane(opts: CddlPaneOptions): CddlPane {
   });
 
   // ── Toolbar ─────────────────────────────────────────────────────────────────
-
-  const samplesSelect = el<HTMLSelectElement>('cddl-samples');
-  for (const sample of CDDL_SAMPLES) {
-    const option = document.createElement('option');
-    option.value = sample.name;
-    option.textContent = sample.name;
-    samplesSelect.appendChild(option);
-  }
-  samplesSelect.addEventListener('change', () => {
-    const sample = CDDL_SAMPLES.find((s) => s.name === samplesSelect.value);
-    if (!sample) return;
-    setEditorText(editor, sample.cddl);
-    if (sample.cdn !== undefined) opts.setCdnText(sample.cdn);
-  });
 
   el('cddl-format-btn').addEventListener('click', () => {
     const text = editor.state.doc.toString();
@@ -254,13 +236,20 @@ export function initCddlPane(opts: CddlPaneOptions): CddlPane {
   // ── Initial state ───────────────────────────────────────────────────────────
 
   compile(editor.state.doc.toString());
-  const initiallyOpen =
-    opts.initialCddl !== undefined || localStorage.getItem(OPEN_KEY) === '1';
-  if (initiallyOpen) setOpen(true, false);
+  if (opts.forceOpen || localStorage.getItem(OPEN_KEY) === '1')
+    setOpen(true, false);
 
   return {
     isOpen: () => !paneEl.hidden,
     getText: () => editor.state.doc.toString(),
+    setText: (text) => {
+      setEditorText(editor, text);
+      // Compile now rather than waiting for the editor's debounce, so a
+      // conversion update racing in from the CDN side validates against
+      // the new schema, not the previous one.
+      compile(text);
+      revalidate(opts.getConversion());
+    },
     revalidate,
   };
 }

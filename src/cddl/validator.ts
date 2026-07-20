@@ -29,6 +29,7 @@ import { CborArray } from '../ast/CborArray';
 import { CborMap } from '../ast/CborMap';
 import { CborTag } from '../ast/CborTag';
 import { CborEllipsis } from '../ast/CborEllipsis';
+import { CborAppSeqResult } from '../ast/CborAppSeqResult';
 import { autoSelectFloatPrecision } from '../cbor/encode';
 import { textValue, byteValue, bytesEqual, intValueOf } from './equal';
 import type {
@@ -355,6 +356,17 @@ function matchRuleName(
 
 // ─── Type matching ────────────────────────────────────────────────────────────
 
+/**
+ * See through transparent app-string sequence wrappers (`t1<<…>>`,
+ * `b1<<…>>`, `ilbs`/`ilts`, `same<<…>>`): the wrapper only preserves the
+ * CDN source spelling for re-serialization; the data-model item is its
+ * `inner` result, which is what CDDL types describe.
+ */
+function unwrapAppSeq(item: CborItem): CborItem {
+  while (item instanceof CborAppSeqResult) item = item.inner;
+  return item;
+}
+
 function matchType(
   item: CborItem,
   type: CddlType,
@@ -377,6 +389,9 @@ function matchType1(
   depth: number
 ): boolean {
   ctx.step();
+  // Unwrapped here (before control handlers see the item) and again in
+  // matchType2, which is also entered directly from control plumbing.
+  item = unwrapAppSeq(item);
   if (!t1.op || !t1.controller)
     return matchType2(item, t1.target, env, path, ctx, depth);
   if (t1.op.kind === 'range')
@@ -401,6 +416,7 @@ function matchType2(
   ctx: Ctx,
   depth: number
 ): boolean {
+  item = unwrapAppSeq(item);
   // A CDN elision stands for content that was deliberately left out.
   if (item instanceof CborEllipsis) return true;
 
@@ -1640,6 +1656,7 @@ function keyMatches(
   ctx: Ctx,
   depth: number
 ): boolean {
+  key = unwrapAppSeq(key);
   if (key instanceof CborEllipsis) return true;
   switch (mk.kind) {
     case 'bareword':

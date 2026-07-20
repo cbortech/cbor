@@ -11,7 +11,7 @@ import { createEditor, selectRange, setEditorText } from './editor/editor';
 import { HexView } from './hexview/hexview';
 import { rangeAtByte, rangeAtChar } from './mapping/lockstep';
 import { inspectJS } from './js-preview';
-import { DEFAULT_SAMPLE } from './samples';
+import { DEFAULT_SAMPLE, SAMPLES } from './samples';
 import { initCddlPane, type CddlPane } from './cddl-pane';
 import {
   type BytesMode,
@@ -310,7 +310,16 @@ initExtensionsPopover(() => {
   update(editor.state.doc.toString());
   forceLinting(editor);
 });
-resetSamples = initSamples((cdn) => setEditorText(editor, cdn));
+resetSamples = initSamples((sample) => {
+  // A sample is a CDN/CDDL pair: load both. The schema compiles right
+  // away, but validation only runs while the CDDL pane is open. Convert
+  // immediately (skipping the editor debounce) so the pane never shows
+  // the previous sample's data validated against the new schema.
+  cddlPane?.setText(sample.cddl);
+  setEditorText(editor, sample.cdn);
+  debouncedUpdate.cancel();
+  update(sample.cdn);
+});
 initModeTabs((next) => {
   mode = next;
   renderBytesPane();
@@ -325,12 +334,11 @@ cddlPane = initCddlPane({
   cdnEditor: editor,
   getConversion: () => conversion,
   hexHighlight: (range) => hexView.highlightValidation(range),
-  setCdnText: (cdn) => {
-    resetSamples();
-    setEditorText(editor, cdn);
-  },
-  cdnIsDefaultSample: () => editor.state.doc.toString() === DEFAULT_SAMPLE,
-  initialCddl: shared?.cddl,
+  // Fresh visit: the default sample's schema, matching the default CDN.
+  // Share link: the shared schema, or — since a schema matching foreign
+  // CDN cannot be guessed — an empty editor.
+  initialCddl: shared ? (shared.cddl ?? '') : SAMPLES[0]!.cddl,
+  forceOpen: shared?.cddl !== undefined,
 });
 
 el('format-btn').addEventListener('click', () => {

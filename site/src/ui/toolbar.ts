@@ -8,7 +8,7 @@ import type {
   FromCDNOptions,
   ToCDNOptions,
 } from '@cbortech/cbor';
-import { SAMPLES } from '../samples';
+import { SAMPLES, type Sample } from '../samples';
 import { EXTENSION_ENTRIES } from '../extensions';
 
 export type BytesMode = 'annotated' | 'plain' | 'js' | 'edit';
@@ -65,7 +65,7 @@ export async function copyWithFeedback(
   }
 }
 
-export function initSamples(onSelect: (cdn: string) => void): () => void {
+export function initSamples(onSelect: (sample: Sample) => void): () => void {
   const select = document.getElementById('samples') as HTMLSelectElement;
   for (const sample of SAMPLES) {
     const option = document.createElement('option');
@@ -75,7 +75,7 @@ export function initSamples(onSelect: (cdn: string) => void): () => void {
   }
   select.addEventListener('change', () => {
     const sample = SAMPLES.find((s) => s.name === select.value);
-    if (sample) onSelect(sample.cdn);
+    if (sample) onSelect(sample);
   });
   return () => {
     select.selectedIndex = 0;
