@@ -14,6 +14,7 @@
   --line-highlight: #ffffff0a;
   --error: #f44747;
   --warning: #cca700;
+  --ok: #89d185;
   --mono:
     'SF Mono', 'Cascadia Code', Consolas, 'Liberation Mono', Menlo, monospace;
 
@@ -52,6 +53,7 @@
   --line-highlight: #00000008;
   --error: #cd3131;
   --warning: #bf8803;
+  --ok: #107c10;
 
   --tok-num: #098658;
   --tok-str: #a31515;
@@ -109,12 +111,16 @@ code {
 }
 
 .site-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px;
   padding: 10px 16px;
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
 
@@ -135,7 +141,7 @@ code {
   gap: 12px;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 672px) {
   .brand-tag {
     display: none;
   }
@@ -190,6 +196,30 @@ code {
   padding: 0;
 }
 
+.hero-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.hero-playground-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.hero-playground-link:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
 .features {
   margin: 20px 0 0;
   padding: 0 0 0 1.2em;
@@ -203,6 +233,70 @@ code {
 }
 
 /* ── Playground ─────────────────────────────────────────────────────────── */
+
+.playground-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 16px 24px 0;
+  scroll-margin-top: 64px;
+}
+
+/* Anchor for a popover that belongs to a control-bar button. */
+.bar-item {
+  position: relative;
+}
+.bar-item .popover {
+  top: calc(100% + 6px);
+  right: 0;
+}
+
+.ctl-labeled {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* A button whose pressed state is rendered as an on/off switch. */
+.ctl-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.switch-track {
+  position: relative;
+  width: 26px;
+  height: 14px;
+  border-radius: 7px;
+  background: var(--fg-faint);
+  transition: background 0.15s;
+}
+.switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bg-panel);
+  transition: left 0.15s;
+}
+.ctl-switch[aria-pressed='true'] .switch-track {
+  background: var(--accent);
+}
+.ctl-switch[aria-pressed='true'] .switch-knob {
+  left: 14px;
+}
+.ctl-labeled svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
 .playground {
   display: flex;
@@ -246,6 +340,12 @@ code {
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
+}
+
+/* display:flex would defeat the hidden attribute (CDDL pane toggle). */
+.pane[hidden],
+.pane-divider[hidden] {
+  display: none;
 }
 
 .pane-toolbar {
@@ -355,7 +455,8 @@ select.ctl {
 /* Per-option help bubble, shown on hover or keyboard focus. The text is a
    real element tied to its control via aria-describedby, so screen readers
    announce it even while it is visually hidden. */
-#format-popover label {
+#format-popover label,
+#cddl-format-popover label {
   position: relative;
 }
 .opt-hint {
@@ -381,7 +482,9 @@ select.ctl {
   transition: opacity 0.12s;
 }
 #format-popover label:hover .opt-hint,
-#format-popover label:focus-within .opt-hint {
+#format-popover label:focus-within .opt-hint,
+#cddl-format-popover label:hover .opt-hint,
+#cddl-format-popover label:focus-within .opt-hint {
   opacity: 1;
   transition-delay: 0.35s;
 }
@@ -545,6 +648,11 @@ select.ctl {
 .hex-bytes.is-active + .hex-comment {
   background: var(--selection);
 }
+/* CDDL validation failure range — independent of the cursor selection. */
+.hex-bytes.is-invalid,
+.hex-bytes.is-invalid + .hex-comment {
+  background: color-mix(in srgb, var(--error) 22%, transparent);
+}
 .hex-bytes {
   white-space: nowrap;
   padding-right: 2ch;
@@ -568,6 +676,9 @@ select.ctl {
 }
 .hex-plain .hex-span.is-active {
   background: var(--selection);
+}
+.hex-plain .hex-span.is-invalid {
+  background: color-mix(in srgb, var(--error) 22%, transparent);
 }
 .hex-addr {
   color: var(--fg-faint);
@@ -643,6 +754,27 @@ select.ctl {
 }
 .bytes-status.warning {
   color: var(--warning);
+}
+.bytes-status.ok {
+  color: var(--ok);
+}
+.bytes-status.info {
+  color: var(--fg-dim);
+}
+
+/* ── CDDL pane ──────────────────────────────────────────────────────────── */
+
+.cddl-toggle[aria-pressed='true'] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Validation-failure range set by the CDDL pane (both editors). Distinct
+   from lint squiggles: a tinted background anchored to the error color. */
+.validation-error {
+  background: color-mix(in srgb, var(--error) 22%, transparent);
+  border-bottom: 2px solid var(--error);
+  border-radius: 2px;
 }
 
 /* ── Footer ─────────────────────────────────────────────────────────────── */

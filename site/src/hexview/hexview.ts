@@ -147,4 +147,22 @@ export class HexView {
       }
     }
   }
+
+  /**
+   * Mark the byte range of a CDDL validation failure; pass null to clear.
+   * Independent of the cursor-driven `highlightBytes` selection, so the
+   * two never clobber each other. No auto-scroll: validation re-runs on
+   * every edit and jumping the view around would be disruptive.
+   */
+  highlightValidation(
+    range: { byteStart: number; byteEnd: number } | null
+  ): void {
+    for (const r of this.rendered) {
+      const active =
+        range !== null &&
+        r.byteStart < range.byteEnd &&
+        r.byteEnd > range.byteStart;
+      r.el.classList.toggle('is-invalid', active);
+    }
+  }
 }

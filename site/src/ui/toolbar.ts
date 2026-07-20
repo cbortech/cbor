@@ -8,7 +8,7 @@ import type {
   FromCDNOptions,
   ToCDNOptions,
 } from '@cbortech/cbor';
-import { SAMPLES } from '../samples';
+import { SAMPLES, type Sample } from '../samples';
 import { EXTENSION_ENTRIES } from '../extensions';
 
 export type BytesMode = 'annotated' | 'plain' | 'js' | 'edit';
@@ -65,7 +65,42 @@ export async function copyWithFeedback(
   }
 }
 
-export function initSamples(onSelect: (cdn: string) => void): () => void {
+/** Accept files dropped onto `target`, with a visual drop-zone cue. */
+export function initFileDrop(
+  target: HTMLElement,
+  onFile: (file: File) => void
+): void {
+  const hasFiles = (event: DragEvent): boolean =>
+    Array.from(event.dataTransfer?.types ?? []).includes('Files');
+
+  target.addEventListener('dragover', (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    target.classList.add('is-file-dragover');
+  });
+  target.addEventListener('dragleave', (event) => {
+    const next = event.relatedTarget;
+    if (!(next instanceof Node) || !target.contains(next)) {
+      target.classList.remove('is-file-dragover');
+    }
+  });
+  target.addEventListener(
+    'drop',
+    (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      target.classList.remove('is-file-dragover');
+      const file = event.dataTransfer?.files[0];
+      if (!file) return;
+      onFile(file);
+    },
+    true
+  );
+}
+
+export function initSamples(onSelect: (sample: Sample) => void): () => void {
   const select = document.getElementById('samples') as HTMLSelectElement;
   for (const sample of SAMPLES) {
     const option = document.createElement('option');
@@ -75,7 +110,7 @@ export function initSamples(onSelect: (cdn: string) => void): () => void {
   }
   select.addEventListener('change', () => {
     const sample = SAMPLES.find((s) => s.name === select.value);
-    if (sample) onSelect(sample.cdn);
+    if (sample) onSelect(sample);
   });
   return () => {
     select.selectedIndex = 0;
@@ -83,7 +118,7 @@ export function initSamples(onSelect: (cdn: string) => void): () => void {
 }
 
 /** Wire a toolbar icon button to show/hide its popover, closing on outside click. */
-function wirePopoverToggle(buttonId: string, popoverId: string): void {
+export function wirePopoverToggle(buttonId: string, popoverId: string): void {
   const button = document.getElementById(buttonId)!;
   const popover = document.getElementById(popoverId)!;
   button.addEventListener('click', (e) => {
@@ -234,37 +269,105 @@ export function getEnabledExtensions(): {
 }
 
 export function initModeTabs(onChange: (mode: BytesMode) => void): void {
-  const tabs = document.querySelectorAll<HTMLButtonElement>('.mode-tabs .tab');
-  tabs.forEach((tab) => {
-    tab.addEventListener('click', () => {
-      tabs.forEach((t) => t.classList.toggle('is-active', t === tab));
-      onChange(tab.dataset.mode as BytesMode);
+  const tabs = [
+    ...document.querySelectorAll<HTMLButtonElement>('.mode-tabs .tab'),
+  ];
+
+  const selectTab = (selected: HTMLButtonElement): void => {
+    tabs.forEach((tab) => {
+      const active = tab === selected;
+      tab.classList.toggle('is-active', active);
+      tab.setAttribute('aria-selected', String(active));
+      tab.tabIndex = active ? 0 : -1;
+    });
+    onChange(selected.dataset.mode as BytesMode);
+  };
+
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => selectTab(tab));
+    tab.addEventListener('keydown', (event) => {
+      let nextIndex: number | undefined;
+      if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
+      if (event.key === 'ArrowLeft')
+        nextIndex = (index - 1 + tabs.length) % tabs.length;
+      if (event.key === 'Home') nextIndex = 0;
+      if (event.key === 'End') nextIndex = tabs.length - 1;
+      if (nextIndex === undefined) return;
+
+      event.preventDefault();
+      const nextTab = tabs[nextIndex];
+      nextTab.focus();
+      selectTab(nextTab);
     });
   });
 }
 
 // ── Share-link fragment codec ────────────────────────────────────────────────
 
-export function encodeShareHash(cdnText: string): string {
-  const bytes = new TextEncoder().encode(cdnText);
-  let bin = '';
-  for (const b of bytes) bin += String.fromCharCode(b);
-  const b64 = btoa(bin)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-  return `#cdn=${b64}`;
+export interface ShareState {
+  cdn: string;
+  /** CDDL schema text; present when the CDDL pane is open and non-empty. */
+  cddl?: string;
 }
 
-export function decodeShareHash(hash: string): string | null {
-  const match = /^#cdn=([A-Za-z0-9_-]+)$/.exec(hash);
+function encodeB64url(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function decodeB64url(b64url: string): string {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(b64);
+  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+}
+
+export function encodeShareHash(state: ShareState): string {
+  let hash = `#cdn=${encodeB64url(state.cdn)}`;
+  if (state.cddl !== undefined && state.cddl.trim() !== '')
+    hash += `&cddl=${encodeB64url(state.cddl)}`;
+  return hash;
+}
+
+/** Decode `#cdn=…` (legacy) or `#cdn=…&cddl=…` share fragments. */
+export function decodeShareHash(hash: string): ShareState | null {
+  const match = /^#cdn=([A-Za-z0-9_-]*)(?:&cddl=([A-Za-z0-9_-]+))?$/.exec(hash);
   if (!match) return null;
   try {
-    const b64 = match[1]!.replace(/-/g, '+').replace(/_/g, '/');
-    const bin = atob(b64);
-    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    const cdn = decodeB64url(match[1]!);
+    return match[2] !== undefined
+      ? { cdn, cddl: decodeB64url(match[2]) }
+      : { cdn };
   } catch {
     return null;
   }
+}
+
+/**
+ * Explicit override for whether the CDDL pane should be open on load, from
+ * a `?cddl=` query parameter (e.g. `?cddl=1`, `?cddl=off`). Takes precedence
+ * over the share-hash heuristic (schema present in the hash → open).
+ * Returns `undefined` when the parameter is absent or unrecognized, so the
+ * caller can fall back to that heuristic.
+ */
+export function readCddlOpenParam(search: string): boolean | undefined {
+  const value = new URLSearchParams(search).get('cddl');
+  if (value === null) return undefined;
+  if (/^(1|true|on)$/i.test(value)) return true;
+  if (/^(0|false|off)$/i.test(value)) return false;
+  return undefined;
+}
+
+/**
+ * Reflect the CDDL pane's open/closed state into the `?cddl=` query
+ * parameter, so reloading or copying the URL reproduces it. Uses
+ * `replaceState` (no new history entry per toggle) and preserves the
+ * share-hash fragment and any other query parameters.
+ */
+export function writeCddlOpenParam(open: boolean): void {
+  const url = new URL(location.href);
+  url.searchParams.set('cddl', open ? '1' : '0');
+  history.replaceState(null, '', url);
 }

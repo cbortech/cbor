@@ -8,6 +8,16 @@ const browser =
 export default mergeConfig(
   viteConfig,
   defineConfig({
+    // In browser mode `test.server.deps.inline` (the node-mode fix in
+    // vite.config.ts) does not apply; instead Vite pre-bundles
+    // @cbortech/hash-extension, baking the *built* dist copy of
+    // `@cbortech/cbor/ast` into the optimized chunk. Excluding it from
+    // pre-bundling routes its imports through the dev server resolver,
+    // where the `@cbortech/cbor/ast` → src/ast alias applies, so its
+    // instanceof checks see the same classes as the tests.
+    optimizeDeps: {
+      exclude: ['@cbortech/hash-extension'],
+    },
     test: {
       globals: true,
       browser: {
@@ -22,6 +32,8 @@ export default mergeConfig(
         'src/cdn/cdn-test-vectors.test.ts',
         'src/cdn/edn-test-vectors.test.ts',
         'src/cdn/edn-abnf-vectors.test.ts',
+        'src/cddl/cddl-corpus.test.ts',
+        'src/cddl/cddl-validation-vectors.test.ts',
       ],
       coverage: {
         provider: 'v8',

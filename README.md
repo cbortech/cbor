@@ -7,14 +7,15 @@
 ![platform](https://img.shields.io/badge/platform-Node.js%20%7C%20Browser-blue)
 
 TypeScript library for converting between [CBOR](#specifications),
-[CDN (CBOR-EDN)](#specifications), and JavaScript values.
-
-![Relationship between CBOR, CDN, and JavaScript values](./assets/cbor-cdn-js.png)
+[CDN (CBOR-EDN)](#specifications), and JavaScript values, plus parsing,
+formatting, and validation for [CDDL](#specifications) schemas.
 
 A live playground is available at **https://cbor.tech/cbor/**.
 
-This package exposes the `CBOR` facade plus a separate AST entrypoint for the
-CBOR node classes needed by extensions. Lower-level parser and encoder internals
+![Relationship between CBOR, CDN, and JavaScript values](./assets/cbor-cdn-js.png)
+
+This package exposes the CBOR facade plus separate CDN, CDDL, and AST
+entrypoints for tooling and extensions. Lower-level parser and encoder internals
 are not part of the documented public API.
 
 ## Install
@@ -73,6 +74,21 @@ const value = CBOR.decode(
 
 console.log(value);
 // { hello: 'world', n: 42 }
+```
+
+### Validate with CDDL
+
+Compile a CDDL schema and validate CBOR bytes, CDN text, or a `CborItem` AST
+against it:
+
+```ts
+import { CDDL } from '@cbortech/cbor/cddl';
+
+const schema = CDDL.compile('point = { x: int, y: int }');
+const result = schema.validate('{"x": 12, "y": -3}');
+
+console.log(result.valid);
+// true
 ```
 
 ### CBOR Sequence to JavaScript values
@@ -874,12 +890,63 @@ Syntax errors thrown by `fromCDN`/`parse`/`tokenize` are `CdnSyntaxError`
 instances (a `SyntaxError` subclass, also exported from the main entry) and
 carry `offset`, `line`, `column`, and — where known — `endOffset`.
 
+## CDDL
+
+The `@cbortech/cbor/cddl` subpath contains a parser, compiler, and validator for
+CDDL, the schema language for describing CBOR data structures. A compiled schema
+validates CBOR bytes, CDN text, or a `CborItem` AST:
+
+```ts
+import { CDDL } from '@cbortech/cbor/cddl';
+
+const schema = CDDL.compile('point = { x: int, y: int }');
+
+console.log(schema.validate('{"x": 12, "y": -3}').valid);
+// true
+```
+
+Validation returns a result object rather than throwing. Failures include the
+instance path and source offsets for both the input and schema. Validation uses
+the first rule by default; pass `rule` to select another non-generic type rule.
+Options also include `features`, `maxDepth`, and `maxSteps`.
+
+All control operators from
+[RFC 8610](https://www.rfc-editor.org/rfc/rfc8610) are implemented, along with
+[RFC 9165](https://www.rfc-editor.org/rfc/rfc9165)'s `.plus`, `.cat`, and
+`.feature`. Enable `.feature` names with the `features` validation option.
+Unsupported operators such as `.abnf` are reported in `result.warnings` and
+matched without their constraint.
+
+The main `CBOR` facade also accepts a compiled schema or CDDL source text through
+the `cddl` option:
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const value = CBOR.parse('{"x": 12, "y": -3}', {
+  cddl: 'point = { x: int, y: int }',
+});
+// { x: 12, y: -3 }
+```
+
+Throwing methods such as `parse`, `decode`, and `encode` throw
+`CddlMismatchError` on a mismatch; `CBOR.validate()` instead collects failures
+in `result.cddlErrors`. Pass validator options through `cddlValidationOptions`,
+or set `cddl` as an instance default with `new CBOR({ cddl: … })`.
+
+`CDDL.compile()` throws `CddlSyntaxError` or `CddlSemanticError`; use
+`{ strict: false }` to collect semantic issues in `schema.warnings` instead.
+Compiled schemas can be formatted with `schema.format()`. The subpath also
+exports `tokenize`, `tokenizeLenient`, and a typed rule AST through `schema.ast`
+and `schema.rules`.
+
 ## Public API
 
 The documented public exports are:
 
 - `CBOR`
 - `CdnSyntaxError`
+- `CddlMismatchError` (thrown by the `cddl` option; see [CDDL](#cddl))
 
 The `CBOR` facade also exposes:
 
@@ -893,41 +960,35 @@ Lower-level CDN tokenization lives in `@cbortech/cbor/cdn`
 (`tokenize`, `tokenizeLenient`, `Token`, `TokenType`, `EdnComment`),
 and AST node classes in `@cbortech/cbor/ast`.
 
+The CDDL compiler lives in `@cbortech/cbor/cddl`
+(`CDDL`, `CddlSchema`, `CddlSyntaxError`, `CddlSemanticError`,
+`CddlMismatchError`, `tokenize`, `tokenizeLenient`, and the CDDL AST
+types).
+
 ## Specifications
 
-This library targets:
+- CBOR
+  - [RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)
+- CDN (CBOR-EDN)
+  - [draft-ietf-cbor-edn-literals-25](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/)
+  - [draft-ietf-cbor-edn-literals-26](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/26/)
+- CDDL
+  - [RFC 8610](https://www.rfc-editor.org/rfc/rfc8610)
+  - [RFC 9682](https://www.rfc-editor.org/rfc/rfc9682)
+  - [RFC 9165](https://www.rfc-editor.org/rfc/rfc9165)
 
-- [CBOR, RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)
-- [Concise Diagnostic Notation (CDN), draft-ietf-cbor-edn-literals-25](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/)
+Implementation notes:
 
-On top of draft -25, this library already incorporates parts of
-[draft -26](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/26/):
-
-- the `t1` / `b1` string-concatenation extensions (§3.4)
-- the `ilbs` / `ilts` indefinite-length string extensions (§3.5)
-- the `float` extension as a default extension (§3.7)
-- the draft-26 raw-string delimiter and trimming rules (§2.5.4): the closing
-  delimiter must have exactly as many backquotes as the opening one, and the
-  space-trimming rule applies to all delimiter lengths
-
-The legacy `+` string-concatenation syntax (removed in draft -26) and the
-`(_ ...)` streamstring syntax (deprecated in draft -26) are still accepted.
-Note that the CDN specification is still an Internet-Draft and may continue
-to change (for example, the extension names `t1` and `b1` are explicitly
-provisional).
-
-CDN is a human-readable text notation for CBOR data. It is useful for
-examples, test vectors, debugging, fixtures, and configuration-like files where
-raw CBOR bytes would be hard to read.
-
-It looks similar to JSON for ordinary arrays, maps, strings, numbers, booleans,
-and null values, but it can also represent CBOR-specific features such as byte
-strings, tags, simple values, indefinite-length items, non-string map keys, and
-application literals like `dt'2026-05-06T00:00:00Z'`.
-
-CDN is a superset of JSON and JSONC, so ordinary JSON data and
-commented JSON-style data can be parsed and formatted as CDN without
-special handling.
+- CDN follows draft-26 while retaining draft-25's `(_ ...)` streamstring syntax
+  and `+` string-concatenation syntax.
+- CDDL implements every RFC 8610 control operator, plus RFC 9165's `.plus`,
+  `.cat`, and `.feature`.
+- The RFC 9682 updates are implemented: its string-literal grammar (including
+  `\u{...}`), empty data models at the syntax layer (a model with no rules is
+  still a semantic error when compiled), and non-literal `#6.<type>` /
+  `#7.<type>` head numbers. Comment `PCHAR` validation, bare CR line endings,
+  and comments ending at EOF are intentionally accepted more leniently than the
+  collected ABNF.
 
 ## License
 
