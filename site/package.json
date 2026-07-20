@@ -8,7 +8,9 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run --config vitest.browser.config.ts",
+    "test:watch": "vitest --config vitest.browser.config.ts"
   },
   "dependencies": {
     "@cbortech/cbor": "file:..",
@@ -19,7 +21,11 @@
     "@codemirror/view": "^6.43.6"
   },
   "devDependencies": {
+    "@vitest/browser": "^4.1.10",
+    "@vitest/browser-playwright": "^4.1.10",
+    "playwright": "^1.61.1",
     "typescript": "^5.9.3",
-    "vite": "^8.1.4"
+    "vite": "^8.1.4",
+    "vitest": "^4.1.10"
   }
 }

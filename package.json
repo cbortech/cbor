@@ -92,9 +92,9 @@
     "start": "node dist/index.js",
     "dev": "npm run build && npm start",
     "clean": "node -e \"['dist','coverage'].forEach(d=>require('fs').rmSync(d,{recursive:true,force:true}))\"",
-    "test": "vitest run --exclude src/cdn/edn-test-vectors.test.ts --exclude src/cdn/edn-abnf-vectors.test.ts --exclude src/cddl/cddl-corpus.test.ts --exclude src/cddl/cddl-validation-vectors.test.ts",
+    "test": "vitest run --exclude src/cdn/edn-test-vectors.test.ts --exclude src/cdn/edn-abnf-vectors.test.ts --exclude src/cddl/cddl-corpus.test.ts --exclude src/cddl/cddl-validation-vectors.test.ts --exclude site/src/playground.browser.test.ts",
     "test:exports": "npm run build && node scripts/check-package-exports.mjs",
-    "test:node": "vitest run --exclude src/cdn/edn-test-vectors.test.ts --exclude src/cdn/edn-abnf-vectors.test.ts --exclude src/cddl/cddl-corpus.test.ts --exclude src/cddl/cddl-validation-vectors.test.ts",
+    "test:node": "vitest run --exclude src/cdn/edn-test-vectors.test.ts --exclude src/cdn/edn-abnf-vectors.test.ts --exclude src/cddl/cddl-corpus.test.ts --exclude src/cddl/cddl-validation-vectors.test.ts --exclude site/src/playground.browser.test.ts",
     "test:edn-vectors": "vitest run src/cdn/edn-test-vectors.test.ts",
     "test:edn-abnf": "vitest run src/cdn/edn-abnf-vectors.test.ts",
     "test:cddl-corpus": "vitest run src/cddl/cddl-corpus.test.ts",
@@ -112,7 +112,8 @@
     "site:clean": "npm run --workspace site clean",
     "site:dev": "npm run build && npm run --workspace site dev",
     "site:build": "npm run build && npm run --workspace site build",
-    "site:preview": "npm run site:build && npm run --workspace site preview"
+    "site:preview": "npm run site:build && npm run --workspace site preview",
+    "site:test": "npm run build && npm run --workspace site test"
   },
   "devDependencies": {
     "@cbortech/hash-extension": "^0.2.3",

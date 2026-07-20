@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import { resolve } from 'path';
 import dts from 'vite-plugin-dts';
 
@@ -42,6 +42,11 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.test.ts', 'site/src/**/*.test.ts'],
+    // Playground UI smoke tests run against a real browser DOM (see
+    // site/vitest.browser.config.ts) — they crash immediately under this
+    // Node environment, so exclude them here the same way the other
+    // special-runner test files below are excluded.
+    exclude: [...configDefaults.exclude, 'site/src/playground.browser.test.ts'],
     // @cbortech/hash-extension (used by site/src/samples.test.ts) does its
     // own `instanceof CborByteString` checks against the classes exported
     // from `@cbortech/cbor/ast`. Left unaliased, that resolves to the
