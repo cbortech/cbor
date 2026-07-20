@@ -339,6 +339,9 @@ describe('playground', () => {
       toggle.click();
       expect(toggle.getAttribute('aria-pressed')).toBe('true');
       expect(pane.hasAttribute('hidden')).toBe(false);
+      // Toggling reflects into the URL, so reloading/copying it reproduces
+      // the pane state.
+      expect(new URLSearchParams(location.search).get('cddl')).toBe('1');
 
       const status = byId('cddl-status');
       expect(status.hidden).toBe(false);
@@ -418,6 +421,7 @@ describe('playground', () => {
       expect(toggle.getAttribute('aria-pressed')).toBe('false');
       expect(pane.hasAttribute('hidden')).toBe(true);
       expect(byId('cddl-status').hidden).toBe(true);
+      expect(new URLSearchParams(location.search).get('cddl')).toBe('0');
     });
   });
 });

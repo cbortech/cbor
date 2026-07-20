@@ -25,7 +25,9 @@ import {
   initModeTabs,
   initSamples,
   initTheme,
+  readCddlOpenParam,
   readFormatOptions,
+  writeCddlOpenParam,
 } from './ui/toolbar';
 
 type Debounced<A extends unknown[]> = ((...args: A) => void) & {
@@ -308,10 +310,14 @@ cddlPane = initCddlPane({
   // Share link: the shared schema, or — since a schema matching foreign
   // CDN cannot be guessed — an empty editor.
   initialCddl: shared ? (shared.cddl ?? '') : SAMPLES[0]!.cddl,
-  forceOpen: shared?.cddl !== undefined,
+  // `?cddl=1`/`?cddl=0` (etc.) explicitly overrides whether the pane opens;
+  // absent that, fall back to the share-hash heuristic (schema → open).
+  initiallyOpen:
+    readCddlOpenParam(location.search) ?? shared?.cddl !== undefined,
   // A loaded sample is a CDN/CDDL pair; importing a foreign schema makes
   // the samples selection stale, same as importing CDN or CBOR.
   onImported: () => resetSamples(),
+  onToggle: writeCddlOpenParam,
 });
 
 el('format-btn').addEventListener('click', () => {

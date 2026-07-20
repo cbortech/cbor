@@ -320,3 +320,30 @@ export function decodeShareHash(hash: string): ShareState | null {
     return null;
   }
 }
+
+/**
+ * Explicit override for whether the CDDL pane should be open on load, from
+ * a `?cddl=` query parameter (e.g. `?cddl=1`, `?cddl=off`). Takes precedence
+ * over the share-hash heuristic (schema present in the hash → open).
+ * Returns `undefined` when the parameter is absent or unrecognized, so the
+ * caller can fall back to that heuristic.
+ */
+export function readCddlOpenParam(search: string): boolean | undefined {
+  const value = new URLSearchParams(search).get('cddl');
+  if (value === null) return undefined;
+  if (/^(1|true|on)$/i.test(value)) return true;
+  if (/^(0|false|off)$/i.test(value)) return false;
+  return undefined;
+}
+
+/**
+ * Reflect the CDDL pane's open/closed state into the `?cddl=` query
+ * parameter, so reloading or copying the URL reproduces it. Uses
+ * `replaceState` (no new history entry per toggle) and preserves the
+ * share-hash fragment and any other query parameters.
+ */
+export function writeCddlOpenParam(open: boolean): void {
+  const url = new URL(location.href);
+  url.searchParams.set('cddl', open ? '1' : '0');
+  history.replaceState(null, '', url);
+}

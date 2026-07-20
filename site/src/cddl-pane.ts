@@ -47,11 +47,20 @@ export interface CddlPaneOptions {
   hexHighlight(range: { byteStart: number; byteEnd: number } | null): void;
   /** Schema shown initially: from the share hash, or the default sample. */
   initialCddl: string;
-  /** Open the pane (normally closed on load) for share links that carry
-   *  a CDDL schema. */
-  forceOpen?: boolean;
+  /**
+   * Whether the pane should open on load (normally closed). Computed by the
+   * caller from the `?cddl=` query override, or — absent that — whether
+   * the share-hash carries a CDDL schema.
+   */
+  initiallyOpen?: boolean;
   /** Called after a schema file is imported (button or drag & drop). */
   onImported?: () => void;
+  /**
+   * Called when the user explicitly toggles the pane open/closed (not on
+   * the initial `initiallyOpen` state), so the caller can reflect it
+   * elsewhere (e.g. the `?cddl=` query parameter).
+   */
+  onToggle?: (open: boolean) => void;
 }
 
 export function initCddlPane(opts: CddlPaneOptions): CddlPane {
@@ -206,7 +215,9 @@ export function initCddlPane(opts: CddlPaneOptions): CddlPane {
   }
 
   toggleBtn.addEventListener('click', () => {
-    setOpen(paneEl.hidden);
+    const open = paneEl.hidden;
+    setOpen(open);
+    opts.onToggle?.(open);
   });
 
   // ── Toolbar ─────────────────────────────────────────────────────────────────
@@ -287,9 +298,9 @@ export function initCddlPane(opts: CddlPaneOptions): CddlPane {
 
   // ── Initial state ───────────────────────────────────────────────────────────
 
-  // Closed (validation off) by default; share links carrying a schema open it.
+  // Closed (validation off) by default; see CddlPaneOptions.initiallyOpen.
   compile(editor.state.doc.toString());
-  if (opts.forceOpen) setOpen(true);
+  if (opts.initiallyOpen) setOpen(true);
 
   return {
     isOpen: () => !paneEl.hidden,
