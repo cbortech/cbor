@@ -141,7 +141,7 @@ code {
   gap: 12px;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 672px) {
   .brand-tag {
     display: none;
   }
@@ -196,6 +196,30 @@ code {
   padding: 0;
 }
 
+.hero-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.hero-playground-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.hero-playground-link:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
 .features {
   margin: 20px 0 0;
   padding: 0 0 0 1.2em;
@@ -216,6 +240,7 @@ code {
   flex-wrap: wrap;
   gap: 8px;
   padding: 16px 24px 0;
+  scroll-margin-top: 64px;
 }
 
 /* Anchor for a popover that belongs to a control-bar button. */

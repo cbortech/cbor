@@ -269,11 +269,35 @@ export function getEnabledExtensions(): {
 }
 
 export function initModeTabs(onChange: (mode: BytesMode) => void): void {
-  const tabs = document.querySelectorAll<HTMLButtonElement>('.mode-tabs .tab');
-  tabs.forEach((tab) => {
-    tab.addEventListener('click', () => {
-      tabs.forEach((t) => t.classList.toggle('is-active', t === tab));
-      onChange(tab.dataset.mode as BytesMode);
+  const tabs = [
+    ...document.querySelectorAll<HTMLButtonElement>('.mode-tabs .tab'),
+  ];
+
+  const selectTab = (selected: HTMLButtonElement): void => {
+    tabs.forEach((tab) => {
+      const active = tab === selected;
+      tab.classList.toggle('is-active', active);
+      tab.setAttribute('aria-selected', String(active));
+      tab.tabIndex = active ? 0 : -1;
+    });
+    onChange(selected.dataset.mode as BytesMode);
+  };
+
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => selectTab(tab));
+    tab.addEventListener('keydown', (event) => {
+      let nextIndex: number | undefined;
+      if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
+      if (event.key === 'ArrowLeft')
+        nextIndex = (index - 1 + tabs.length) % tabs.length;
+      if (event.key === 'Home') nextIndex = 0;
+      if (event.key === 'End') nextIndex = tabs.length - 1;
+      if (nextIndex === undefined) return;
+
+      event.preventDefault();
+      const nextTab = tabs[nextIndex];
+      nextTab.focus();
+      selectTab(nextTab);
     });
   });
 }

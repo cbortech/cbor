@@ -116,6 +116,21 @@ describe('playground', () => {
         byId('hexview').querySelectorAll('.hex-bytes').length
       ).toBeGreaterThan(0);
     });
+
+    test('exposes playground navigation and live status regions', () => {
+      const link = document.querySelector<HTMLAnchorElement>(
+        '.hero-playground-link'
+      )!;
+      expect(link.getAttribute('href')).toBe('#playground');
+      expect(byId('playground')).toBeTruthy();
+
+      for (const id of ['cddl-status', 'bytes-status']) {
+        const status = byId(id);
+        expect(status.getAttribute('role')).toBe('status');
+        expect(status.getAttribute('aria-live')).toBe('polite');
+        expect(status.getAttribute('aria-atomic')).toBe('true');
+      }
+    });
   });
 
   describe('CDN pane', () => {
@@ -240,17 +255,29 @@ describe('playground', () => {
       const byMode = (mode: string) =>
         [...tabs].find((t) => t.dataset.mode === mode)!;
 
+      expect(byMode('annotated').getAttribute('aria-selected')).toBe('true');
+      expect(byMode('annotated').tabIndex).toBe(0);
+      expect(byMode('plain').getAttribute('aria-selected')).toBe('false');
+      expect(byMode('plain').tabIndex).toBe(-1);
+
       // The tab labeled "Hex" is the `plain` mode; hexview stays visible
       // for both `annotated` and `plain` (renderBytesPane switches its
       // rendering, not its visibility, between the two).
-      byMode('plain').click();
+      byMode('annotated').dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })
+      );
       expect(byId('hexview').hidden).toBe(false);
       expect(byId('js-view').hidden).toBe(true);
       expect(byMode('plain').classList.contains('is-active')).toBe(true);
+      expect(byMode('plain').getAttribute('aria-selected')).toBe('true');
+      expect(byMode('plain').tabIndex).toBe(0);
+      expect(byMode('annotated').getAttribute('aria-selected')).toBe('false');
+      expect(byMode('annotated').tabIndex).toBe(-1);
 
       byMode('js').click();
       expect(byId('js-view').hidden).toBe(false);
       expect(byId('hexview').hidden).toBe(true);
+      expect(byMode('js').getAttribute('aria-selected')).toBe('true');
 
       byMode('edit').click();
       expect(byId('bytes-edit-wrap').hidden).toBe(false);

@@ -4,18 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>@cbortech/cbor — CBOR ⇄ CDN playground</title>
+    <title>@cbortech/cbor — CBOR ⇄ CDN ⇄ JS with CDDL validation</title>
     <meta
       name="description"
-      content="Convert between CBOR, Concise Diagnostic Notation (CDN / CBOR-EDN), and JavaScript values. Zero-dependency TypeScript library with a live playground."
+      content="Convert between CBOR, Concise Diagnostic Notation (CDN / CBOR-EDN), and JavaScript values, with live RFC 8610 CDDL validation. Zero-dependency TypeScript library with an interactive browser playground."
     />
     <meta
       property="og:title"
-      content="@cbortech/cbor — CBOR ⇄ CDN (CBOR-EDN) playground"
+      content="@cbortech/cbor — CBOR ⇄ CDN ⇄ JS with CDDL validation"
     />
     <meta
       property="og:description"
-      content="Type Concise Diagnostic Notation (CDN / CBOR-EDN), get annotated CBOR bytes — and back. Powered by the zero-dependency @cbortech/cbor library."
+      content="Convert CBOR, CDN (CBOR-EDN), and JavaScript values with live RFC 8610 CDDL validation. Powered by the zero-dependency @cbortech/cbor library."
     />
     <meta property="og:type" content="website" />
   </head>
@@ -23,7 +23,9 @@
     <header class="site-header">
       <div class="brand">
         <span class="brand-name">@cbortech/cbor</span>
-        <span class="brand-tag">CBOR ⇄ CDN (CBOR-EDN) ⇄ JS</span>
+        <span class="brand-tag"
+          >CBOR ⇄ CDN (CBOR-EDN) ⇄ JS + CDDL validation</span
+        >
       </div>
       <nav class="site-nav">
         <a
@@ -53,7 +55,10 @@
     </header>
 
     <section class="hero">
-      <h1>Convert between CBOR, CDN (CBOR-EDN), and JavaScript values</h1>
+      <h1>
+        Convert between CBOR, CDN (CBOR-EDN), and JavaScript values — with CDDL
+        validation
+      </h1>
       <p class="hero-sub">
         <a
           href="https://www.npmjs.com/package/@cbortech/cbor"
@@ -67,8 +72,7 @@
           target="_blank"
           rel="noopener"
           >RFC 8949 CBOR</a
-        >
-        and
+        >,
         <a
           href="https://datatracker.ietf.org/doc/html/draft-ietf-cbor-edn-literals-25"
           target="_blank"
@@ -81,24 +85,35 @@
           target="_blank"
           rel="noopener"
           >draft-26</a
+        >, and
+        <a
+          href="https://www.rfc-editor.org/rfc/rfc8610"
+          target="_blank"
+          rel="noopener"
+          >RFC 8610 CDDL</a
         >
         — encode, decode, parse, pretty-print, and round-trip with full
         fidelity. Everything on this page runs in your browser using the library
-        itself.
+        itself, including live validation of CDN input against CDDL schemas.
       </p>
-      <div class="hero-install">
-        <code id="install-cmd">npm install @cbortech/cbor</code>
-        <button
-          id="copy-install"
-          class="icon-btn toolbar-icon-btn"
-          title="Copy install command to clipboard"
-          aria-label="Copy install command to clipboard"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="9" y="9" width="11" height="11" rx="2" />
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-          </svg>
-        </button>
+      <div class="hero-actions">
+        <div class="hero-install">
+          <code id="install-cmd">npm install @cbortech/cbor</code>
+          <button
+            id="copy-install"
+            class="icon-btn toolbar-icon-btn"
+            title="Copy install command to clipboard"
+            aria-label="Copy install command to clipboard"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="9" y="9" width="11" height="11" rx="2" />
+              <path
+                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+              />
+            </svg>
+          </button>
+        </div>
+        <a class="hero-playground-link" href="#playground">Open playground ↓</a>
       </div>
       <ul class="features">
         <li>
@@ -112,6 +127,24 @@
         <li>
           <strong>AST access</strong> — inspect every data item with byte
           ranges, warnings, and annotated hex dumps.
+        </li>
+        <li>
+          <strong>CDDL validation</strong> — open the CDDL pane to validate CDN
+          input live against a CDDL schema, with failures highlighted in the
+          schema, source, and CBOR bytes. Supports every
+          <a
+            href="https://www.rfc-editor.org/rfc/rfc8610"
+            target="_blank"
+            rel="noopener"
+            >RFC 8610</a
+          >
+          control operator, plus
+          <a
+            href="https://www.rfc-editor.org/rfc/rfc9165"
+            target="_blank"
+            rel="noopener"
+            >RFC 9165</a
+          >'s <code>.plus</code>, <code>.cat</code>, and <code>.feature</code>.
         </li>
         <li>
           <strong>Extensible</strong> — application-oriented extensions for
@@ -128,7 +161,12 @@
       </ul>
     </section>
 
-    <div class="playground-bar" role="toolbar" aria-label="Playground controls">
+    <div
+      id="playground"
+      class="playground-bar"
+      role="toolbar"
+      aria-label="Playground controls"
+    >
       <button
         id="cddl-toggle-btn"
         class="ctl ctl-switch cddl-toggle"
@@ -289,7 +327,14 @@
           </label>
         </div>
         <div id="cddl-editor" class="editor-host"></div>
-        <div id="cddl-status" class="bytes-status" hidden></div>
+        <div
+          id="cddl-status"
+          class="bytes-status"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          hidden
+        ></div>
       </section>
       <div
         class="pane-divider"
@@ -546,12 +591,50 @@
           ></span>
           <span class="toolbar-spacer"></span>
           <div class="mode-tabs" role="tablist">
-            <button class="tab is-active" data-mode="annotated" role="tab">
+            <button
+              id="tab-annotated"
+              class="tab is-active"
+              data-mode="annotated"
+              role="tab"
+              aria-selected="true"
+              aria-controls="hexview"
+              tabindex="0"
+            >
               Annotated
             </button>
-            <button class="tab" data-mode="plain" role="tab">Hex</button>
-            <button class="tab" data-mode="js" role="tab">JS</button>
-            <button class="tab" data-mode="edit" role="tab">Edit</button>
+            <button
+              id="tab-plain"
+              class="tab"
+              data-mode="plain"
+              role="tab"
+              aria-selected="false"
+              aria-controls="hexview"
+              tabindex="-1"
+            >
+              Hex
+            </button>
+            <button
+              id="tab-js"
+              class="tab"
+              data-mode="js"
+              role="tab"
+              aria-selected="false"
+              aria-controls="js-view"
+              tabindex="-1"
+            >
+              JS
+            </button>
+            <button
+              id="tab-edit"
+              class="tab"
+              data-mode="edit"
+              role="tab"
+              aria-selected="false"
+              aria-controls="bytes-edit-wrap"
+              tabindex="-1"
+            >
+              Edit
+            </button>
           </div>
           <button
             id="import-btn"
@@ -606,7 +689,14 @@
             placeholder="83 01 02 03"
           ></textarea>
         </div>
-        <div id="bytes-status" class="bytes-status" hidden></div>
+        <div
+          id="bytes-status"
+          class="bytes-status"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          hidden
+        ></div>
       </section>
     </main>
 
@@ -619,8 +709,8 @@
           rel="noopener"
           >@cbortech/cbor</a
         >
-        — conversion, formatting, tokenization, and hex dumps on this page all
-        come from the library. Apache-2.0.
+        — conversion, formatting, tokenization, validation, and hex dumps on
+        this page all come from the library. Apache-2.0.
       </p>
     </footer>
 
