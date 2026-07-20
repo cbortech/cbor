@@ -102,7 +102,7 @@ describe('playground', () => {
 
   describe('boot', () => {
     test('loads the default sample with the CDDL pane closed', () => {
-      expect(cmText('editor')).toContain('"unsigned"');
+      expect(cmText('editor')).toContain('"Image"');
       const paneCddl = document.querySelector('.pane-cddl')!;
       expect(paneCddl.hasAttribute('hidden')).toBe(true);
       expect(byId('cddl-toggle-btn').getAttribute('aria-pressed')).toBe(

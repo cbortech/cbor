@@ -11,6 +11,40 @@ export interface Sample {
 
 export const SAMPLES: Sample[] = [
   {
+    name: 'JSON is valid CDN',
+    cdn: `{
+  // JSON and JSONC parse as-is — CDN is a superset.
+  // This is the JSON example from RFC 8259 §13.
+  "Image": {
+    "Width":  800,
+    "Height": 600,
+    "Title":  "View from 15th Floor",
+    "Thumbnail": {
+      "Url":    "http://www.example.com/image/481989943",
+      "Height": 125,
+      "Width":  100
+    },
+    "Animated" : false,
+    "IDs": [116, 943, 234, 38793]
+  }
+}`,
+    cddl: `; RFC 8259 §13's own example, describing the same nested structure.
+image-example = { "Image": image }
+image = {
+  "Width": uint,
+  "Height": uint,
+  "Title": tstr,
+  "Thumbnail": thumbnail,
+  "Animated": bool,
+  "IDs": [* uint],
+}
+thumbnail = {
+  "Url": tstr,
+  "Height": uint,
+  "Width": uint,
+}`,
+  },
+  {
     name: 'All CBOR types',
     cdn: `{
   # Concise Diagnostic Notation (CDN / CBOR-EDN) — edit me!
@@ -232,9 +266,7 @@ cbor-types = {
   "array-nested": [uint, [2*2 uint]],
   "no-commas": [3*3 uint],
   "trailing-comma": [3*3 uint],
-  ; "true" as a bareword key would mean the literal text string "true";
-  ; => forces it to be read as the boolean value true instead.
-  "map": { 1: tstr, true => tstr },
+  "map": { 1 => tstr, true => tstr },
   "map-nested": { "a": { "b": uint } },
   "tag": time,
   "tag-nested": #6.6([* tstr]),
@@ -242,94 +274,9 @@ cbor-types = {
 }`,
   },
   {
-    name: 'Indefinite lengths',
-    cdn: `[_
-  "streamed array",
-  (_ h'0011', h'2233'),     # chunked byte string
-  (_ "chunked ", "text"),
-  [_ 1, 2, 3],
-]`,
-    cddl: `; Indefinite-length encoding is invisible to CDDL: chunked strings
-; are just strings, and [_ …] is just an array.
-streamed = [
-  tstr,
-  bstr,
-  tstr,
-  [* uint],
-]`,
-  },
-  {
-    name: 'Tags & big numbers',
-    cdn: `{
-  "timestamp": 1(1749772800),
-  "rfc3339": 0("2026-06-13T00:00:00Z"),
-  "bignum": 18446744073709551616,
-  "negative": -18446744073709551617,
-  "embedded": <<1, [2, 3]>>,
-}`,
-    cddl: `tagged = {
-  "timestamp": time,       ; prelude: #6.1(number)
-  "rfc3339": tdate,        ; prelude: #6.0(tstr)
-  "bignum": biguint,       ; > 2^64-1 → tag 2 on the wire
-  "negative": bignint,
-  "embedded": bstr .cborseq [uint, [2*2 uint]],
-}`,
-  },
-  {
-    name: 'String concatenation (+)',
-    cdn: `{
-  # Text and byte strings can be split with +.
-  # Note: + concatenation was removed in draft-26; this is legacy syntax.
-  # Try Format → Text strings: Newline or CDN to auto-split.
-  "poem": "Roses are red,\\n" +
-    "Violets are blue,\\n" +
-    "CBOR is binary,\\n" +
-    "CDN is for you.",
-  "bytes": h'deadbeef' +
-    h'cafebabe',
-
-  # Strings containing JSON/CDN are split at brackets with 'CDN' mode.
-  "array-json": "[" +
-      "1, " +
-      "2, " +
-      "3" +
-    "]",
-  "object-json": "{" +
-      "\\"key\\": \\"value\\"" +
-    "}",
-}`,
-    cddl: `; Concatenation is CDN spelling only: each value is one string.
-concat = {
-  "poem": tstr .size (1..128),
-  "bytes": bstr .size 8,
-  "array-json": tstr,
-  "object-json": tstr,
-}`,
-  },
-  {
-    name: 'JSON is valid CDN',
-    cdn: `{
-  // JSON and JSONC parse as-is — CDN is a superset.
-  "menu": {
-    "id": "file",
-    "items": [
-      { "label": "Open", "key": "ctrl+o" },
-      { "label": "Save", "key": "ctrl+s" }
-    ],
-    "version": 2.1
-  }
-}`,
-    cddl: `doc = { "menu": menu }
-menu = {
-  "id": tstr,
-  "items": [* { "label": tstr, "key": tstr }],
-  "version": float,
-}`,
-  },
-  {
     // Values follow the draft's own examples (draft-ietf-cbor-edn-literals
     // §7.2/§7.3) — including its Apollo 11 splashdown timestamp for dt/DT.
-    name: 'App extensions: dt & ip (draft-25)',
+    name: 'App extensions: dt & ip (§3.1–§3.2)',
     cdn: `{
   # dt gives a bare epoch number; an explicit .0/.N fraction forces float
   # even when the value is whole; DT wraps the epoch in tag(1)
@@ -363,7 +310,7 @@ app-extensions-dt-ip = {
 }`,
   },
   {
-    name: 'App extensions: hash & cri (draft-25)',
+    name: 'App extensions: hash (§3.3)',
     cdn: `{
   # hash'...' computes SHA-256 over UTF-8 text — shorthand for
   # hash<<'foo'>>, whose << >> form also accepts raw bytes and an
@@ -374,36 +321,21 @@ app-extensions-dt-ip = {
   "sha256-name":  hash<<'foo', "SHA-256">>,
   "sha512-id":    hash<<'foo', -44>>,
   "sha512-name":  hash<<'foo', "SHA-512">>,
-
-  # cri decomposes a URI into [scheme, host, path?, query?]; CRI wraps
-  # that array in a tag
-  "url":        cri'https://example.com/bottarga/shaved',
-  "tagged-url": CRI'https://example.com/bottarga/shaved',
-
-  # An app-string prefix the parser doesn't recognize is not an error:
-  # it round-trips as tag 999 (CPA999) — the prefix plus its content —
-  # exactly what a not-yet-registered extension identifier becomes.
-  "unknown-single":   nosuchext'some value',
-  "unknown-sequence": nosuchext<<1, "two", 3>>,
 }`,
     cddl: `; hash'...' — requires @cbortech/hash-extension (bstr; without it,
-; an unrecognised app-string becomes tag 999(["hash", "..."]) instead)
-app-extensions-hash-cri = {
+; an unrecognised app-string becomes tag 999(["hash", "..."]) instead —
+; see the "unknown" fields in the cri/float/others sample)
+app-extensions-hash = {
   "sha256-text": bstr .size 32,
   "sha256-bytes": bstr .size 32,
   "sha256-id": bstr .size 32,
   "sha256-name": bstr .size 32,
   "sha512-id": bstr .size 64,
   "sha512-name": bstr .size 64,
-  "url": cri-array,            ; cri → [scheme, host, ? path, ? query]
-  "tagged-url": #6.99(cri-array),
-  "unknown-single": #6.999([tstr, tstr]),
-  "unknown-sequence": #6.999([tstr, [* any]]),
-}
-cri-array = [int, [* tstr], *[* tstr]]`,
+}`,
   },
   {
-    name: 'App extensions: t1/b1, ilbs/ilts, float & others (draft-26)',
+    name: 'App extensions: t1/b1, ilbs/ilts (§3.4–§3.5)',
     cdn: `{
   # t1 / b1 join (text or byte) strings into one
   "text":  t1<<"Hello ", "world">>,
@@ -415,26 +347,136 @@ cri-array = [int, [* tstr], *[* tstr]]`,
   # ilbs / ilts build indefinite-length strings, one chunk per argument
   "il-bytes": ilbs<<h'0011', h'2233'>>,
   "il-text":  ilts<<"chunked ", "text">>,
-
-  # float'...' — raw float bits
-  "f16": float'3c00',            # float16 bits: 1.0
-
-  # Other app strings: encodings and a cross-encoding assertion
-  "b32":  b32'AEBAGBAF',          # base32 byte string
-  "h32":  h32'01A0C294',          # base32hex byte string
-  "same": same<<h'cafe', b32'ZL7A'>>,   # same bytes, two spellings
 }`,
-    cddl: `app-extensions-26 = {
+    cddl: `app-extensions-t1-b1-ilbs-ilts = {
   "text": tstr,
   "mixed": tstr,
   "bytes": bstr,
   "elided": any,                ; ... elides the value
   "il-bytes": bstr,
   "il-text": tstr,
+}`,
+  },
+  {
+    name: 'App extensions: cri, float & others (§3.6–§3.7)',
+    cdn: `{
+  # cri decomposes a URI into [scheme, host, path?, query?]; CRI wraps
+  # that array in a tag
+  "url":        cri'https://example.com/bottarga/shaved',
+  "tagged-url": CRI'https://example.com/bottarga/shaved',
+
+  # float'...' — raw IEEE 754 bits, width picked by hex length
+  "f16": float'3c00',                 # float16 bits: 1.0
+  "f32": float'3f800000',             # float32 bits: 1.0
+  "f64": float'3ff0000000000000',     # float64 bits: 1.0
+
+  # b32 / h32 — base32 / base32hex byte strings (not part of the CDN
+  # draft; bundled with this library as additional app extensions)
+  "b32": b32'AEBAGBAF',
+  "h32": h32'01A0C294',
+  # same<<...>> asserts that two different encodings decode to the same
+  # bytes, and keeps only the first argument's value
+  "same": same<<h'cafe', b32'ZL7A'>>,
+
+  # An app-string prefix the parser doesn't recognize is not an error:
+  # it round-trips as tag 999 (CPA999) — the prefix plus its content —
+  # exactly what a not-yet-registered extension identifier becomes.
+  "unknown-single":   nosuchext'some value',
+  "unknown-sequence": nosuchext<<1, "two", 3>>,
+}`,
+    cddl: `app-extensions-cri-float-other = {
+  "url": cri-array,            ; cri → [scheme, host, ? path, ? query]
+  "tagged-url": #6.99(cri-array),
   "f16": float16,
+  "f32": float32,
+  "f64": float64,
   "b32": bstr,
   "h32": bstr,
   "same": bstr .size 2,
+  "unknown-single": #6.999([tstr, tstr]),
+  "unknown-sequence": #6.999([tstr, [* any]]),
+}
+cri-array = [int, [* tstr], *[* tstr]]`,
+  },
+  {
+    name: 'Indefinite lengths',
+    cdn: `[_
+  "streamed array",
+  (_ h'0011', h'2233'),     # deprecated in draft-26
+  (_ "chunked ", "text"),   # deprecated in draft-26
+  [_ 1, 2, 3],
+  {_ "a": 1, "b": 2},
+]`,
+    cddl: `; Indefinite-length encoding is invisible to CDDL: chunked strings
+; are just strings, and [_ …] / {_ …} are just an array / a map.
+streamed = [
+  tstr,
+  bstr,
+  tstr,
+  [* uint],
+  { * tstr => uint },
+]`,
+  },
+  {
+    name: 'Tags, bignums, CBOR sequences & elision',
+    cdn: `{
+  "timestamp": 1(1749772800),
+  "rfc3339": 0("2026-06-13T00:00:00Z"),
+  "bignum": 18446744073709551616,
+  "negative": -18446744073709551617,
+  "embedded": <<1, [2, 3]>>,
+
+  # ... elides a whole item — a value known to exist but left unspecified.
+  "array-elision": [1, 2, ..., 3],
+  "map-elision": {
+    "a": 1,
+    "b": ...,
+    ...: ...
+  },
+}`,
+    cddl: `tagged = {
+  "timestamp": time,       ; prelude: #6.1(number)
+  "rfc3339": tdate,        ; prelude: #6.0(tstr)
+  "bignum": biguint,       ; > 2^64-1 → tag 2 on the wire
+  "negative": bignint,
+  "embedded": bstr .cborseq [uint, [2*2 uint]],
+  "array-elision": [4*4 uint],
+  "map-elision": { "a": uint, ? "b": uint, * tstr => any },
+}`,
+  },
+  {
+    name: 'String concatenation (+)',
+    cdn: `{
+  # Text and byte strings can be split with +.
+  # Note: + concatenation was removed in draft-26; this is legacy syntax.
+  # Try Format → Text strings: Newline or CDN to auto-split.
+  "poem": "Roses are red,\\n" +
+    "Violets are blue,\\n" +
+    "CBOR is binary,\\n" +
+    "CDN is for you.",
+  "bytes": h'deadbeef' +
+    h'cafebabe',
+
+  # Strings containing JSON/CDN are split at brackets with 'CDN' mode.
+  "array-json": "[" +
+      "1, " +
+      "2, " +
+      "3" +
+    "]",
+  "object-json": "{" +
+      "\\"key\\": \\"value\\"" +
+    "}",
+
+  # ... can stand in for part of a string too — a fragment was elided.
+  "elided": "Herewith I buy" + ... + "gned: Alice & Bob",
+}`,
+    cddl: `; Concatenation is CDN spelling only: each value is one string.
+concat = {
+  "poem": tstr .size (1..128),
+  "bytes": bstr .size 8,
+  "array-json": tstr,
+  "object-json": tstr,
+  "elided": any,
 }`,
   },
   {
@@ -464,7 +506,7 @@ row = {
 }`,
   },
   {
-    name: 'Groups, choices & ranges',
+    name: 'CDDL: Groups, choices & ranges',
     cdn: `[
   {"name": "Kudo"},
   {"name": "Ada", "vip": true},
