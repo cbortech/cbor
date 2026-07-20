@@ -4,18 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>@cbortech/cbor — CBOR ⇄ CDN playground</title>
+    <title>@cbortech/cbor — CBOR ⇄ CDN ⇄ JS with CDDL validation</title>
     <meta
       name="description"
-      content="Convert between CBOR, Concise Diagnostic Notation (CDN / CBOR-EDN), and JavaScript values. Zero-dependency TypeScript library with a live playground."
+      content="Convert between CBOR, Concise Diagnostic Notation (CDN / CBOR-EDN), and JavaScript values, with live RFC 8610 CDDL validation. Zero-dependency TypeScript library with an interactive browser playground."
     />
     <meta
       property="og:title"
-      content="@cbortech/cbor — CBOR ⇄ CDN (CBOR-EDN) playground"
+      content="@cbortech/cbor — CBOR ⇄ CDN ⇄ JS with CDDL validation"
     />
     <meta
       property="og:description"
-      content="Type Concise Diagnostic Notation (CDN / CBOR-EDN), get annotated CBOR bytes — and back. Powered by the zero-dependency @cbortech/cbor library."
+      content="Convert CBOR, CDN (CBOR-EDN), and JavaScript values with live RFC 8610 CDDL validation. Powered by the zero-dependency @cbortech/cbor library."
     />
     <meta property="og:type" content="website" />
   </head>
@@ -23,7 +23,9 @@
     <header class="site-header">
       <div class="brand">
         <span class="brand-name">@cbortech/cbor</span>
-        <span class="brand-tag">CBOR ⇄ CDN (CBOR-EDN) ⇄ JS</span>
+        <span class="brand-tag"
+          >CBOR ⇄ CDN (CBOR-EDN) ⇄ JS + CDDL validation</span
+        >
       </div>
       <nav class="site-nav">
         <a
@@ -53,7 +55,10 @@
     </header>
 
     <section class="hero">
-      <h1>Convert between CBOR, CDN (CBOR-EDN), and JavaScript values</h1>
+      <h1>
+        Convert between CBOR, CDN (CBOR-EDN), and JavaScript values — with CDDL
+        validation
+      </h1>
       <p class="hero-sub">
         <a
           href="https://www.npmjs.com/package/@cbortech/cbor"
@@ -67,8 +72,7 @@
           target="_blank"
           rel="noopener"
           >RFC 8949 CBOR</a
-        >
-        and
+        >,
         <a
           href="https://datatracker.ietf.org/doc/html/draft-ietf-cbor-edn-literals-25"
           target="_blank"
@@ -81,24 +85,35 @@
           target="_blank"
           rel="noopener"
           >draft-26</a
+        >, and
+        <a
+          href="https://www.rfc-editor.org/rfc/rfc8610"
+          target="_blank"
+          rel="noopener"
+          >RFC 8610 CDDL</a
         >
         — encode, decode, parse, pretty-print, and round-trip with full
         fidelity. Everything on this page runs in your browser using the library
-        itself.
+        itself, including live validation of CDN input against CDDL schemas.
       </p>
-      <div class="hero-install">
-        <code id="install-cmd">npm install @cbortech/cbor</code>
-        <button
-          id="copy-install"
-          class="icon-btn toolbar-icon-btn"
-          title="Copy install command to clipboard"
-          aria-label="Copy install command to clipboard"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="9" y="9" width="11" height="11" rx="2" />
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-          </svg>
-        </button>
+      <div class="hero-actions">
+        <div class="hero-install">
+          <code id="install-cmd">npm install @cbortech/cbor</code>
+          <button
+            id="copy-install"
+            class="icon-btn toolbar-icon-btn"
+            title="Copy install command to clipboard"
+            aria-label="Copy install command to clipboard"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="9" y="9" width="11" height="11" rx="2" />
+              <path
+                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+              />
+            </svg>
+          </button>
+        </div>
+        <a class="hero-playground-link" href="#playground">Open playground ↓</a>
       </div>
       <ul class="features">
         <li>
@@ -114,6 +129,24 @@
           ranges, warnings, and annotated hex dumps.
         </li>
         <li>
+          <strong>CDDL validation</strong> — open the CDDL pane to validate CDN
+          input live against a CDDL schema, with failures highlighted in the
+          schema, source, and CBOR bytes. Supports every
+          <a
+            href="https://www.rfc-editor.org/rfc/rfc8610"
+            target="_blank"
+            rel="noopener"
+            >RFC 8610</a
+          >
+          control operator, plus
+          <a
+            href="https://www.rfc-editor.org/rfc/rfc9165"
+            target="_blank"
+            rel="noopener"
+            >RFC 9165</a
+          >'s <code>.plus</code>, <code>.cat</code>, and <code>.feature</code>.
+        </li>
+        <li>
           <strong>Extensible</strong> — application-oriented extensions for
           dates, IP addresses, string concatenation, and more, plus optional
           <a
@@ -122,18 +155,197 @@
             rel="noopener"
             >hash</a
           >
-          support. Toggle any extension from the button above the CDN editor.
+          support. Toggle any extension from the Extensions button in the
+          playground control bar below.
         </li>
       </ul>
     </section>
 
+    <div
+      id="playground"
+      class="playground-bar"
+      role="toolbar"
+      aria-label="Playground controls"
+    >
+      <button
+        id="cddl-toggle-btn"
+        class="ctl ctl-switch cddl-toggle"
+        title="Show or hide the CDDL schema pane — while shown, the CDN input is validated against the schema"
+        aria-pressed="false"
+      >
+        CDDL
+        <span class="switch-track" aria-hidden="true">
+          <span class="switch-knob"></span>
+        </span>
+      </button>
+      <select id="samples" class="ctl" title="Load a sample">
+        <option value="" disabled selected>Samples…</option>
+      </select>
+      <span class="toolbar-spacer"></span>
+      <div class="bar-item">
+        <button
+          id="ext-opts-btn"
+          class="ctl ctl-labeled"
+          title="Enabled extensions"
+          aria-expanded="false"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M4 7h4a2 2 0 1 1 4 0h4a1 1 0 0 1 1 1v4a2 2 0 1 0 0 4v4a1 1 0 0 1-1 1h-4a2 2 0 1 0-4 0H4a1 1 0 0 1-1-1v-4a2 2 0 1 1 0-4V8a1 1 0 0 1 1-1Z"
+            />
+          </svg>
+          Extensions
+        </button>
+        <div id="ext-popover" class="popover ext-popover" hidden>
+          <div class="popover-section-title">Built-in</div>
+          <div id="ext-popover-builtin" class="popover-grid">
+            <label class="check" title="Core CDN syntax — always active">
+              <input type="checkbox" checked disabled />
+              h
+            </label>
+            <label class="check" title="Core CDN syntax — always active">
+              <input type="checkbox" checked disabled />
+              b64
+            </label>
+          </div>
+          <div class="popover-section-title">Additional</div>
+          <div id="ext-popover-extra" class="popover-grid"></div>
+        </div>
+      </div>
+      <button
+        id="share-btn"
+        class="ctl ctl-labeled"
+        title="Copy a shareable link to clipboard"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="18" cy="5" r="2" />
+          <circle cx="6" cy="12" r="2" />
+          <circle cx="18" cy="19" r="2" />
+          <path d="m8 11 8-5M8 13l8 5" />
+        </svg>
+        Share
+      </button>
+    </div>
+
     <main class="playground">
+      <section class="pane pane-cddl" aria-label="CDDL schema editor" hidden>
+        <div class="pane-toolbar">
+          <span class="pane-title">CDDL</span>
+          <span class="toolbar-spacer"></span>
+          <div class="format-group">
+            <button
+              id="cddl-format-btn"
+              class="ctl"
+              title="Format the CDDL schema"
+            >
+              Format
+            </button>
+            <button
+              id="cddl-format-opts-btn"
+              class="ctl toolbar-icon-btn"
+              title="Formatting options"
+              aria-label="Formatting options"
+              aria-expanded="false"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"
+                />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+          </div>
+          <button
+            id="cddl-import-btn"
+            class="ctl toolbar-icon-btn"
+            title="Open a CDDL UTF-8 text file"
+            aria-label="Import CDDL text file"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" />
+            </svg>
+          </button>
+          <button
+            id="cddl-export-btn"
+            class="ctl toolbar-icon-btn"
+            title="Save as a .cddl UTF-8 text file"
+            aria-label="Export CDDL text file"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 21V9m0 0 4 4m-4-4-4 4M5 3h14" />
+            </svg>
+          </button>
+          <button
+            id="copy-cddl"
+            class="ctl toolbar-icon-btn"
+            title="Copy CDDL text to clipboard"
+            aria-label="Copy CDDL text to clipboard"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="9" y="9" width="11" height="11" rx="2" />
+              <path
+                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+              />
+            </svg>
+          </button>
+        </div>
+        <input
+          type="file"
+          id="cddl-import-input"
+          accept=".cddl,text/plain"
+          hidden
+        />
+        <div id="cddl-format-popover" class="popover" hidden>
+          <label
+            >Indent
+            <select
+              id="cddl-opt-indent"
+              aria-describedby="hint-cddl-opt-indent"
+            >
+              <option value="2" selected>2 spaces</option>
+              <option value="4">4 spaces</option>
+              <option value="tab">Tab</option>
+              <option value="">Compact</option>
+            </select>
+            <span class="opt-hint" role="tooltip" id="hint-cddl-opt-indent"
+              >Pretty-print groups with one entry per indented line; Compact
+              keeps each rule on a single line</span
+            >
+          </label>
+          <label class="check">
+            <input
+              type="checkbox"
+              id="cddl-opt-comments"
+              aria-describedby="hint-cddl-opt-comments"
+              checked
+            />
+            Keep comments
+            <span class="opt-hint" role="tooltip" id="hint-cddl-opt-comments"
+              >Keep ; comments from the input and emit them in the formatted
+              output</span
+            >
+          </label>
+        </div>
+        <div id="cddl-editor" class="editor-host"></div>
+        <div
+          id="cddl-status"
+          class="bytes-status"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          hidden
+        ></div>
+      </section>
+      <div
+        class="pane-divider"
+        id="cddl-divider"
+        title="Drag to resize"
+        hidden
+      ></div>
+
       <section class="pane pane-cdn" aria-label="CDN editor">
         <div class="pane-toolbar">
           <span class="pane-title">CDN (CBOR-EDN)</span>
-          <select id="samples" class="ctl" title="Load a sample">
-            <option value="" disabled selected>Samples…</option>
-          </select>
           <span class="toolbar-spacer"></span>
           <div class="format-group">
             <button
@@ -158,19 +370,6 @@
               </svg>
             </button>
           </div>
-          <button
-            id="ext-opts-btn"
-            class="ctl toolbar-icon-btn"
-            title="Enabled extensions"
-            aria-label="Enabled extensions"
-            aria-expanded="false"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                d="M4 7h4a2 2 0 1 1 4 0h4a1 1 0 0 1 1 1v4a2 2 0 1 0 0 4v4a1 1 0 0 1-1 1h-4a2 2 0 1 0-4 0H4a1 1 0 0 1-1-1v-4a2 2 0 1 1 0-4V8a1 1 0 0 1 1-1Z"
-              />
-            </svg>
-          </button>
           <button
             id="cdn-import-btn"
             class="ctl toolbar-icon-btn"
@@ -202,19 +401,6 @@
               <path
                 d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
               />
-            </svg>
-          </button>
-          <button
-            id="share-btn"
-            class="ctl toolbar-icon-btn"
-            title="Copy a shareable link to clipboard"
-            aria-label="Copy a shareable link to clipboard"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="18" cy="5" r="2" />
-              <circle cx="6" cy="12" r="2" />
-              <circle cx="18" cy="19" r="2" />
-              <path d="m8 11 8-5M8 13l8 5" />
             </svg>
           </button>
         </div>
@@ -394,21 +580,6 @@
             >
           </label>
         </div>
-        <div id="ext-popover" class="popover ext-popover" hidden>
-          <div class="popover-section-title">Built-in</div>
-          <div id="ext-popover-builtin" class="popover-grid">
-            <label class="check" title="Core CDN syntax — always active">
-              <input type="checkbox" checked disabled />
-              h
-            </label>
-            <label class="check" title="Core CDN syntax — always active">
-              <input type="checkbox" checked disabled />
-              b64
-            </label>
-          </div>
-          <div class="popover-section-title">Additional</div>
-          <div id="ext-popover-extra" class="popover-grid"></div>
-        </div>
         <div id="editor" class="editor-host"></div>
       </section>
 
@@ -420,12 +591,50 @@
           ></span>
           <span class="toolbar-spacer"></span>
           <div class="mode-tabs" role="tablist">
-            <button class="tab is-active" data-mode="annotated" role="tab">
+            <button
+              id="tab-annotated"
+              class="tab is-active"
+              data-mode="annotated"
+              role="tab"
+              aria-selected="true"
+              aria-controls="hexview"
+              tabindex="0"
+            >
               Annotated
             </button>
-            <button class="tab" data-mode="plain" role="tab">Hex</button>
-            <button class="tab" data-mode="js" role="tab">JS</button>
-            <button class="tab" data-mode="edit" role="tab">Edit</button>
+            <button
+              id="tab-plain"
+              class="tab"
+              data-mode="plain"
+              role="tab"
+              aria-selected="false"
+              aria-controls="hexview"
+              tabindex="-1"
+            >
+              Hex
+            </button>
+            <button
+              id="tab-js"
+              class="tab"
+              data-mode="js"
+              role="tab"
+              aria-selected="false"
+              aria-controls="js-view"
+              tabindex="-1"
+            >
+              JS
+            </button>
+            <button
+              id="tab-edit"
+              class="tab"
+              data-mode="edit"
+              role="tab"
+              aria-selected="false"
+              aria-controls="bytes-edit-wrap"
+              tabindex="-1"
+            >
+              Edit
+            </button>
           </div>
           <button
             id="import-btn"
@@ -480,7 +689,14 @@
             placeholder="83 01 02 03"
           ></textarea>
         </div>
-        <div id="bytes-status" class="bytes-status" hidden></div>
+        <div
+          id="bytes-status"
+          class="bytes-status"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          hidden
+        ></div>
       </section>
     </main>
 
@@ -493,8 +709,8 @@
           rel="noopener"
           >@cbortech/cbor</a
         >
-        — conversion, formatting, tokenization, and hex dumps on this page all
-        come from the library. Apache-2.0.
+        — conversion, formatting, tokenization, validation, and hex dumps on
+        this page all come from the library. Apache-2.0.
       </p>
     </footer>
 
