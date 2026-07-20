@@ -20,6 +20,7 @@ import {
   encodeShareHash,
   getEnabledExtensions,
   initExtensionsPopover,
+  initFileDrop,
   initFormatPopover,
   initModeTabs,
   initSamples,
@@ -184,37 +185,6 @@ function applyHexResult(cdn: string, warnings: string[]): void {
   _programmaticEdit = false;
 }
 
-function initFileDrop(target: HTMLElement, onFile: (file: File) => void): void {
-  const hasFiles = (event: DragEvent): boolean =>
-    Array.from(event.dataTransfer?.types ?? []).includes('Files');
-
-  target.addEventListener('dragover', (event) => {
-    if (!hasFiles(event)) return;
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
-    target.classList.add('is-file-dragover');
-  });
-  target.addEventListener('dragleave', (event) => {
-    const next = event.relatedTarget;
-    if (!(next instanceof Node) || !target.contains(next)) {
-      target.classList.remove('is-file-dragover');
-    }
-  });
-  target.addEventListener(
-    'drop',
-    (event) => {
-      if (!hasFiles(event)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      target.classList.remove('is-file-dragover');
-      const file = event.dataTransfer?.files[0];
-      if (!file) return;
-      onFile(file);
-    },
-    true
-  );
-}
-
 // ── Pane resize ──────────────────────────────────────────────────────────────
 
 const playgroundEl = document.querySelector<HTMLElement>('.playground')!;
@@ -339,6 +309,9 @@ cddlPane = initCddlPane({
   // CDN cannot be guessed — an empty editor.
   initialCddl: shared ? (shared.cddl ?? '') : SAMPLES[0]!.cddl,
   forceOpen: shared?.cddl !== undefined,
+  // A loaded sample is a CDN/CDDL pair; importing a foreign schema makes
+  // the samples selection stale, same as importing CDN or CBOR.
+  onImported: () => resetSamples(),
 });
 
 el('format-btn').addEventListener('click', () => {

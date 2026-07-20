@@ -39,14 +39,6 @@
           >npm</a
         >
         <button
-          id="cddl-toggle-btn"
-          class="ctl cddl-toggle"
-          title="Show or hide the CDDL schema pane"
-          aria-pressed="false"
-        >
-          CDDL
-        </button>
-        <button
           id="theme-toggle"
           class="icon-btn toolbar-icon-btn"
           title="Toggle color theme"
@@ -130,22 +122,120 @@
             rel="noopener"
             >hash</a
           >
-          support. Toggle any extension from the button above the CDN editor.
+          support. Toggle any extension from the Extensions button in the
+          playground control bar below.
         </li>
       </ul>
     </section>
+
+    <div class="playground-bar" role="toolbar" aria-label="Playground controls">
+      <button
+        id="cddl-toggle-btn"
+        class="ctl ctl-switch cddl-toggle"
+        title="Show or hide the CDDL schema pane — while shown, the CDN input is validated against the schema"
+        aria-pressed="false"
+      >
+        CDDL
+        <span class="switch-track" aria-hidden="true">
+          <span class="switch-knob"></span>
+        </span>
+      </button>
+      <select id="samples" class="ctl" title="Load a sample">
+        <option value="" disabled selected>Samples…</option>
+      </select>
+      <span class="toolbar-spacer"></span>
+      <div class="bar-item">
+        <button
+          id="ext-opts-btn"
+          class="ctl ctl-labeled"
+          title="Enabled extensions"
+          aria-expanded="false"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M4 7h4a2 2 0 1 1 4 0h4a1 1 0 0 1 1 1v4a2 2 0 1 0 0 4v4a1 1 0 0 1-1 1h-4a2 2 0 1 0-4 0H4a1 1 0 0 1-1-1v-4a2 2 0 1 1 0-4V8a1 1 0 0 1 1-1Z"
+            />
+          </svg>
+          Extensions
+        </button>
+        <div id="ext-popover" class="popover ext-popover" hidden>
+          <div class="popover-section-title">Built-in</div>
+          <div id="ext-popover-builtin" class="popover-grid">
+            <label class="check" title="Core CDN syntax — always active">
+              <input type="checkbox" checked disabled />
+              h
+            </label>
+            <label class="check" title="Core CDN syntax — always active">
+              <input type="checkbox" checked disabled />
+              b64
+            </label>
+          </div>
+          <div class="popover-section-title">Additional</div>
+          <div id="ext-popover-extra" class="popover-grid"></div>
+        </div>
+      </div>
+      <button
+        id="share-btn"
+        class="ctl ctl-labeled"
+        title="Copy a shareable link to clipboard"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="18" cy="5" r="2" />
+          <circle cx="6" cy="12" r="2" />
+          <circle cx="18" cy="19" r="2" />
+          <path d="m8 11 8-5M8 13l8 5" />
+        </svg>
+        Share
+      </button>
+    </div>
 
     <main class="playground">
       <section class="pane pane-cddl" aria-label="CDDL schema editor" hidden>
         <div class="pane-toolbar">
           <span class="pane-title">CDDL</span>
           <span class="toolbar-spacer"></span>
+          <div class="format-group">
+            <button
+              id="cddl-format-btn"
+              class="ctl"
+              title="Format the CDDL schema"
+            >
+              Format
+            </button>
+            <button
+              id="cddl-format-opts-btn"
+              class="ctl toolbar-icon-btn"
+              title="Formatting options"
+              aria-label="Formatting options"
+              aria-expanded="false"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"
+                />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+          </div>
           <button
-            id="cddl-format-btn"
-            class="ctl"
-            title="Format the CDDL schema"
+            id="cddl-import-btn"
+            class="ctl toolbar-icon-btn"
+            title="Open a CDDL UTF-8 text file"
+            aria-label="Import CDDL text file"
           >
-            Format
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" />
+            </svg>
+          </button>
+          <button
+            id="cddl-export-btn"
+            class="ctl toolbar-icon-btn"
+            title="Save as a .cddl UTF-8 text file"
+            aria-label="Export CDDL text file"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 21V9m0 0 4 4m-4-4-4 4M5 3h14" />
+            </svg>
           </button>
           <button
             id="copy-cddl"
@@ -161,6 +251,43 @@
             </svg>
           </button>
         </div>
+        <input
+          type="file"
+          id="cddl-import-input"
+          accept=".cddl,text/plain"
+          hidden
+        />
+        <div id="cddl-format-popover" class="popover" hidden>
+          <label
+            >Indent
+            <select
+              id="cddl-opt-indent"
+              aria-describedby="hint-cddl-opt-indent"
+            >
+              <option value="2" selected>2 spaces</option>
+              <option value="4">4 spaces</option>
+              <option value="tab">Tab</option>
+              <option value="">Compact</option>
+            </select>
+            <span class="opt-hint" role="tooltip" id="hint-cddl-opt-indent"
+              >Pretty-print groups with one entry per indented line; Compact
+              keeps each rule on a single line</span
+            >
+          </label>
+          <label class="check">
+            <input
+              type="checkbox"
+              id="cddl-opt-comments"
+              aria-describedby="hint-cddl-opt-comments"
+              checked
+            />
+            Keep comments
+            <span class="opt-hint" role="tooltip" id="hint-cddl-opt-comments"
+              >Keep ; comments from the input and emit them in the formatted
+              output</span
+            >
+          </label>
+        </div>
         <div id="cddl-editor" class="editor-host"></div>
         <div id="cddl-status" class="bytes-status" hidden></div>
       </section>
@@ -174,9 +301,6 @@
       <section class="pane pane-cdn" aria-label="CDN editor">
         <div class="pane-toolbar">
           <span class="pane-title">CDN (CBOR-EDN)</span>
-          <select id="samples" class="ctl" title="Load a sample">
-            <option value="" disabled selected>Samples…</option>
-          </select>
           <span class="toolbar-spacer"></span>
           <div class="format-group">
             <button
@@ -201,19 +325,6 @@
               </svg>
             </button>
           </div>
-          <button
-            id="ext-opts-btn"
-            class="ctl toolbar-icon-btn"
-            title="Enabled extensions"
-            aria-label="Enabled extensions"
-            aria-expanded="false"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                d="M4 7h4a2 2 0 1 1 4 0h4a1 1 0 0 1 1 1v4a2 2 0 1 0 0 4v4a1 1 0 0 1-1 1h-4a2 2 0 1 0-4 0H4a1 1 0 0 1-1-1v-4a2 2 0 1 1 0-4V8a1 1 0 0 1 1-1Z"
-              />
-            </svg>
-          </button>
           <button
             id="cdn-import-btn"
             class="ctl toolbar-icon-btn"
@@ -245,19 +356,6 @@
               <path
                 d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
               />
-            </svg>
-          </button>
-          <button
-            id="share-btn"
-            class="ctl toolbar-icon-btn"
-            title="Copy a shareable link to clipboard"
-            aria-label="Copy a shareable link to clipboard"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="18" cy="5" r="2" />
-              <circle cx="6" cy="12" r="2" />
-              <circle cx="18" cy="19" r="2" />
-              <path d="m8 11 8-5M8 13l8 5" />
             </svg>
           </button>
         </div>
@@ -436,21 +534,6 @@
               notation like 1(1672574400)</span
             >
           </label>
-        </div>
-        <div id="ext-popover" class="popover ext-popover" hidden>
-          <div class="popover-section-title">Built-in</div>
-          <div id="ext-popover-builtin" class="popover-grid">
-            <label class="check" title="Core CDN syntax — always active">
-              <input type="checkbox" checked disabled />
-              h
-            </label>
-            <label class="check" title="Core CDN syntax — always active">
-              <input type="checkbox" checked disabled />
-              b64
-            </label>
-          </div>
-          <div class="popover-section-title">Additional</div>
-          <div id="ext-popover-extra" class="popover-grid"></div>
         </div>
         <div id="editor" class="editor-host"></div>
       </section>

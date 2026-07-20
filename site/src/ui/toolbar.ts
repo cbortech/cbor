@@ -65,6 +65,41 @@ export async function copyWithFeedback(
   }
 }
 
+/** Accept files dropped onto `target`, with a visual drop-zone cue. */
+export function initFileDrop(
+  target: HTMLElement,
+  onFile: (file: File) => void
+): void {
+  const hasFiles = (event: DragEvent): boolean =>
+    Array.from(event.dataTransfer?.types ?? []).includes('Files');
+
+  target.addEventListener('dragover', (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    target.classList.add('is-file-dragover');
+  });
+  target.addEventListener('dragleave', (event) => {
+    const next = event.relatedTarget;
+    if (!(next instanceof Node) || !target.contains(next)) {
+      target.classList.remove('is-file-dragover');
+    }
+  });
+  target.addEventListener(
+    'drop',
+    (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      target.classList.remove('is-file-dragover');
+      const file = event.dataTransfer?.files[0];
+      if (!file) return;
+      onFile(file);
+    },
+    true
+  );
+}
+
 export function initSamples(onSelect: (sample: Sample) => void): () => void {
   const select = document.getElementById('samples') as HTMLSelectElement;
   for (const sample of SAMPLES) {
@@ -83,7 +118,7 @@ export function initSamples(onSelect: (sample: Sample) => void): () => void {
 }
 
 /** Wire a toolbar icon button to show/hide its popover, closing on outside click. */
-function wirePopoverToggle(buttonId: string, popoverId: string): void {
+export function wirePopoverToggle(buttonId: string, popoverId: string): void {
   const button = document.getElementById(buttonId)!;
   const popover = document.getElementById(popoverId)!;
   button.addEventListener('click', (e) => {

@@ -12,6 +12,7 @@ import type { EditorView } from '@codemirror/view';
 import {
   CDDL,
   CddlSyntaxError,
+  type CddlFormatOptions,
   type CddlSchema,
   type CddlValidationWarning,
 } from '@cbortech/cbor/cddl';
@@ -21,9 +22,11 @@ import { cddlHighlight } from './editor/cddl-highlight';
 import { cddlLinter } from './editor/cddl-lint';
 import { setValidationRange } from './editor/validation-deco';
 import { rangeAtChar } from './mapping/lockstep';
-import { copyWithFeedback, readFormatOptions } from './ui/toolbar';
-
-const OPEN_KEY = 'cbor-site-cddl';
+import {
+  copyWithFeedback,
+  initFileDrop,
+  wirePopoverToggle,
+} from './ui/toolbar';
 
 export interface CddlPane {
   isOpen(): boolean;
@@ -44,9 +47,11 @@ export interface CddlPaneOptions {
   hexHighlight(range: { byteStart: number; byteEnd: number } | null): void;
   /** Schema shown initially: from the share hash, or the default sample. */
   initialCddl: string;
-  /** Open the pane on load regardless of the persisted toggle state
-   *  (share links that carry a CDDL schema). */
+  /** Open the pane (normally closed on load) for share links that carry
+   *  a CDDL schema. */
   forceOpen?: boolean;
+  /** Called after a schema file is imported (button or drag & drop). */
+  onImported?: () => void;
 }
 
 export function initCddlPane(opts: CddlPaneOptions): CddlPane {
@@ -186,11 +191,10 @@ export function initCddlPane(opts: CddlPaneOptions): CddlPane {
 
   // ── Toggle ──────────────────────────────────────────────────────────────────
 
-  function setOpen(open: boolean, persist = true): void {
+  function setOpen(open: boolean): void {
     paneEl.hidden = !open;
     dividerEl.hidden = !open;
     toggleBtn.setAttribute('aria-pressed', String(open));
-    if (persist) localStorage.setItem(OPEN_KEY, open ? '1' : '0');
     if (open) {
       compile(editor.state.doc.toString());
       revalidate(opts.getConversion());
@@ -207,19 +211,25 @@ export function initCddlPane(opts: CddlPaneOptions): CddlPane {
 
   // ── Toolbar ─────────────────────────────────────────────────────────────────
 
+  wirePopoverToggle('cddl-format-opts-btn', 'cddl-format-popover');
+
+  function readCddlFormatOptions(): CddlFormatOptions {
+    const options: CddlFormatOptions = {};
+    const indentRaw = el<HTMLSelectElement>('cddl-opt-indent').value;
+    if (indentRaw !== '')
+      options.indent = indentRaw === 'tab' ? '\t' : Number(indentRaw);
+    if (el<HTMLInputElement>('cddl-opt-comments').checked)
+      options.preserveComments = true;
+    return options;
+  }
+
   el('cddl-format-btn').addEventListener('click', () => {
     const text = editor.state.doc.toString();
     if (text.trim() === '') return;
     try {
-      // Share the Indent setting from the CDN Format-options popover;
-      // "Compact" (no indent) yields single-line rules.
-      const { indent } = readFormatOptions();
       setEditorText(
         editor,
-        CDDL.compile(text, { strict: false }).format({
-          ...(indent !== undefined ? { indent } : {}),
-          preserveComments: true,
-        })
+        CDDL.compile(text, { strict: false }).format(readCddlFormatOptions())
       );
     } catch {
       // Invalid CDDL: the lint squiggle already explains the problem.
@@ -233,11 +243,53 @@ export function initCddlPane(opts: CddlPaneOptions): CddlPane {
     );
   });
 
+  // ── Schema file import / export ─────────────────────────────────────────────
+
+  const importInput = el<HTMLInputElement>('cddl-import-input');
+
+  function importCddlFile(file: File): void {
+    file
+      .text()
+      .then((text) => {
+        opts.onImported?.();
+        setEditorText(editor, text);
+        // Compile now rather than waiting for the editor debounce so the
+        // status line reflects the imported schema immediately.
+        compile(text);
+        revalidate(opts.getConversion());
+      })
+      .catch((e: unknown) => {
+        setStatus('error', e instanceof Error ? e.message : String(e));
+      });
+  }
+
+  el('cddl-import-btn').addEventListener('click', () => importInput.click());
+
+  importInput.addEventListener('change', () => {
+    const file = importInput.files?.[0];
+    if (!file) return;
+    importInput.value = '';
+    importCddlFile(file);
+  });
+
+  initFileDrop(el('cddl-editor'), importCddlFile);
+
+  el('cddl-export-btn').addEventListener('click', () => {
+    const text = editor.state.doc.toString().replace(/\r\n?|\n/g, '\r\n');
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'schema.cddl';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
   // ── Initial state ───────────────────────────────────────────────────────────
 
+  // Closed (validation off) by default; share links carrying a schema open it.
   compile(editor.state.doc.toString());
-  if (opts.forceOpen || localStorage.getItem(OPEN_KEY) === '1')
-    setOpen(true, false);
+  if (opts.forceOpen) setOpen(true);
 
   return {
     isOpen: () => !paneEl.hidden,
