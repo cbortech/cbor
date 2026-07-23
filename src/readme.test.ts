@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import DefaultCBOR, { CBOR } from './index';
+import DefaultCBOR, { CBOR, CddlMismatchError } from './index';
+import { CDDL } from './cddl/index';
 
 describe('README examples', () => {
   test('default import exposes the CBOR facade', () => {
@@ -143,15 +144,16 @@ describe('README examples', () => {
 
   test('preserveConcatenation keeps + string concatenation', () => {
     expect(CBOR.format('"a" + "b"')).toBe('"ab"');
-    expect(CBOR.format('"a" + "b"', { preserveConcatenation: true })).toBe(
-      '"a" + "b"'
-    );
+    expect(
+      CBOR.format('"a" + "b"', { indent: 2, preserveConcatenation: true })
+    ).toBe('"a" +\n  "b"');
     expect(
       CBOR.format("h'68' + b64'aQ'", {
+        indent: 2,
         preserveConcatenation: true,
         preserveByteString: true,
       })
-    ).toBe("h'68' + b64'aQ'");
+    ).toBe("h'68' +\n  b64'aQ'");
   });
 
   test('AST item methods', () => {
@@ -311,5 +313,96 @@ describe('README examples', () => {
 `);
 
     expect(item.toCDN()).toBe('[1,2,3]');
+  });
+});
+
+describe('README examples: CDDL', () => {
+  test('compile a data model', () => {
+    const schema = CDDL.compile(`
+      person = { name: tstr, ? age: uint }
+    `);
+
+    expect(schema.root?.name).toBe('person');
+  });
+
+  test('strict: false collects semantic warnings', () => {
+    const schema = CDDL.compile('a = missing-name', { strict: false });
+
+    expect(schema.warnings?.[0]?.code).toBe('undefined-name');
+    expect(schema.warnings?.[0]).toMatchObject({ start: 4, end: 16 });
+  });
+
+  test('format normalizes spacing and keeps literal spelling', () => {
+    const text = CDDL.compile('a=0x10\nb   = { x :  tstr }').format();
+
+    expect(text).toBe('a = 0x10\nb = {x: tstr}\n');
+  });
+
+  test('format supports indent and preserveComments', () => {
+    const text = CDDL.compile(
+      '; a person\nperson = {name: tstr, ? age: uint}'
+    ).format({ indent: 2, preserveComments: true });
+
+    expect(text).toBe(
+      '; a person\nperson = {\n  name: tstr,\n  ? age: uint\n}\n'
+    );
+  });
+
+  test('validate CDN text against a schema', () => {
+    const schema = CDDL.compile(`
+      person = { name: tstr, ? age: uint }
+    `);
+
+    expect(schema.validate('{"name": "kudo", "age": 42}').valid).toBe(true);
+  });
+
+  test('validation failures report the deepest mismatch', () => {
+    const schema = CDDL.compile('person = { name: tstr, ? age: uint }');
+    const result = schema.validate('{"name": "kudo", "age": "x"}');
+
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]?.path).toBe('/age');
+  });
+
+  test('the rule option validates against a non-root rule', () => {
+    const schema = CDDL.compile(`
+      p1 = { name: tstr, ? addr: tstr }
+      p2 = { name: tstr, ? age: uint }
+    `);
+
+    expect(
+      schema.validate('{"name": "kudo", "age": 42}', { rule: 'p2' }).valid
+    ).toBe(true);
+  });
+
+  test('cddl option on the CBOR facade throws on mismatch', () => {
+    const value = CBOR.parse('{"name": "kudo"}', {
+      cddl: 'person = { name: tstr, ? age: uint }',
+    });
+
+    expect(value).toEqual({ name: 'kudo' });
+    expect(() =>
+      CBOR.parse('{"name": 1}', {
+        cddl: 'person = { name: tstr, ? age: uint }',
+      })
+    ).toThrow(CddlMismatchError);
+  });
+
+  test('cddl option on CBOR.validate collects mismatches per item', () => {
+    const schema = CDDL.compile('person = { name: tstr, ? age: uint }');
+    const result = CBOR.validate('{"name": "kudo"} {"name": 1}', {
+      type: 'cdn',
+      cddl: schema,
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.cddlErrors?.[0]?.path).toBe('/name');
+  });
+
+  test('cddl option works as an instance default', () => {
+    const cbor = new CBOR({ cddl: 'person = { name: tstr, ? age: uint }' });
+
+    expect(cbor.parse('{"name": "kudo"}')).toEqual({ name: 'kudo' });
+    expect(() => cbor.parse('{"name": 1}')).toThrow(CddlMismatchError);
   });
 });

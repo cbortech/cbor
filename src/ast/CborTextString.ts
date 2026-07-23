@@ -82,17 +82,28 @@ function formatTextString(
   ednSource: string | undefined,
   ednPartSources: readonly (string | undefined)[] | undefined
 ): string {
+  const indentStr = resolveIndent(options);
   // A preserved raw backtick literal is emitted verbatim — re-escaping,
   // re-indenting, or splitting it would change its meaning or its
-  // deliberately chosen form.
-  if (options?.preserveRawString && ednSource !== undefined) {
+  // deliberately chosen form. In single-line mode a spelling that spans
+  // multiple lines (raw strings are often written that way) cannot be
+  // re-emitted, so it falls back to normal escaping instead.
+  if (
+    options?.preserveRawString &&
+    ednSource !== undefined &&
+    (indentStr !== null || !/[\r\n]/.test(ednSource))
+  ) {
     return ednSource + suffix;
+  }
+  // Splits and preserved concatenation are layout features, disabled in
+  // single-line mode: the string collapses to one literal.
+  if (indentStr === null) {
+    return escapeString(value) + suffix;
   }
   const partSources = options?.preserveRawString ? ednPartSources : undefined;
   const hasPreservedRawPart =
     partSources?.some((source) => source !== undefined) ?? false;
   const { cdn, newline } = resolveTextStringSplits(options);
-  const indentStr = resolveIndent(options);
   const preservedParts =
     options?.preserveConcatenation &&
     ednParts !== undefined &&
@@ -100,21 +111,6 @@ function formatTextString(
       ? ednParts
       : undefined;
 
-  if (indentStr === null) {
-    if (preservedParts !== undefined) {
-      return emitParts(
-        preservedParts.map((text, i) => ({
-          text,
-          contentDepth: 0,
-          source: partSources?.[i],
-        })),
-        suffix,
-        null,
-        depth
-      );
-    }
-    return escapeString(value) + suffix;
-  }
   if (!cdn && !newline && preservedParts === undefined) {
     return escapeString(value) + suffix;
   }
@@ -175,21 +171,21 @@ function formatTextString(
 }
 
 /**
- * Serialize string parts as a `+` concatenation chain: one line when indent
- * is disabled, otherwise one part per continuation line indented by
- * `depth + 1 + contentDepth`.  The EI suffix is appended to the last part.
+ * Serialize string parts as a `+` concatenation chain, one part per
+ * continuation line indented by `depth + 1 + contentDepth`.  The EI suffix
+ * is appended to the last part. Only reached in multi-line mode — preserved
+ * concatenation is disabled in single-line output.
  */
 function emitParts(
   parts: readonly StringPart[],
   suffix: string,
-  indentStr: string | null,
+  indentStr: string,
   depth: number
 ): string {
   const literals = parts.map(({ text, source }, i) => {
     const literal = source ?? escapeString(text);
     return i === parts.length - 1 ? literal + suffix : literal;
   });
-  if (indentStr === null) return literals.join(' + ');
   let result = literals[0]!;
   for (let i = 1; i < literals.length; i++) {
     const continuationIndent = indentOf(

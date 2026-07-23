@@ -9,7 +9,7 @@ import type {
   ParseWarning,
 } from '../types';
 import { CBOR_OMIT } from '../types';
-import { convertCommentText } from '../cdn/serialize-utils';
+import { convertCommentText, resolveIndent } from '../cdn/serialize-utils';
 import { CborWriter } from '../cbor/encode';
 import { bytesToSpacedHexUpper } from '../utils/hex';
 
@@ -88,7 +88,10 @@ export abstract class CborItem {
     const merged = this._defaults ? { ...this._defaults, ...options } : options;
     const body = this._toCDN(merged, 0);
     const pv = merged?.preserveComments;
-    if (!pv) return body;
+    // Single-line output strips comments: `#`/`//` comments need a newline
+    // to terminate, so they cannot be emitted without breaking the guarantee
+    // that single-line output contains no newlines.
+    if (!pv || resolveIndent(merged) === null) return body;
     const style = typeof pv === 'string' ? pv : undefined;
     const leading =
       this.comments?.leading?.map((c) => convertCommentText(c, style)) ?? [];

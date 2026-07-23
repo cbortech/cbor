@@ -1,10 +1,13 @@
 {
   "name": "@cbortech/cbor",
-  "version": "0.26.2",
-  "description": "Convert between CBOR, CDN (CBOR-EDN), and JavaScript values",
+  "version": "0.26.6",
+  "description": "Convert between CBOR, CDN (CBOR-EDN), and JavaScript values with CDDL validation",
   "keywords": [
     "cbor",
     "cdn",
+    "cddl",
+    "cddl-validation",
+    "rfc8610",
     "cbor-edn",
     "diagnostic-notation",
     "json",
@@ -60,6 +63,16 @@
         "types": "./dist/cdn/index.d.ts",
         "default": "./dist/cdn/index.cjs"
       }
+    },
+    "./cddl": {
+      "import": {
+        "types": "./dist/cddl/index.d.ts",
+        "default": "./dist/cddl/index.js"
+      },
+      "require": {
+        "types": "./dist/cddl/index.d.ts",
+        "default": "./dist/cddl/index.cjs"
+      }
     }
   },
   "files": [
@@ -81,11 +94,13 @@
     "start": "node dist/index.js",
     "dev": "npm run build && npm start",
     "clean": "node -e \"['dist','coverage'].forEach(d=>require('fs').rmSync(d,{recursive:true,force:true}))\"",
-    "test": "vitest run --exclude src/cdn/edn-test-vectors.test.ts --exclude src/cdn/edn-abnf-vectors.test.ts",
+    "test": "vitest run --exclude src/cdn/edn-test-vectors.test.ts --exclude src/cdn/edn-abnf-vectors.test.ts --exclude src/cddl/cddl-corpus.test.ts --exclude src/cddl/cddl-validation-vectors.test.ts --exclude site/src/playground.browser.test.ts",
     "test:exports": "npm run build && node scripts/check-package-exports.mjs",
-    "test:node": "vitest run --exclude src/cdn/edn-test-vectors.test.ts --exclude src/cdn/edn-abnf-vectors.test.ts",
+    "test:node": "vitest run --exclude src/cdn/edn-test-vectors.test.ts --exclude src/cdn/edn-abnf-vectors.test.ts --exclude src/cddl/cddl-corpus.test.ts --exclude src/cddl/cddl-validation-vectors.test.ts --exclude site/src/playground.browser.test.ts",
     "test:edn-vectors": "vitest run src/cdn/edn-test-vectors.test.ts",
     "test:edn-abnf": "vitest run src/cdn/edn-abnf-vectors.test.ts",
+    "test:cddl-corpus": "vitest run src/cddl/cddl-corpus.test.ts",
+    "test:cddl-vectors": "vitest run src/cddl/cddl-validation-vectors.test.ts",
     "test:chromium": "cross-env BROWSER=chromium vitest run --config vitest.browser.config.ts",
     "test:firefox": "cross-env BROWSER=firefox vitest run --config vitest.browser.config.ts",
     "test:webkit": "cross-env BROWSER=webkit vitest run --config vitest.browser.config.ts",
@@ -99,19 +114,21 @@
     "site:clean": "npm run --workspace site clean",
     "site:dev": "npm run build && npm run --workspace site dev",
     "site:build": "npm run build && npm run --workspace site build",
-    "site:preview": "npm run site:build && npm run --workspace site preview"
+    "site:preview": "npm run site:build && npm run --workspace site preview",
+    "site:test": "npm run build && npm run --workspace site test"
   },
   "devDependencies": {
-    "@types/node": "^24.13.2",
+    "@cbortech/hash-extension": "^0.2.3",
+    "@types/node": "^24.13.3",
     "@vitest/browser": "^4.1.10",
     "@vitest/browser-playwright": "^4.1.10",
     "@vitest/coverage-v8": "^4.1.10",
     "@vitest/ui": "^4.1.10",
     "cross-env": "^10.1.0",
     "playwright": "^1.61.1",
-    "prettier": "^3.9.4",
+    "prettier": "^3.9.5",
     "typescript": "^5.9.3",
-    "vite": "^8.1.3",
+    "vite": "^8.1.5",
     "vite-plugin-dts": "^4.5.4",
     "vitest": "^4.1.10"
   }

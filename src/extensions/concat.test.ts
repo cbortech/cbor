@@ -159,6 +159,18 @@ describe('t1 / b1 — round-trip and errors', () => {
     );
   });
 
+  test('toCDN preserves multi-line source under indent', () => {
+    expect(parseCDN('t1<<\n  "a",\n  "b"\n>>').toCDN({ indent: 2 })).toBe(
+      't1<<\n  "a",\n  "b"\n>>'
+    );
+  });
+
+  test('single-line output falls back when the source spans multiple lines', () => {
+    expect(parseCDN('t1<<\n  "a",\n  "b"\n>>').toCDN()).toBe('"ab"');
+    // Single-line source spellings are still kept verbatim.
+    expect(parseCDN('t1<<"a", "b">>').toCDN()).toBe('t1<<"a", "b">>');
+  });
+
   test('appStrings: false serializes the resolved value', () => {
     expect(
       parseCDN('t1<<"Hello ", "world">>').toCDN({ appStrings: false })

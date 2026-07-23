@@ -11,7 +11,7 @@
 
 import type { CborExtension } from './types';
 import type { CborItem } from '../ast/CborItem';
-import type { FromCBOROptions } from '../types';
+import type { DecodeWarning, FromCBOROptions } from '../types';
 import { CborByteString } from '../ast/CborByteString';
 import { CborEmbeddedCBOR } from '../ast/CborEmbeddedCBOR';
 import { CborTag } from '../ast/CborTag';
@@ -29,8 +29,13 @@ const cbordata: CborExtension = {
   ): CborItem | undefined {
     if (tag !== TAG_CBOR_DATA) return undefined;
     if (!(value instanceof CborByteString)) return undefined;
-    // Forward strict/onWarning/silent/builtinExtensions into the inner decode,
-    // but reset offset and allowTrailing since the embedded bytes start at 0.
+    // The embedded bytes are decoded as a fresh buffer starting at offset 0,
+    // so any offset reported by the inner decode (via onWarning, or a thrown
+    // error) is relative to that buffer and must be translated back to the
+    // payload's actual position in the outer input before it reaches callers.
+    const payloadStart = (value.end ?? value.value.length) - value.value.length;
+    // Forward strict/silent/builtinExtensions into the inner decode, but
+    // reset offset and allowTrailing since the embedded bytes start at 0.
     // Forwarding builtinExtensions matters for the allowlist story: a
     // disabled built-in (e.g. dt via builtinExtensions: false) must not
     // re-enable itself for tags found inside embedded CBOR.
@@ -39,7 +44,10 @@ const cbordata: CborExtension = {
           extensions: options.extensions,
           builtinExtensions: options.builtinExtensions,
           strict: options.strict,
-          onWarning: options.onWarning,
+          onWarning: options.onWarning
+            ? (w: DecodeWarning) =>
+                options.onWarning!({ ...w, offset: w.offset + payloadStart })
+            : undefined,
           silent: options.silent,
         }
       : undefined;
@@ -54,7 +62,21 @@ const cbordata: CborExtension = {
         // In strict mode, propagate inner violations to the outer decode.
         throw e;
       }
-      // In non-strict mode, fall back to a plain CborTag.
+      // In non-strict mode, fall back to a plain CborTag, but still surface
+      // the violation via onWarning — otherwise callers that rely on it to
+      // detect problems (e.g. CBOR.validate()) would see no signal at all
+      // for tag 24 content that isn't valid CBOR.
+      const message = `tag 24 content is not valid CBOR: ${
+        e instanceof Error ? e.message : String(e)
+      }`;
+      const warning: DecodeWarning = { message, offset: payloadStart };
+      if (options?.onWarning) {
+        options.onWarning(warning);
+      } else if (!options?.silent) {
+        console.warn(
+          `CBOR strict violation at offset ${warning.offset}: ${message}`
+        );
+      }
       return undefined;
     }
   },

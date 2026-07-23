@@ -39,4 +39,20 @@ assert.equal('Tokenizer' in cdn, false);
 const cdnCjs = require('@cbortech/cbor/cdn');
 assert.equal(typeof cdnCjs.tokenizeLenient, 'function');
 
+assert.equal(existsSync('dist/cddl/index.d.ts'), true);
+
+const cddl = await import('@cbortech/cbor/cddl');
+assert.equal(typeof cddl.CDDL, 'function');
+assert.equal(typeof cddl.CDDL.compile, 'function');
+assert.equal(typeof cddl.CDDL.compile('t = uint').validate, 'function');
+assert.equal(cddl.CDDL.compile('t = uint').validate('7').valid, true);
+assert.equal(typeof cddl.tokenize, 'function');
+assert.equal(typeof cddl.tokenizeLenient, 'function');
+assert.equal(typeof cddl.CddlSyntaxError, 'function');
+assert.equal(typeof cddl.CddlSemanticError, 'function');
+assert.equal('CddlTokenizer' in cddl, false);
+
+const cddlCjs = require('@cbortech/cbor/cddl');
+assert.equal(typeof cddlCjs.CDDL.compile, 'function');
+
 console.log('package exports ok');

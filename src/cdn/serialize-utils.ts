@@ -15,7 +15,9 @@ export function resolveIndent(
 ): string | null {
   const indent = options?.indent;
   if (indent === undefined) return null;
-  return typeof indent === 'number' ? ' '.repeat(indent) : indent;
+  const indentStr = typeof indent === 'number' ? ' '.repeat(indent) : indent;
+  // `0` / `''` disable pretty-printing entirely (like `JSON.stringify`).
+  return indentStr === '' ? null : indentStr;
 }
 
 /** Build the indent prefix for a given depth. */
@@ -53,9 +55,12 @@ export function hasPreservedComments(item: Commented): boolean {
 }
 
 export function hasContainerLayoutComments(item: Commented): boolean {
-  return Boolean(
-    item.comments?.trailing?.length || item.comments?.dangling?.length
-  );
+  // Only dangling comments force the container itself onto multiple lines —
+  // they live inside the brackets on their own line. A trailing comment on
+  // the container is appended after the closing bracket by the caller (root
+  // `toCDN()` or the parent's `entryTrailing`), so it never needs the body
+  // to break, and single/flat rendering stays available.
+  return Boolean(item.comments?.dangling?.length);
 }
 
 /**
@@ -169,8 +174,9 @@ export function resolveSeparators(
  * Shared CDN serialization for bracketed containers (CborArray / CborMap /
  * indefinite-length string chunks `(_ ...)`):
  * encoding-indicator / `_` prefix resolution, single-line vs multi-line
- * selection (comments force multi-line), separators, and per-entry
- * leading/trailing plus container dangling comments.
+ * selection, separators, and per-entry leading/trailing plus container
+ * dangling comments. Single-line output (no `indent`) always strips
+ * comments — line comments can only be terminated by a newline.
  *
  * Entries are accessed through per-index callbacks (not materialised entry
  * objects) so the common no-comments path allocates nothing per entry.
@@ -204,14 +210,14 @@ export function serializeContainer(p: {
   ) => string;
 }): string {
   const { options, depth, openChar, closeChar, count } = p;
-  let indentStr = resolveIndent(options);
+  const indentStr = resolveIndent(options);
   const preserveComments = options?.preserveComments;
   const commentStyle =
     typeof preserveComments === 'string' ? preserveComments : undefined;
   const hasComments =
+    indentStr !== null &&
     preserveComments &&
     (hasContainerLayoutComments(p.node) || p.hasEntryComments());
-  if (indentStr === null && hasComments) indentStr = '  ';
   const { inlineSep, multilineSep, trailSep, colSep } = resolveSeparators(
     options,
     indentStr === null

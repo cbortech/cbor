@@ -1,6 +1,7 @@
 import type { CborItem } from './ast/CborItem';
 import type {
   CBOROptions,
+  DecodeWarning,
   FromCBOROptions,
   FromCBORSeqOptions,
   FromCDNOptions,
@@ -12,16 +13,85 @@ import type {
   ToCDNOptions,
   ToHexDumpOptions,
   ToJSOptions,
+  ValidateOptions,
+  ValidateResult,
 } from './types';
 import { CBOR_OMIT } from './types';
 import { decodeCBOR } from './cbor/decoder';
 import { parseCDN } from './cdn/parser';
 import { CdnSyntaxError } from './cdn/errors';
+import { CddlMismatchError } from './cddl/errors';
+import { compile as compileCDDL, CddlSchema } from './cddl/schema';
+import type { ValidateOptions as CddlValidateOptions } from './cddl/validator';
+import type { CddlValidationError, CddlValidationWarning } from './cddl/errors';
 import { dt_as_Date as _dt_as_Date } from './extensions/dt';
 import { fromJS as _fromJS, _applyReplacer } from './js/fromJS';
 import { MapEntries as _MapEntries } from './mapEntries';
 import { Simple as _Simple } from './simple';
 import { CBOR_TAG, Tag as _Tag } from './tag';
+
+/**
+ * Cache for schemas compiled from CDDL source text passed as the `cddl`
+ * option, so repeated per-call use of the same string does not recompile.
+ * Bounded: the oldest entry is evicted once the cap is reached.
+ */
+const compiledCddlCache = new Map<string, CddlSchema>();
+const COMPILED_CDDL_CACHE_MAX = 64;
+
+/**
+ * Resolve the `cddl` option to a compiled schema: pass compiled schemas
+ * through, compile (and cache) CDDL source text.
+ */
+function resolveCddl(
+  cddl: CddlSchema | string | undefined
+): CddlSchema | undefined {
+  if (typeof cddl !== 'string') return cddl;
+  let schema = compiledCddlCache.get(cddl);
+  if (!schema) {
+    schema = compileCDDL(cddl);
+    if (compiledCddlCache.size >= COMPILED_CDDL_CACHE_MAX) {
+      compiledCddlCache.delete(compiledCddlCache.keys().next().value!);
+    }
+    compiledCddlCache.set(cddl, schema);
+  }
+  return schema;
+}
+
+/**
+ * Validate an item against a resolved schema (if any) and throw
+ * {@link CddlMismatchError} on mismatch.
+ */
+function assertCddl(
+  item: CborItem,
+  schema: CddlSchema | undefined,
+  validationOptions?: CddlValidateOptions
+): CborItem {
+  if (schema) {
+    const result = schema.validate(item, validationOptions);
+    if (!result.valid) {
+      throw new CddlMismatchError(result.errors, result.warnings);
+    }
+  }
+  return item;
+}
+
+/**
+ * When a CDDL schema is supplied via the `cddl` option, validate the item
+ * against it and throw {@link CddlMismatchError} on mismatch.
+ */
+function checkCddl(
+  item: CborItem,
+  options?: {
+    cddl?: CddlSchema | string;
+    cddlValidationOptions?: CddlValidateOptions;
+  }
+): CborItem {
+  return assertCddl(
+    item,
+    resolveCddl(options?.cddl),
+    options?.cddlValidationOptions
+  );
+}
 
 /**
  * Main facade class.
@@ -199,6 +269,17 @@ export class CBOR {
     return CBOR.fromHex(text, this.#merge(options));
   }
 
+  /**
+   * Check CBOR / CDN / hex dump input for well-formedness and validity,
+   * without throwing.
+   */
+  validate(
+    input: ArrayBufferView | ArrayBufferLike | string,
+    options?: ValidateOptions
+  ): ValidateResult {
+    return CBOR.validate(input, this.#merge(options));
+  }
+
   /** @deprecated Use `decompile()` instead. */
   cborToCborEdn(
     input: ArrayBufferView | ArrayBufferLike,
@@ -305,12 +386,12 @@ export class CBOR {
     input: ArrayBufferView | ArrayBufferLike,
     options?: FromCBOROptions
   ): CborItem {
-    return decodeCBOR(input, options);
+    return checkCddl(decodeCBOR(input, options), options);
   }
 
   /** Parse a CDN text string into an AST node. */
   static fromCDN(text: string, options?: FromCDNOptions): CborItem {
-    return parseCDN(text, options);
+    return checkCddl(parseCDN(text, options), options);
   }
 
   /**
@@ -350,6 +431,9 @@ export class CBOR {
     input: ArrayBufferView | ArrayBufferLike,
     options?: FromCBORSeqOptions
   ): Generator<CborItem> {
+    // Resolve up front so invalid CDDL source text throws even when the
+    // sequence turns out to be empty.
+    const cddlSchema = resolveCddl(options?.cddl);
     const bytes =
       input instanceof ArrayBuffer ||
       (typeof SharedArrayBuffer !== 'undefined' &&
@@ -367,7 +451,7 @@ export class CBOR {
         offset,
         allowTrailing: true,
       });
-      yield item;
+      yield assertCddl(item, cddlSchema, options?.cddlValidationOptions);
       offset = item.end!;
     }
   }
@@ -384,6 +468,9 @@ export class CBOR {
     text: string,
     options?: FromCDNSeqOptions
   ): Generator<CborItem> {
+    // Resolve up front so invalid CDDL source text throws even when the
+    // sequence turns out to be empty.
+    const cddlSchema = resolveCddl(options?.cddl);
     const preserve = !!options?.preserveComments;
     let offset = 0;
     let isFirst = true;
@@ -444,7 +531,7 @@ export class CBOR {
         );
         break;
       }
-      yield item;
+      yield assertCddl(item, cddlSchema, options?.cddlValidationOptions);
       offset = item.end!;
       isFirst = false;
     }
@@ -452,7 +539,7 @@ export class CBOR {
 
   /** Convert a JavaScript value into an AST node. */
   static fromJS(value: unknown, options?: FromJSOptions): CborItem {
-    return _fromJS(value, options);
+    return checkCddl(_fromJS(value, options), options);
   }
 
   /**
@@ -482,7 +569,7 @@ export class CBOR {
         );
       }
     }
-    return decodeCBOR(new Uint8Array(bytes), options);
+    return checkCddl(decodeCBOR(new Uint8Array(bytes), options), options);
   }
 
   // ─── Shortcut API ───────────────────────────────────────────────────────────
@@ -589,6 +676,128 @@ export class CBOR {
       off += b.length;
     }
     return result;
+  }
+
+  /**
+   * Check CBOR / CDN / hex dump input for well-formedness and validity,
+   * without throwing.
+   *
+   * Decodes/parses the input as a sequence (CBOR Sequence per RFC 8742, or a
+   * CDN Sequence) in non-strict mode: recoverable violations are collected
+   * into `warnings` instead of stopping decoding, while malformed input
+   * (e.g. truncated data, hard syntax errors — including a CDN Sequence
+   * abandoned after a hard syntax error) is reported via `error`.
+   * Informational hints about optional extensions that aren't registered
+   * (`ParseWarning.hint`) are not treated as violations; they are collected
+   * separately into `hints`.
+   *
+   * @example
+   * const result = CBOR.validate(bytes);
+   * if (!result.valid) {
+   *   if (result.error) console.error(`invalid: ${result.error.message}`);
+   *   for (const w of result.warnings) console.warn(w.message);
+   * }
+   *
+   * @example
+   * // CDN text input
+   * CBOR.validate('{"a": 1}', { type: 'cdn' });
+   *
+   * @example
+   * // Schema validation with a compiled CDDL schema
+   * import { CDDL } from '@cbortech/cbor/cddl';
+   * const schema = CDDL.compile('person = { name: tstr, ? age: uint }');
+   * const result = CBOR.validate('{"name": "kudo"}', { type: 'cdn', cddl: schema });
+   * result.valid;      // true
+   * result.cddlErrors; // []
+   */
+  static validate(
+    input: ArrayBufferView | ArrayBufferLike | string,
+    options?: ValidateOptions
+  ): ValidateResult {
+    const warnings: (DecodeWarning | ParseWarning)[] = [];
+    const hints: ParseWarning[] = [];
+    let fatal: ParseWarning | undefined;
+    // `cddl` is deliberately not forwarded to the Seq generators: a mismatch
+    // must be collected below, not thrown from inside the generator.
+    const seqOptions = {
+      strict: false,
+      extensions: options?.extensions,
+      builtinExtensions: options?.builtinExtensions,
+      onWarning: (w: DecodeWarning | ParseWarning) => {
+        if ('hint' in w && w.hint) {
+          hints.push(w);
+          return;
+        }
+        if ('fatal' in w && w.fatal) {
+          fatal = w;
+          return;
+        }
+        warnings.push(w);
+      },
+    };
+    const schema = resolveCddl(options?.cddl);
+    const cddlErrors: CddlValidationError[] = [];
+    const cddlWarnings: CddlValidationWarning[] = [];
+    const checkItem = (item: CborItem) => {
+      if (!schema) return;
+      const result = schema.validate(item, options?.cddlValidationOptions);
+      cddlErrors.push(...result.errors);
+      if (result.warnings) cddlWarnings.push(...result.warnings);
+    };
+    const cddlFields = schema ? { cddlErrors, cddlWarnings } : {};
+    let count = 0;
+    try {
+      const type = options?.type ?? 'cbor';
+      if (type === 'cdn') {
+        const cdnOptions: FromCDNSeqOptions = {
+          ...seqOptions,
+          unresolvedExtension: options?.unresolvedExtension,
+        };
+        for (const item of CBOR.fromCDNSeq(input as string, cdnOptions)) {
+          count++;
+          checkItem(item);
+        }
+      } else if (type === 'hex') {
+        for (const item of CBOR.fromHexDumpSeq(input as string, seqOptions)) {
+          count++;
+          checkItem(item);
+        }
+      } else {
+        for (const item of CBOR.fromCBORSeq(
+          input as ArrayBufferView | ArrayBufferLike,
+          seqOptions
+        )) {
+          count++;
+          checkItem(item);
+        }
+      }
+    } catch (err) {
+      return {
+        valid: false,
+        count,
+        warnings,
+        hints,
+        error: err instanceof Error ? err : new Error(String(err)),
+        ...cddlFields,
+      };
+    }
+    if (fatal) {
+      // Prefer the original syntax error (position fields intact); the
+      // unterminated-comment fatals are emitted without one, so rebuild a
+      // CdnSyntaxError carrying at least the warning's offset.
+      const error =
+        fatal.cause instanceof Error
+          ? fatal.cause
+          : new CdnSyntaxError(fatal.message, { offset: fatal.offset });
+      return { valid: false, count, warnings, hints, error, ...cddlFields };
+    }
+    return {
+      valid: warnings.length === 0 && cddlErrors.length === 0,
+      count,
+      warnings,
+      hints,
+      ...cddlFields,
+    };
   }
 
   /**
@@ -731,14 +940,20 @@ export class CBOR {
       if (replaced === undefined || replaced === CBOR_OMIT)
         return undefined as unknown as string;
       const { replacer: _r, ...restFromJS } = opts;
-      return _fromJS(
-        replaced,
-        Object.keys(restFromJS).length > 0
-          ? (restFromJS as FromJSOptions)
-          : undefined
+      return checkCddl(
+        _fromJS(
+          replaced,
+          Object.keys(restFromJS).length > 0
+            ? (restFromJS as FromJSOptions)
+            : undefined
+        ),
+        opts
       ).toCDN(opts);
     }
-    return _fromJS(value, opts as FromJSOptions | undefined).toCDN(opts);
+    return checkCddl(
+      _fromJS(value, opts as FromJSOptions | undefined),
+      opts
+    ).toCDN(opts);
   }
 
   /** Normalize a CDN text string by parsing and re-serializing it. */
@@ -823,6 +1038,7 @@ function emitCDNSeqWarning(
   const offset = cause?.offset ?? fallbackOffset;
   const w: ParseWarning = { message: msg, offset };
   if (fatal) w.fatal = true;
+  if (cause) w.cause = cause;
   if (cause?.offset !== undefined) {
     w.line = cause.line;
     w.column = cause.column;

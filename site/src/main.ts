@@ -11,7 +11,8 @@ import { createEditor, selectRange, setEditorText } from './editor/editor';
 import { HexView } from './hexview/hexview';
 import { rangeAtByte, rangeAtChar } from './mapping/lockstep';
 import { inspectJS } from './js-preview';
-import { DEFAULT_SAMPLE } from './samples';
+import { DEFAULT_SAMPLE, SAMPLES } from './samples';
+import { initCddlPane, type CddlPane } from './cddl-pane';
 import {
   type BytesMode,
   copyWithFeedback,
@@ -19,11 +20,14 @@ import {
   encodeShareHash,
   getEnabledExtensions,
   initExtensionsPopover,
+  initFileDrop,
   initFormatPopover,
   initModeTabs,
   initSamples,
   initTheme,
+  readCddlOpenParam,
   readFormatOptions,
+  writeCddlOpenParam,
 } from './ui/toolbar';
 
 type Debounced<A extends unknown[]> = ((...args: A) => void) & {
@@ -144,6 +148,7 @@ const update = (text: string): void => {
   conversion = convertCdn(text);
   renderBytesPane();
   updateCopyBytesBtn();
+  cddlPane?.revalidate(conversion);
 };
 
 const debouncedUpdate = debounce(update, 200);
@@ -157,8 +162,10 @@ const onCursorMoved = debounce((pos: number): void => {
   );
 }, 100);
 
-const initialText = decodeShareHash(location.hash) ?? DEFAULT_SAMPLE;
+const shared = decodeShareHash(location.hash);
+const initialText = shared?.cdn ?? DEFAULT_SAMPLE;
 let resetSamples = (): void => {};
+let cddlPane: CddlPane | undefined;
 
 const editor = createEditor(el('editor'), initialText, {
   onDocChanged(text) {
@@ -180,68 +187,51 @@ function applyHexResult(cdn: string, warnings: string[]): void {
   _programmaticEdit = false;
 }
 
-function initFileDrop(target: HTMLElement, onFile: (file: File) => void): void {
-  const hasFiles = (event: DragEvent): boolean =>
-    Array.from(event.dataTransfer?.types ?? []).includes('Files');
-
-  target.addEventListener('dragover', (event) => {
-    if (!hasFiles(event)) return;
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
-    target.classList.add('is-file-dragover');
-  });
-  target.addEventListener('dragleave', (event) => {
-    const next = event.relatedTarget;
-    if (!(next instanceof Node) || !target.contains(next)) {
-      target.classList.remove('is-file-dragover');
-    }
-  });
-  target.addEventListener(
-    'drop',
-    (event) => {
-      if (!hasFiles(event)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      target.classList.remove('is-file-dragover');
-      const file = event.dataTransfer?.files[0];
-      if (!file) return;
-      onFile(file);
-    },
-    true
-  );
-}
-
 // ── Pane resize ──────────────────────────────────────────────────────────────
 
-const divider = el<HTMLDivElement>('pane-divider');
-const playgroundEl = divider.parentElement!;
+const playgroundEl = document.querySelector<HTMLElement>('.playground')!;
+const cddlPaneEl = playgroundEl.querySelector<HTMLElement>('.pane-cddl')!;
 const cdnPane = playgroundEl.querySelector<HTMLElement>('.pane-cdn')!;
 const bytesPane = playgroundEl.querySelector<HTMLElement>('.pane-bytes')!;
 
-divider.addEventListener('pointerdown', (e) => {
-  e.preventDefault();
-  divider.setPointerCapture(e.pointerId);
-  divider.classList.add('is-dragging');
-  const startX = e.clientX;
-  const startCdn = cdnPane.getBoundingClientRect().width;
-  const startBytes = bytesPane.getBoundingClientRect().width;
-  const total = startCdn + startBytes;
+/** Make a divider resize its two adjacent panes by dragging. */
+function initPaneDivider(
+  divider: HTMLElement,
+  left: HTMLElement,
+  right: HTMLElement
+): void {
+  divider.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    divider.setPointerCapture(e.pointerId);
+    divider.classList.add('is-dragging');
+    const startX = e.clientX;
+    const startLeft = left.getBoundingClientRect().width;
+    const startRight = right.getBoundingClientRect().width;
+    const total = startLeft + startRight;
+    // The two flex weights being redistributed between the two panes.
+    const leftFlex = parseFloat(left.style.flex) || 1;
+    const rightFlex = parseFloat(right.style.flex) || 1;
+    const flexTotal = leftFlex + rightFlex;
 
-  const onMove = (ev: PointerEvent) => {
-    const delta = ev.clientX - startX;
-    const newCdn = Math.max(200, Math.min(total - 200, startCdn + delta));
-    const ratio = newCdn / total;
-    cdnPane.style.flex = `${ratio} 1 0`;
-    bytesPane.style.flex = `${1 - ratio} 1 0`;
-  };
-  const onUp = () => {
-    divider.classList.remove('is-dragging');
-    divider.removeEventListener('pointermove', onMove);
-    divider.removeEventListener('pointerup', onUp);
-  };
-  divider.addEventListener('pointermove', onMove);
-  divider.addEventListener('pointerup', onUp);
-});
+    const onMove = (ev: PointerEvent) => {
+      const delta = ev.clientX - startX;
+      const newLeft = Math.max(200, Math.min(total - 200, startLeft + delta));
+      const ratio = newLeft / total;
+      left.style.flex = `${flexTotal * ratio} 1 0`;
+      right.style.flex = `${flexTotal * (1 - ratio)} 1 0`;
+    };
+    const onUp = () => {
+      divider.classList.remove('is-dragging');
+      divider.removeEventListener('pointermove', onMove);
+      divider.removeEventListener('pointerup', onUp);
+    };
+    divider.addEventListener('pointermove', onMove);
+    divider.addEventListener('pointerup', onUp);
+  });
+}
+
+initPaneDivider(el('pane-divider'), cdnPane, bytesPane);
+initPaneDivider(el('cddl-divider'), cddlPaneEl, cdnPane);
 
 // ── Bytes edit mode: hex / annotated dump → CDN ──────────────────────────────
 
@@ -292,11 +282,42 @@ initExtensionsPopover(() => {
   update(editor.state.doc.toString());
   forceLinting(editor);
 });
-resetSamples = initSamples((cdn) => setEditorText(editor, cdn));
+resetSamples = initSamples((sample) => {
+  // A sample is a CDN/CDDL pair: load both. The schema compiles right
+  // away, but validation only runs while the CDDL pane is open. Convert
+  // immediately (skipping the editor debounce) so the pane never shows
+  // the previous sample's data validated against the new schema.
+  cddlPane?.setText(sample.cddl);
+  setEditorText(editor, sample.cdn);
+  debouncedUpdate.cancel();
+  update(sample.cdn);
+});
 initModeTabs((next) => {
   mode = next;
   renderBytesPane();
   updateCopyBytesBtn();
+  // Re-render rebuilds the hex rows, dropping any validation highlight.
+  cddlPane?.revalidate(conversion);
+});
+
+// ── CDDL pane ────────────────────────────────────────────────────────────────
+
+cddlPane = initCddlPane({
+  cdnEditor: editor,
+  getConversion: () => conversion,
+  hexHighlight: (range) => hexView.highlightValidation(range),
+  // Fresh visit: the default sample's schema, matching the default CDN.
+  // Share link: the shared schema, or — since a schema matching foreign
+  // CDN cannot be guessed — an empty editor.
+  initialCddl: shared ? (shared.cddl ?? '') : SAMPLES[0]!.cddl,
+  // `?cddl=1`/`?cddl=0` (etc.) explicitly overrides whether the pane opens;
+  // absent that, fall back to the share-hash heuristic (schema → open).
+  initiallyOpen:
+    readCddlOpenParam(location.search) ?? shared?.cddl !== undefined,
+  // A loaded sample is a CDN/CDDL pair; importing a foreign schema makes
+  // the samples selection stale, same as importing CDN or CBOR.
+  onImported: () => resetSamples(),
+  onToggle: writeCddlOpenParam,
 });
 
 el('format-btn').addEventListener('click', () => {
@@ -438,7 +459,10 @@ copyBytesBtn.addEventListener('click', (e) => {
 });
 
 el('share-btn').addEventListener('click', (e) => {
-  const hash = encodeShareHash(editor.state.doc.toString());
+  const hash = encodeShareHash({
+    cdn: editor.state.doc.toString(),
+    ...(cddlPane?.isOpen() ? { cddl: cddlPane.getText() } : {}),
+  });
   history.replaceState(null, '', hash);
   void copyWithFeedback(e.currentTarget as HTMLElement, location.href);
 });

@@ -364,10 +364,31 @@ describe('toCDN() — inlineLeafContainers', () => {
     );
   });
 
-  test('preserved comments force multi-line', () => {
+  test('entry comments force multi-line', () => {
+    const node = parseCDN('[1, 2 # trailing\n]', { preserveComments: true });
+    expect(toCDN(node, { ...opts, preserveComments: true })).toBe(
+      '[\n  1,\n  2 # trailing\n]'
+    );
+  });
+
+  test('dangling comments force multi-line', () => {
+    const node = parseCDN('[1, 2\n# dangling\n]', { preserveComments: true });
+    expect(toCDN(node, { ...opts, preserveComments: true })).toBe(
+      '[\n  1,\n  2\n  # dangling\n]'
+    );
+  });
+
+  test('container-level trailing comment does not force multi-line', () => {
     const node = parseCDN('[1, 2] # trailing', { preserveComments: true });
     expect(toCDN(node, { ...opts, preserveComments: true })).toBe(
-      '[\n  1,\n  2\n] # trailing'
+      '[1, 2] # trailing'
+    );
+
+    const mapNode = parseCDN('{ "a": 1, "b": 2 } // comment', {
+      preserveComments: true,
+    });
+    expect(toCDN(mapNode, { ...opts, preserveComments: 'cdn-style' })).toBe(
+      '{"a": 1, "b": 2} # comment'
     );
   });
 

@@ -18,6 +18,15 @@ export const CBOR_OMIT: unique symbol = Symbol('cbor.omit');
 export type { CborExtension } from './extensions/types';
 import type { CborExtension } from './extensions/types';
 
+// ─── CDDL ─────────────────────────────────────────────────────────────────────
+// Type-only imports; note however that supporting CDDL source text as the
+// `cddl` option makes the facade (cbor.ts) import the compiler at runtime,
+// so the main entry loads the CDDL chunks as well. Accepting only compiled
+// schemas would keep the compiler exclusive to the `/cddl` subpath.
+import type { CddlSchema } from './cddl/schema';
+import type { ValidateOptions as CddlValidateOptions } from './cddl/validator';
+import type { CddlValidationError, CddlValidationWarning } from './cddl/errors';
+
 // ─── Options ──────────────────────────────────────────────────────────────────
 
 export interface ToHexDumpOptions {
@@ -131,6 +140,22 @@ export interface ParseWarning {
    * fatal warnings as errors.
    */
   fatal?: boolean;
+
+  /**
+   * `true` when this entry is an informational hint (e.g. an app-string
+   * prefix matches a known optional extension that isn't registered) rather
+   * than a validity violation. Parsing is unaffected either way, but tooling
+   * that treats `onWarning` calls as failures (see `CBOR.validate()`) should
+   * not count these against validity.
+   */
+  hint?: boolean;
+
+  /**
+   * For a `fatal` warning built from a caught syntax error (see
+   * `CdnSyntaxError`), the original error object with its position fields
+   * intact. `CBOR.validate()` promotes this into `ValidateResult.error`.
+   */
+  cause?: Error;
 }
 
 export interface FromCBOROptions {
@@ -226,6 +251,31 @@ export interface FromCBOROptions {
    * @default false
    */
   silent?: boolean;
+
+  /**
+   * CDDL schema to validate decoded items against: either a compiled schema
+   * (`CDDL.compile()` from `@cbortech/cbor/cddl`) or CDDL source text.
+   * Source text is compiled on first use with default compile options and
+   * cached, so passing the same string repeatedly does not recompile; pass a
+   * compiled schema to control `CompileOptions` yourself. Invalid CDDL text
+   * throws `CddlSyntaxError` / `CddlSemanticError` at the call site.
+   *
+   * Each decoded item is validated after decoding, against the schema's
+   * root rule by default (or `cddlValidationOptions.rule`, if set); a
+   * mismatch throws {@link CddlMismatchError}. Sequence entry points
+   * (`fromCBORSeq`, `decodeSeq`, …) validate each item of the sequence
+   * individually against that same rule. `CBOR.validate()` collects
+   * mismatches into `ValidateResult.cddlErrors` instead of throwing.
+   */
+  cddl?: CddlSchema | string;
+
+  /**
+   * Options forwarded to the CDDL validator when `cddl` is supplied
+   * (`features` for the `.feature` control operator, `maxDepth`,
+   * `maxSteps`, and `rule` to validate against a rule other than the
+   * schema's root). Ignored without `cddl`.
+   */
+  cddlValidationOptions?: CddlValidateOptions;
 }
 
 /**
@@ -268,6 +318,18 @@ export interface FromHexDumpOptions {
    * @default false
    */
   silent?: boolean;
+
+  /**
+   * Compiled CDDL schema to validate decoded items against.
+   * Mirrors `FromCBOROptions.cddl`.
+   */
+  cddl?: CddlSchema | string;
+
+  /**
+   * Options forwarded to the CDDL validator.
+   * Mirrors `FromCBOROptions.cddlValidationOptions`.
+   */
+  cddlValidationOptions?: CddlValidateOptions;
 }
 
 export interface FromCDNOptions {
@@ -411,6 +473,18 @@ export interface FromCDNOptions {
    * @default false
    */
   silent?: boolean;
+
+  /**
+   * Compiled CDDL schema to validate parsed items against.
+   * Mirrors `FromCBOROptions.cddl`.
+   */
+  cddl?: CddlSchema | string;
+
+  /**
+   * Options forwarded to the CDDL validator.
+   * Mirrors `FromCBOROptions.cddlValidationOptions`.
+   */
+  cddlValidationOptions?: CddlValidateOptions;
 }
 
 /**
@@ -478,6 +552,18 @@ export interface FromJSOptions {
    * @default false
    */
   undefinedOmits?: boolean;
+
+  /**
+   * Compiled CDDL schema to validate the constructed item against, before
+   * encoding/serialization. Mirrors `FromCBOROptions.cddl`.
+   */
+  cddl?: CddlSchema | string;
+
+  /**
+   * Options forwarded to the CDDL validator.
+   * Mirrors `FromCBOROptions.cddlValidationOptions`.
+   */
+  cddlValidationOptions?: CddlValidateOptions;
 }
 
 export interface ToCDNOptions {
@@ -486,6 +572,11 @@ export interface ToCDNOptions {
    * - `number`: number of spaces
    * - `string`: literal indent string (e.g. `'\t'`)
    * - omit for single-line output
+   *
+   * Like `JSON.stringify`, `0` and `''` are equivalent to omitting the
+   * option: the output is a single line. Single-line output is guaranteed
+   * to contain no newlines; layout-dependent options (`preserveComments`,
+   * `splitCdn`, `splitNewline`, `preserveConcatenation`) are ignored.
    */
   indent?: number | string;
 
@@ -501,8 +592,9 @@ export interface ToCDNOptions {
    *   kept as-is.
    * - `false` / omitted: strip all comments from the output.
    *
-   * When enabled for containers, comment-bearing arrays/maps are emitted in
-   * multi-line form even if `indent` is omitted.
+   * Only effective when `indent` enables pretty-printing: single-line
+   * output strips all comments, since line comments (`#`, `//`) can only
+   * be terminated by a newline.
    *
    * @default false
    */
@@ -522,6 +614,10 @@ export interface ToCDNOptions {
    * When enabled, this takes precedence over `bstrEncoding` and `sqstr` for
    * byte strings that carry original EDN source text.
    *
+   * In single-line output (no `indent`), an original spelling that spans
+   * multiple lines (e.g. a byte string literal with interior line comments)
+   * falls back to normal serialization; single-line spellings are kept.
+   *
    * @default false
    */
   preserveByteString?: boolean;
@@ -538,6 +634,9 @@ export interface ToCDNOptions {
    *
    * Raw byte string forms (e.g. `` h`...` ``) are covered by
    * `preserveByteString`, not this option.
+   *
+   * In single-line output (no `indent`), a spelling that spans multiple
+   * lines falls back to normal escaping; single-line spellings are kept.
    *
    * @default false
    */
@@ -601,7 +700,7 @@ export interface ToCDNOptions {
 
   /**
    * Split long text strings using CDN string concatenation syntax (`"a" + "b"`).
-   * Only effective when `indent` is specified.
+   * Only effective when `indent` enables pretty-printing.
    *
    * - `'newline'`: split at newline characters
    * - `'cdn'`: split according to CDN structure when the string content
@@ -660,7 +759,8 @@ export interface ToCDNOptions {
    * text strings whose content parses as CDN, while `splitNewline` combines
    * with this option by further splitting the preserved parts at newline
    * characters. Has no effect on values that did not originate from a CDN
-   * concatenation.
+   * concatenation, and only takes effect when `indent` enables
+   * pretty-printing (single-line output joins the parts into one literal).
    *
    * @default false
    */
@@ -720,6 +820,117 @@ export interface CborComments {
   leading?: CborComment[];
   trailing?: CborComment[];
   dangling?: CborComment[];
+}
+
+/**
+ * Options for `CBOR.validate()`.
+ */
+export interface ValidateOptions {
+  /**
+   * Input format.
+   * - `'cbor'`: binary CBOR, decoded as a CBOR Sequence (RFC 8742).
+   * - `'cdn'`: CDN text, parsed as a CDN Sequence.
+   * - `'hex'`: annotated hex dump text, decoded as a CBOR Sequence.
+   * @default 'cbor'
+   */
+  type?: 'cbor' | 'cdn' | 'hex';
+
+  /**
+   * Extension plugins used while decoding/parsing.
+   * Mirrors `FromCBOROptions.extensions` / `FromCDNOptions.extensions`.
+   */
+  extensions?: CborExtension[];
+
+  /**
+   * Override the default set of bundled application-oriented extensions.
+   * Mirrors `FromCBOROptions.builtinExtensions`.
+   */
+  builtinExtensions?: CborExtension[] | false;
+
+  /**
+   * How to handle unrecognised application-extension identifiers.
+   * Only applies when `type` is `'cdn'`; mirrors `FromCDNOptions.unresolvedExtension`.
+   * @default 'cpa999'
+   */
+  unresolvedExtension?: 'cpa999' | 'error';
+
+  /**
+   * CDDL schema to validate each decoded/parsed item against: either a
+   * compiled schema (`CDDL.compile()` from `@cbortech/cbor/cddl`) or CDDL
+   * source text (compiled on first use and cached; mirrors
+   * `FromCBOROptions.cddl`).
+   *
+   * Unlike the throwing entry points, `CBOR.validate()` does not throw on a
+   * mismatch: failures are collected into `ValidateResult.cddlErrors` (and
+   * validator observations into `ValidateResult.cddlWarnings`), and any
+   * mismatch makes `valid` `false`. Each item of a sequence is validated
+   * individually against the schema's root rule by default (or
+   * `cddlValidationOptions.rule`, if set). Note that invalid CDDL source
+   * text itself still throws (`CddlSyntaxError` / `CddlSemanticError`): the
+   * schema is part of the call, not the data being validated.
+   */
+  cddl?: CddlSchema | string;
+
+  /**
+   * Options forwarded to the CDDL validator.
+   * Mirrors `FromCBOROptions.cddlValidationOptions`.
+   */
+  cddlValidationOptions?: CddlValidateOptions;
+}
+
+/**
+ * Result of `CBOR.validate()`.
+ */
+export interface ValidateResult {
+  /**
+   * `true` when every item decoded/parsed without error and without any
+   * warnings. `false` when the input was malformed (see `error`) or
+   * well-formed but in violation of a validity constraint (see `warnings`).
+   */
+  valid: boolean;
+
+  /** Number of items successfully decoded/parsed before any error. */
+  count: number;
+
+  /**
+   * Validity violations encountered while decoding/parsing in non-strict
+   * mode (recoverable — decoding continued after each one). Excludes
+   * informational hints (see `hints`) and the fatal CDN warning that
+   * `error` is built from, if any.
+   */
+  warnings: (DecodeWarning | ParseWarning)[];
+
+  /**
+   * Informational hints (`ParseWarning.hint`) encountered while parsing,
+   * e.g. an app-string prefix that matches a known optional extension which
+   * isn't registered. Hints never affect `valid`; they are collected here so
+   * tooling can still surface them.
+   */
+  hints: ParseWarning[];
+
+  /**
+   * Set when decoding/parsing failed outright: either it threw (e.g.
+   * truncated CBOR data), or — for CDN input — `fromCDNSeq()` abandoned the
+   * rest of the sequence after a hard syntax error (reported internally as a
+   * `fatal` warning, which `validate()` promotes to `error` rather than
+   * including in `warnings`). For a CDN syntax error this is the original
+   * `CdnSyntaxError`, position fields intact.
+   */
+  error?: Error;
+
+  /**
+   * CDDL validation failures, collected per decoded item. Only present when
+   * `ValidateOptions.cddl` was supplied (empty array when every item
+   * matched). Any entry makes `valid` `false`.
+   */
+  cddlErrors?: CddlValidationError[];
+
+  /**
+   * Non-fatal CDDL validator observations (e.g. unsupported control
+   * operators whose constraints were skipped). Only present when
+   * `ValidateOptions.cddl` was supplied. Never affects `valid`.
+   */
+  cddlWarnings?: CddlValidationWarning[];
 }
 
 /** `fromCBORSeq()` の options（`offset`/`allowTrailing` はジェネレータが管理するため除外）。 */

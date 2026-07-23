@@ -55,8 +55,12 @@ export class CborByteString extends CborItem {
   }
 
   _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
+    const indentStr = resolveIndent(options);
     if (
       options?.preserveConcatenation &&
+      // Preserved concatenation is a layout feature; single-line mode joins
+      // the parts into one literal instead.
+      indentStr !== null &&
       this.ednParts !== undefined &&
       this.ednParts.length > 1
     ) {
@@ -71,9 +75,15 @@ export class CborByteString extends CborItem {
           : serializeBytes(part.bytes, encoding, options?.sqstr)
       );
       literals[literals.length - 1] += suffix;
-      return joinConcatParts(literals, resolveIndent(options), _depth);
+      return joinConcatParts(literals, indentStr, _depth);
     }
-    if (options?.preserveByteString && this.ednSource !== undefined) {
+    if (
+      options?.preserveByteString &&
+      this.ednSource !== undefined &&
+      // In single-line mode an original spelling that spans multiple lines
+      // (e.g. a byte string with interior line comments) cannot be re-emitted.
+      (indentStr !== null || !/[\r\n]/.test(this.ednSource))
+    ) {
       // App-string byte strings (e.g. b32'...'_1) embed the EI inside ednSource.
       // Regular byte strings (h'...', b64'...') store EI separately in encodingWidth.
       if (/_[0-3i]$/.test(this.ednSource)) {

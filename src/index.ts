@@ -16,10 +16,18 @@ export type {
   ToJSOptions,
   FromHexDumpOptions,
   ToHexDumpOptions,
+  ValidateOptions,
+  ValidateResult,
 } from './types';
 
 // Structured syntax error thrown by fromCDN/parse
 export { CdnSyntaxError } from './cdn/errors';
+
+// CDDL schema mismatch error thrown by the `cddl` option of the decode/parse
+// entry points. The option accepts CDDL source text or a schema compiled
+// with `CDDL.compile()` from the `@cbortech/cbor/cddl` subpath entry.
+export { CddlMismatchError } from './cddl/errors';
+export type { CddlValidationError, CddlValidationWarning } from './cddl/errors';
 
 // Tag annotation utilities
 export { CBOR_TAG, Null, Tag, Undefined } from './tag';
