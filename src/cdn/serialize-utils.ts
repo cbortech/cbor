@@ -55,9 +55,12 @@ export function hasPreservedComments(item: Commented): boolean {
 }
 
 export function hasContainerLayoutComments(item: Commented): boolean {
-  return Boolean(
-    item.comments?.trailing?.length || item.comments?.dangling?.length
-  );
+  // Only dangling comments force the container itself onto multiple lines —
+  // they live inside the brackets on their own line. A trailing comment on
+  // the container is appended after the closing bracket by the caller (root
+  // `toCDN()` or the parent's `entryTrailing`), so it never needs the body
+  // to break, and single/flat rendering stays available.
+  return Boolean(item.comments?.dangling?.length);
 }
 
 /**
