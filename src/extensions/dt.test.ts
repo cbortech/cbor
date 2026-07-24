@@ -164,6 +164,293 @@ describe('dt — preserveNumberFormat', () => {
   });
 });
 
+describe('dt — preserveAppSequence', () => {
+  // By design, dt/DT regenerate their notation from the resolved value on
+  // every format() call — so <<...>> normally collapses to '...' even
+  // though both spell the same value. preserveAppSequence keeps the
+  // original bracketed spelling instead, without changing the parsed
+  // node's class (CborEpochDtExt* / CborTaggedEpochDtExt).
+
+  test('DT<<...>> keeps its bracketed notation when requested', () => {
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", {
+        preserveAppSequence: true,
+      })
+    ).toBe("DT<<'1969-07-21T02:56:16Z'>>");
+    // Default output normalises to the DT'...' form.
+    expect(CBOR.format("DT<<'1969-07-21T02:56:16Z'>>")).toBe(
+      "DT'1969-07-21T02:56:16Z'"
+    );
+  });
+
+  test('dt<<...>> (integer) keeps its bracketed notation when requested', () => {
+    expect(
+      CBOR.format("dt<<'1969-07-21T02:56:16Z'>>", {
+        preserveAppSequence: true,
+      })
+    ).toBe("dt<<'1969-07-21T02:56:16Z'>>");
+  });
+
+  test('dt<<...>> (float) keeps its bracketed notation when requested', () => {
+    expect(
+      CBOR.format("dt<<'1969-07-21T02:56:16.5Z'>>", {
+        preserveAppSequence: true,
+      })
+    ).toBe("dt<<'1969-07-21T02:56:16.5Z'>>");
+  });
+
+  test('encoding indicator on the >> is kept, and stripped under never', () => {
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'>>_1", {
+        preserveAppSequence: true,
+      })
+    ).toBe("DT<<'1969-07-21T02:56:16Z'>>_1");
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'>>_1", {
+        preserveAppSequence: true,
+        encodingIndicators: 'never',
+      })
+    ).toBe("DT<<'1969-07-21T02:56:16Z'>>");
+  });
+
+  test('encodingIndicators: never also strips an inner (item-level) indicator', () => {
+    // The app-sequence's sole inner item can carry its own indicator
+    // (right before the closing >>), independent of the wrapper's own
+    // (right after >>). 'never' means neither should survive.
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'_1>>_1", {
+        preserveAppSequence: true,
+        encodingIndicators: 'never',
+      })
+    ).toBe("DT<<'1969-07-21T02:56:16Z'>>");
+  });
+
+  test('encodingIndicators: never strips an inner indicator across whitespace/comma before >>', () => {
+    // CDN allows whitespace and/or a trailing comma between an
+    // app-sequence's item and its closing >>; the inner indicator isn't
+    // always immediately adjacent to it.
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'_1, >>_1", {
+        preserveAppSequence: true,
+        encodingIndicators: 'never',
+      })
+    ).toBe("DT<<'1969-07-21T02:56:16Z', >>");
+  });
+
+  test('encodingIndicators: never strips an inner indicator across a comment before >>', () => {
+    // The inner indicator is located by its actual parsed position, not by
+    // pattern-matching text near '>>', so a comment (of any form) between
+    // it and '>>' doesn't defeat the strip.
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'_1 /note/ >>_1", {
+        preserveAppSequence: true,
+        encodingIndicators: 'never',
+      })
+    ).toBe("DT<<'1969-07-21T02:56:16Z' /note/ >>");
+  });
+
+  test('untagged dt<<...>> keeps its bracketed notation under always/never too', () => {
+    expect(
+      CBOR.format("dt<<'1969-07-21T02:56:16Z'>>", {
+        preserveAppSequence: true,
+        encodingIndicators: 'never',
+      })
+    ).toBe("dt<<'1969-07-21T02:56:16Z'>>");
+    expect(
+      CBOR.format("dt<<'1969-07-21T02:56:16Z'>>", {
+        preserveAppSequence: true,
+        encodingIndicators: 'always',
+      })
+    ).toBe("dt<<'1969-07-21T02:56:16Z'>>_2");
+  });
+
+  test('encodingIndicators: always adds a missing indicator to <<...>> / `...` notation', () => {
+    // Unlike raw tag notation, <<...>> / `...` have only one indicator
+    // position (right after the closing bracket/backtick), so it can be
+    // added without losing the bracketed/backtick notation itself.
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", {
+        preserveAppSequence: true,
+        encodingIndicators: 'always',
+      })
+    ).toBe("DT<<'1969-07-21T02:56:16Z'>>_i");
+    expect(
+      CBOR.format('DT`1969-07-21T02:56:16Z`', {
+        preserveAppSequence: true,
+        encodingIndicators: 'always',
+      })
+    ).toBe('DT`1969-07-21T02:56:16Z`_i');
+  });
+
+  test('appStrings:false still wins over preserveAppSequence', () => {
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", {
+        preserveAppSequence: true,
+        appStrings: false,
+      })
+    ).toBe('1(-14159024)');
+  });
+
+  test('keeps a non-canonical dt/DT app-string spelling too, not just <<...>>', () => {
+    // '+00:00' / a non-canonical fractional-digit count are both valid
+    // RFC 3339 spellings of the same instant that epochToRfc3339() would
+    // normally regenerate differently.
+    expect(
+      CBOR.format("dt'1969-07-21T02:56:16+00:00'", {
+        preserveAppSequence: true,
+      })
+    ).toBe("dt'1969-07-21T02:56:16+00:00'");
+    expect(CBOR.format("dt'1969-07-21T02:56:16+00:00'")).toBe(
+      "dt'1969-07-21T02:56:16Z'"
+    );
+
+    expect(
+      CBOR.format("dt'1969-07-21T02:56:16.50Z'", {
+        preserveAppSequence: true,
+      })
+    ).toBe("dt'1969-07-21T02:56:16.50Z'");
+    expect(CBOR.format("dt'1969-07-21T02:56:16.50Z'")).toBe(
+      "dt'1969-07-21T02:56:16.500Z'"
+    );
+  });
+
+  test('keeps prefix`...` (backtick app-rstring) notation when requested', () => {
+    expect(
+      CBOR.format('dt`1969-07-21T02:56:16Z`', { preserveAppSequence: true })
+    ).toBe('dt`1969-07-21T02:56:16Z`');
+    expect(
+      CBOR.format('DT`1969-07-21T02:56:16Z`', { preserveAppSequence: true })
+    ).toBe('DT`1969-07-21T02:56:16Z`');
+    // Default output normalises to the single-quoted form.
+    expect(CBOR.format('dt`1969-07-21T02:56:16Z`')).toBe(
+      "dt'1969-07-21T02:56:16Z'"
+    );
+  });
+
+  test('prefix`...` (float, backtick) keeps its notation when requested', () => {
+    expect(
+      CBOR.format('dt`1969-07-21T02:56:16.5Z`', {
+        preserveAppSequence: true,
+      })
+    ).toBe('dt`1969-07-21T02:56:16.5Z`');
+  });
+
+  test('backtick node keeps its dedicated class/identity', () => {
+    const n = CBOR.fromCDN('dt`1969-07-21T02:56:16Z`');
+    expect(n).toBeInstanceOf(CborEpochDtExtNint);
+  });
+
+  test('keeps raw tag notation (1(...)) instead of upgrading to DT notation', () => {
+    expect(CBOR.format('1(1749772800)', { preserveAppSequence: true })).toBe(
+      '1(1749772800)'
+    );
+    // Default output normalises to the regenerated DT'...' form.
+    expect(CBOR.format('1(1749772800)')).toBe("DT'2025-06-13T00:00:00Z'");
+  });
+
+  test('raw tag notation combines with preserveNumberFormat for the tag/content bases', () => {
+    expect(
+      CBOR.format('0x1(0xff)', {
+        preserveAppSequence: true,
+        preserveNumberFormat: true,
+      })
+    ).toBe('0x1(0xff)');
+  });
+
+  test('appStrings:false still wins over preserveAppSequence for raw tag notation', () => {
+    expect(
+      CBOR.format('1(1749772800)', {
+        preserveAppSequence: true,
+        appStrings: false,
+      })
+    ).toBe('1(1749772800)');
+  });
+
+  test('raw tag notation node keeps its dedicated class/identity', () => {
+    const n = CBOR.fromCDN('1(1749772800)');
+    expect(n).toBeInstanceOf(CborTaggedEpochDtExt);
+  });
+
+  test('encodingIndicators applies structurally to raw tag notation, not verbatim', () => {
+    // The tag number and content each carry their own indicator; verbatim
+    // text can only ever reflect what was in the source, so 'never'/'always'
+    // must fall back to re-deriving each one from the AST instead.
+    expect(
+      CBOR.format('1_1(1749772800_3)', {
+        preserveAppSequence: true,
+        encodingIndicators: 'never',
+      })
+    ).toBe('1(1749772800)');
+    expect(
+      CBOR.format('1(1749772800)', {
+        preserveAppSequence: true,
+        encodingIndicators: 'always',
+      })
+    ).toBe('1_i(1749772800_2)');
+  });
+
+  test('preserveNumberFormat: false overrides verbatim raw tag notation', () => {
+    // preserveAll turns preserveAppSequence on but leaves an explicit
+    // preserveNumberFormat: false alone; verbatim raw-tag text is itself
+    // number-literal spelling, so it must not be used when that's off.
+    expect(
+      CBOR.format('0x1(0xff)', {
+        preserveAll: true,
+        preserveNumberFormat: false,
+      })
+    ).toBe('1(255)');
+  });
+
+  test('preserveComments: false overrides verbatim raw tag notation', () => {
+    // The raw-tag verbatim text embeds a comment written inside the
+    // parens; preserveComments: false must still strip it, same as it
+    // would for a comment anywhere else in the document.
+    expect(
+      CBOR.format('0x1(/note/ 0xff)', {
+        preserveAll: true,
+        preserveComments: false,
+        indent: 2,
+      })
+    ).toBe('0x1(0xff)');
+    // Left unset, preserveAppSequence alone keeps the comment (consistent
+    // with preserveNumberFormat/preserveByteString also defaulting to
+    // "verbatim wins" rather than "off wins" when merely left unset).
+    expect(CBOR.format('0x1(/note/ 0xff)', { preserveAppSequence: true })).toBe(
+      '0x1(/note/ 0xff)'
+    );
+  });
+
+  test('preserveComments: c-style/cdn-style override verbatim, normalising the marker', () => {
+    // Verbatim text keeps the comment's original marker unconverted, which
+    // doesn't satisfy a request to normalise it — same treatment as
+    // preserveComments: false forcing structural rendering — but unlike
+    // false, the structural path here does still emit the comment (with
+    // its marker normalised), since CborTag renders its content's own
+    // leading/trailing/dangling comments regardless of preserveAppSequence.
+    expect(
+      CBOR.format('0x1(/note/ 0xff)', {
+        preserveAll: true,
+        preserveComments: 'c-style',
+        indent: 2,
+      })
+    ).toBe('0x1(\n  /*note*/\n  0xff\n)');
+    expect(
+      CBOR.format('0x1(/note/ 0xff)', {
+        preserveAll: true,
+        preserveComments: 'cdn-style',
+        indent: 2,
+      })
+    ).toBe('0x1(\n  /note/\n  0xff\n)');
+  });
+
+  test('parsed node keeps its dedicated class/identity, unlike CborAppSeqResult wrapping', () => {
+    const n = CBOR.fromCDN("dt<<'1969-07-21T02:56:16Z'>>");
+    expect(n).toBeInstanceOf(CborEpochDtExtNint);
+    const t = CBOR.fromCDN("DT<<'1969-07-21T02:56:16Z'>>");
+    expect(t).toBeInstanceOf(CborTaggedEpochDtExt);
+  });
+});
+
 // ─── fromCBOR round-trip (DT_EXT built-in, no extensions option needed) ───────
 
 describe('dt — fromCBOR round-trip', () => {

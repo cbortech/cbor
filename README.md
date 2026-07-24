@@ -336,6 +336,25 @@ CBOR.format('`\\d+`', { preserveRawString: true });
 // '`\\d+`'
 ```
 
+### Preserve double-quoted string spelling
+
+By default, `CBOR.format()` re-escapes double-quoted text strings from their
+decoded value, so e.g. a `\uXXXX` escape becomes the literal character.
+`preserveTextString` re-emits a non-concatenated `"..."` literal using its
+original source spelling instead. (Raw backtick literals such as `` `...` ``
+are covered by `preserveRawString`, not this option; a string reached via
+`+` concatenation is normalised as usual regardless of this option.)
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+CBOR.format('"caf\\u00e9"');
+// '"café"'
+
+CBOR.format('"caf\\u00e9"', { preserveTextString: true });
+// '"caf\\u00e9"'
+```
+
 ### Preserve number literal spelling
 
 By default, `CBOR.format()` normalizes integer and floating-point literals:
@@ -392,31 +411,69 @@ CBOR.format("h'68' + b64'aQ'", {
 //   b64'aQ'
 ```
 
-### Format with minimal changes
+### Preserve application-string/-sequence notation
 
-Combine all `preserve*` options to reformat CDN text — e.g. when
-reformatting on save in an editor — touching only whitespace/indentation
-and leaving most literals' original spelling untouched (bignums are the one
-exception; see `preserveNumberFormat` above):
+Some built-in extensions (`dt`/`DT`, `ip`/`IP`) support `prefix'...'`
+(application string), `` prefix`...` `` (backtick application string),
+`prefix<<...>>` (application sequence), and a raw tag literal (`N(...)`)
+notation for the same value, and by default regenerate `prefix'...'` from
+the resolved value on every `CBOR.format()` call — so
+`` DT`1969-07-21T02:56:16Z` ``, `DT<<'1969-07-21T02:56:16Z'>>`, and even the
+raw tag form `1(1749772800)` all normalize to `DT'...'` notation, and a
+non-canonical `DT'...'` spelling (e.g. a `+00:00` offset instead of `Z`)
+gets rewritten too. `preserveAppSequence` keeps the original spelling
+instead — whichever form was used. It has no effect when
+`appStrings: false` is also set (raw tag notation is used either way
+regardless of the original spelling), or on values not parsed from one of
+these forms.
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
-const layoutOnly = {
-  indent: 2,
-  preserveComments: true,
-  preserveByteString: true,
-  preserveRawString: true,
-  preserveConcatenation: true,
-  preserveNumberFormat: true,
-};
+CBOR.format('1(1749772800)');
+// "DT'2025-06-13T00:00:00Z'"
 
-CBOR.format('{"a":0xff,"b":1.5_1,"c":b64\'aGk=\'}', layoutOnly);
+CBOR.format('1(1749772800)', { preserveAppSequence: true });
+// "1(1749772800)"
+
+CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", { preserveAppSequence: true });
+// "DT<<'1969-07-21T02:56:16Z'>>"
+
+CBOR.format('DT`1969-07-21T02:56:16Z`', { preserveAppSequence: true });
+// "DT`1969-07-21T02:56:16Z`"
+```
+
+### Format with minimal changes
+
+`preserveAll` turns on every `preserve*` option at once, to reformat CDN
+text — e.g. when reformatting on save in an editor — touching only
+whitespace/indentation and leaving most literals' original spelling
+untouched (bignums are the one exception; see `preserveNumberFormat`
+above). An explicitly-set individual option (including `false`) still wins
+over `preserveAll`.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+CBOR.format('{"a":0xff,"b":1.5_1,"c":b64\'aGk=\'}', {
+  indent: 2,
+  preserveAll: true,
+});
 // {
 //   "a": 0xff,
 //   "b": 1.5_1,
 //   "c": b64'aGk='
 // }
+```
+
+`CBOR.format()` passes the same options to both `fromCDN()` and `toCDN()`
+internally, so this one option is enough. Calling them separately needs
+`preserveAll` (or `preserveComments`) on the `fromCDN()` side too, since
+comments must be captured while parsing to be re-emittable later:
+
+```ts
+const item = CBOR.fromCDN(text, { preserveAll: true });
+item.toCDN({ preserveAll: true, indent: 2 });
 ```
 
 ### Validate CBOR / CDN / hex dump

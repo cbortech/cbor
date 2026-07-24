@@ -307,6 +307,54 @@ export function serializeContainer(p: {
   return `${open}\n${body}\n${closeIndent}${closeChar}`;
 }
 
+/**
+ * Single-child counterpart to `serializeContainer`, for a wrapper that
+ * holds exactly one child inside `openChar`/`closeChar` (currently just
+ * `CborTag`'s `(content)`) rather than a comma-separated list of entries.
+ *
+ * Emits the child's own leading/trailing comments, and the wrapper node's
+ * `dangling` comments (a comment positioned after the child but still
+ * inside the brackets, with nothing following it to attach to as leading —
+ * mirroring how `serializeContainer` handles a container's own dangling
+ * comments). Falls back to the plain single-line `(content)` form — the
+ * common, zero-allocation-beyond-string-concat path — when comments aren't
+ * requested/applicable (no indent, no `preserveComments`, or neither the
+ * child nor the wrapper has any).
+ *
+ * `renderChild` is called with the child's depth exactly once, resolved
+ * *before* calling it: `depth + 1` when comments force multi-line
+ * rendering, `depth` otherwise (matching a plain value's existing
+ * "transparent" nesting — `tag(content)` doesn't indent `content` an extra
+ * level when there's nothing to justify going multi-line for).
+ */
+export function renderSingleChildWithComments(
+  child: Commented,
+  wrapper: Commented,
+  options: ToCDNOptions | undefined,
+  depth: number,
+  renderChild: (childDepth: number) => string,
+  openChar: '(',
+  closeChar: ')'
+): string {
+  const indentStr = resolveIndent(options);
+  const preserveComments = options?.preserveComments;
+  const hasComments =
+    indentStr !== null &&
+    !!preserveComments &&
+    (hasPreservedComments(child) || hasContainerLayoutComments(wrapper));
+  if (!hasComments) return `${openChar}${renderChild(depth)}${closeChar}`;
+  const commentStyle =
+    typeof preserveComments === 'string' ? preserveComments : undefined;
+  const childIndent = indentOf(indentStr!, depth + 1);
+  const closeIndent = indentOf(indentStr!, depth);
+  const lines = [
+    ...formatLeadingComments(child, childIndent, commentStyle),
+    `${childIndent}${renderChild(depth + 1)}${formatTrailingComments(child, commentStyle)}`,
+    ...formatDanglingComments(wrapper, childIndent, commentStyle),
+  ];
+  return `${openChar}\n${lines.join('\n')}\n${closeIndent}${closeChar}`;
+}
+
 // ─── Byte string encoding ─────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -562,4 +610,108 @@ export function resolveEiSuffix(
   if (mode === 'never') return '';
   if (mode === 'always') return `_${encodingWidth ?? getCanonical()}`;
   return encodingWidth !== undefined ? `_${encodingWidth}` : '';
+}
+
+/** How a node should render under `preserveAppSequence`. */
+export type AppSeqRenderDecision =
+  'verbatim' | 'adjusted' | 'structural' | 'normal';
+
+/**
+ * Decide how an extension result node — from a `prefix'...'` /
+ * `` prefix`...` `` / `prefix<<...>>` source, or (for a tag-wrapper node
+ * that also has a generic `CborTag` fallback to delegate to) a raw tag
+ * literal `N(...)` — should render under `ToCDNOptions.preserveAppSequence`.
+ *
+ * A raw-tag source is recognised by `ednSource !== undefined`: the parser
+ * only ever sets a tag-wrapper's `ednSource` (the tag *number's* digit
+ * spelling) when it was reached via `N(...)`, never via one of the
+ * app-string/-sequence forms. Leaf (non-tag-wrapper) nodes have no raw-tag
+ * form at all — always pass `undefined` for `ednSource` there.
+ *
+ * Returns:
+ * - `'verbatim'`: re-emit `appSeqSource` as-is. Only reachable for a
+ *   raw-tag source: its encoding-indicator suffixes are nested at two
+ *   independent positions (tag number and inner content), so this is only
+ *   safe in `'auto'` mode with no relevant sibling option overridden.
+ * - `'adjusted'`: for an app-string/-sequence source, strip whatever
+ *   *outer* indicator suffix is already at the end of `appSeqSource` (or,
+ *   under `'never'`, also an *inner* one immediately before `<<...>>`'s
+ *   closing `>>` — the app-sequence's sole item's own indicator) and let
+ *   the caller append one recomputed via `resolveEiSuffix`/`floatSuffix`
+ *   for the current mode via `adjustAppSeqIndicator` — correct in every
+ *   mode, without losing the source's notation family. (An inner indicator
+ *   can only be *stripped*, not *recomputed*: the item's own encoding
+ *   width isn't tracked once resolved to a plain date/address string, so
+ *   `'always'` cannot add a missing one — it is left absent.)
+ * - `'structural'`: keep the raw-tag notation *family* (as opposed to
+ *   upgrading to `prefix'...'`) but re-derive it structurally — via the
+ *   node's own `CborTag` rendering — instead of using `appSeqSource`
+ *   verbatim. Needed whenever verbatim text would ignore a sibling option
+ *   that must apply per nested node: `encodingIndicators` other than
+ *   `'auto'` (each nested indicator needs recomputing under that mode), or
+ *   `preserveNumberFormat` / `preserveByteString` / `preserveComments`
+ *   explicitly set to `false` (verbatim text is, in a raw-tag source,
+ *   inherently number-/byte-string-literal spelling, and may itself embed
+ *   a comment written inside the parens).
+ * - `'normal'`: fall through to the class's own notation regeneration
+ *   (`prefix'...'`), unaffected by `preserveAppSequence`. Also used for a
+ *   non-raw-tag source when `preserveComments` is explicitly `false`: an
+ *   app-string/-sequence source has no structural fallback to delegate to
+ *   (there is no way to re-derive `<<...>>` notation from the AST), so a
+ *   comment embedded in its verbatim text can only be dropped by giving up
+ *   the notation family entirely.
+ */
+export function decideTaggedAppSeqRendering(
+  options: ToCDNOptions | undefined,
+  appSeqSource: string | undefined,
+  ednSource: string | undefined
+): AppSeqRenderDecision {
+  if (!options?.preserveAppSequence || appSeqSource === undefined)
+    return 'normal';
+  if (resolveIndent(options) === null && /[\r\n]/.test(appSeqSource))
+    return 'normal';
+  // 'c-style' / 'cdn-style' ask for the comment *marker* to be normalised,
+  // which verbatim/adjusted text can't do any more than `false` (which asks
+  // for it to be dropped) can — both need the fallback path. Only `true`
+  // (or leaving the option unset, matching preserveNumberFormat /
+  // preserveByteString's precedent) is compatible with verbatim reuse.
+  const commentsOverridden =
+    options?.preserveComments !== undefined &&
+    options?.preserveComments !== true;
+  const isRawTagSource = ednSource !== undefined;
+  if (!isRawTagSource) return commentsOverridden ? 'normal' : 'adjusted';
+  const mode = options?.encodingIndicators ?? 'auto';
+  const siblingOverridden =
+    commentsOverridden ||
+    options?.preserveNumberFormat === false ||
+    options?.preserveByteString === false;
+  return mode === 'auto' && !siblingOverridden ? 'verbatim' : 'structural';
+}
+
+/**
+ * Strip the encoding-indicator suffix(es) already in an `'adjusted'`
+ * app-string/-sequence source, then append `newSuffix` (the outer/wrapper
+ * indicator recomputed for the current mode) — see
+ * `decideTaggedAppSeqRendering`.
+ *
+ * Under `'never'`, an inner (item-level) indicator is also stripped, using
+ * `innerItemEnd` (see `CborItem.appSeqInnerEnd`) to find it by its actual
+ * parsed position rather than by pattern-matching text near the closing
+ * `>>` — whitespace, a trailing comma, and/or a comment can all separate
+ * the two, in any combination, so a position-based cut is the only fully
+ * reliable way to locate it.
+ */
+export function adjustAppSeqIndicator(
+  appSeqSource: string,
+  newSuffix: string,
+  mode: 'auto' | 'always' | 'never' | undefined,
+  innerItemEnd: number | undefined
+): string {
+  let text = appSeqSource;
+  if ((mode ?? 'auto') === 'never' && innerItemEnd !== undefined) {
+    const beforeInner = text.slice(0, innerItemEnd);
+    if (/_[0-3i]$/.test(beforeInner))
+      text = beforeInner.slice(0, -2) + text.slice(innerItemEnd);
+  }
+  return text.replace(/_[0-3i]$/, '') + newSuffix;
 }

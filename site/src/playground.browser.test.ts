@@ -177,6 +177,145 @@ describe('playground', () => {
       expect(cmText('editor')).toBe('{"a":255,"b":1.5}');
     });
 
+    test('Keep byte strings preserves original byte string literal spelling', async () => {
+      const importBytes = () =>
+        uploadTo(
+          'cdn-import-input',
+          new File(["h'48656c6c6f'"], 'bytes.cdn', { type: 'text/plain' })
+        );
+
+      // Default: "Keep byte strings" is on, so the literal spelling survives
+      // Format instead of being rewritten to the printable-string form.
+      await importBytes();
+      await vi.waitFor(() => expect(cmText('editor')).toContain("h'"));
+      byId('format-opts-btn').click();
+      byId<HTMLSelectElement>('opt-indent').value = '';
+      expect(byId<HTMLInputElement>('opt-byte-string').checked).toBe(true);
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe("h'48656c6c6f'");
+
+      await importBytes();
+      await vi.waitFor(() => expect(cmText('editor')).toContain("h'"));
+      byId<HTMLInputElement>('opt-byte-string').checked = false;
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe("'Hello'");
+    });
+
+    test('Keep string escapes preserves original double-quoted string spelling', async () => {
+      const importText = () =>
+        uploadTo(
+          'cdn-import-input',
+          new File(['"caf\\u00e9"'], 'text.cdn', { type: 'text/plain' })
+        );
+
+      // Default: "Keep string escapes" is on, so the é escape survives
+      // Format instead of being decoded into the literal character.
+      await importText();
+      await vi.waitFor(() => expect(cmText('editor')).toContain('caf'));
+      byId('format-opts-btn').click();
+      byId<HTMLSelectElement>('opt-indent').value = '';
+      expect(byId<HTMLInputElement>('opt-text-string').checked).toBe(true);
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe('"caf\\u00e9"');
+
+      await importText();
+      await vi.waitFor(() => expect(cmText('editor')).toContain('caf'));
+      byId<HTMLInputElement>('opt-text-string').checked = false;
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe('"café"');
+    });
+
+    test('individual preserve options open in their own submenu popover', () => {
+      byId('format-opts-btn').click();
+      const preserveBtn = byId<HTMLButtonElement>('preserve-opts-btn');
+      const preservePopover = byId('preserve-popover');
+
+      // Starts closed; the individual checkboxes live inside it.
+      expect(preservePopover.hidden).toBe(true);
+      expect(preserveBtn.getAttribute('aria-expanded')).toBe('false');
+      expect(preservePopover.contains(byId('opt-comments'))).toBe(true);
+
+      preserveBtn.click();
+      expect(preservePopover.hidden).toBe(false);
+      expect(preserveBtn.getAttribute('aria-expanded')).toBe('true');
+
+      // Clicking a checkbox inside the submenu doesn't close it or the
+      // parent format-popover.
+      byId('opt-comments').click();
+      expect(preservePopover.hidden).toBe(false);
+      expect(byId('format-popover').hidden).toBe(false);
+      byId('opt-comments').click(); // restore
+
+      // Clicking fully outside closes both.
+      byId('editor').click();
+      expect(preservePopover.hidden).toBe(true);
+      expect(byId('format-popover').hidden).toBe(true);
+    });
+
+    test('closing format-popover also force-closes the preserve submenu', () => {
+      byId('format-opts-btn').click();
+      byId<HTMLButtonElement>('preserve-opts-btn').click();
+      expect(byId('preserve-popover').hidden).toBe(false);
+
+      // Toggling format-popover closed stops propagation before it can
+      // reach the submenu's own document-level close listener, so
+      // initFormatPopover() force-closes it explicitly instead.
+      byId('format-opts-btn').click();
+      expect(byId('format-popover').hidden).toBe(true);
+      expect(byId('preserve-popover').hidden).toBe(true);
+      expect(
+        byId<HTMLButtonElement>('preserve-opts-btn').getAttribute(
+          'aria-expanded'
+        )
+      ).toBe('false');
+    });
+
+    test('Preserve everything toggles all "Keep …" checkboxes together', () => {
+      byId('format-opts-btn').click();
+      const master = byId<HTMLInputElement>('opt-preserve-all');
+      const ids = [
+        'opt-comments',
+        'opt-concat',
+        'opt-byte-string',
+        'opt-raw-string',
+        'opt-text-string',
+        'opt-number-format',
+        'opt-app-sequence',
+      ] as const;
+
+      // Normalize to a known all-checked state first: earlier tests in this
+      // file may have left individual boxes unchecked (the DOM is shared
+      // across tests — see beforeAll above).
+      for (const id of ids) {
+        const box = byId<HTMLInputElement>(id);
+        if (!box.checked) box.click();
+      }
+      expect(master.checked).toBe(true);
+      expect(master.indeterminate).toBe(false);
+
+      // Unchecking the master unchecks every "Keep …" checkbox.
+      master.click();
+      expect(master.checked).toBe(false);
+      for (const id of ids)
+        expect(byId<HTMLInputElement>(id).checked).toBe(false);
+
+      // Checking the master re-checks every one.
+      master.click();
+      expect(master.checked).toBe(true);
+      for (const id of ids)
+        expect(byId<HTMLInputElement>(id).checked).toBe(true);
+
+      // Unchecking a single option makes the master indeterminate.
+      byId<HTMLInputElement>('opt-comments').click();
+      expect(master.checked).toBe(false);
+      expect(master.indeterminate).toBe(true);
+
+      // Re-checking it makes the master fully checked again.
+      byId<HTMLInputElement>('opt-comments').click();
+      expect(master.checked).toBe(true);
+      expect(master.indeterminate).toBe(false);
+    });
+
     test('Copy button copies the CDN text to the clipboard', () => {
       const spy = vi.spyOn(Clipboard.prototype, 'writeText');
       byId('copy-cdn').click();

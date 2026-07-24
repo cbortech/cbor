@@ -806,6 +806,37 @@ describe('CBOR.format()', () => {
     ).toBe('{\n  "k": `line1\nline2`\n}');
   });
 
+  test('preserves double-quoted string escape spelling when requested', () => {
+    expect(CBOR.format('"caf\\u00e9"', { preserveTextString: true })).toBe(
+      '"caf\\u00e9"'
+    );
+    expect(
+      CBOR.format('"caf\\u00e9"', { preserveTextString: true, indent: 2 })
+    ).toBe('"caf\\u00e9"');
+    // Default output decodes the escape into the literal character.
+    expect(CBOR.format('"caf\\u00e9"')).toBe('"café"');
+  });
+
+  test('preserveTextString does not affect raw backtick literals', () => {
+    // preserveRawString (not preserveTextString) governs backtick spelling;
+    // without it, a backtick literal still normalises to double-quoted form.
+    expect(CBOR.format('`\\d+`', { preserveTextString: true })).toBe(
+      '"\\\\d+"'
+    );
+  });
+
+  test('preserveTextString has no effect on concatenated string parts', () => {
+    // Documented limitation: only non-concatenated double-quoted literals
+    // are covered; a `+` chain still normalises each part's escapes.
+    expect(
+      CBOR.format('"caf\\u00e9" + "x"', {
+        preserveTextString: true,
+        preserveConcatenation: true,
+        indent: 2,
+      })
+    ).toBe('"café" +\n  "x"');
+  });
+
   test('preserveRawString takes precedence over split options', () => {
     expect(
       CBOR.format('`[1, 2]`', {
@@ -1206,6 +1237,64 @@ describe('CBOR.format()', () => {
   test('round-trips: format of already-formatted text is idempotent', () => {
     const input = '[1,2,3]';
     expect(CBOR.format(CBOR.format(input))).toBe(CBOR.format(input));
+  });
+
+  test('preserveAll turns on every preserve* option at once', () => {
+    const text =
+      '{"a":0xff,"b":1.5_1,"c":b64\'aGk=\',"d":"caf\\u00e9","e":`raw`,"f":"x"+"y"}';
+    expect(CBOR.format(text, { preserveAll: true, indent: 2 })).toBe(
+      '{\n' +
+        '  "a": 0xff,\n' +
+        '  "b": 1.5_1,\n' +
+        '  "c": b64\'aGk=\',\n' +
+        '  "d": "caf\\u00e9",\n' +
+        '  "e": `raw`,\n' +
+        '  "f": "x" +\n' +
+        '    "y"\n' +
+        '}'
+    );
+    // Default output normalises everything.
+    expect(CBOR.format(text, { indent: 2 })).toBe(
+      '{\n' +
+        '  "a": 255,\n' +
+        '  "b": 1.5,\n' +
+        '  "c": \'hi\',\n' +
+        '  "d": "café",\n' +
+        '  "e": "raw",\n' +
+        '  "f": "xy"\n' +
+        '}'
+    );
+  });
+
+  test('preserveAll leaves an explicitly-set individual option alone', () => {
+    expect(
+      CBOR.format('0xff', { preserveAll: true, preserveNumberFormat: false })
+    ).toBe('255');
+  });
+
+  test('preserveAll + explicit preserveNumberFormat: false also applies inside a preserved raw tag', () => {
+    // preserveAll turns preserveAppSequence on too, but a raw-tag source's
+    // verbatim text is itself number-literal spelling — the explicit
+    // preserveNumberFormat: false must still win there, not just for
+    // top-level literals.
+    expect(
+      CBOR.format('0x1(0xff)', {
+        preserveAll: true,
+        preserveNumberFormat: false,
+      })
+    ).toBe('1(255)');
+  });
+
+  test('preserveAll on toCDN() alone does not capture comments — needs FromCDNOptions too', () => {
+    // CBOR.format() passes the same options object to both fromCDN() and
+    // toCDN(), so preserveAll covers both there; a manual fromCDN()/toCDN()
+    // split needs preserveAll (or preserveComments) on the fromCDN() call
+    // too, since comments must be captured while parsing.
+    const withoutCapture = CBOR.fromCDN('1 # hi');
+    expect(withoutCapture.toCDN({ preserveAll: true, indent: 2 })).toBe('1');
+
+    const withCapture = CBOR.fromCDN('1 # hi', { preserveAll: true });
+    expect(withCapture.toCDN({ preserveAll: true, indent: 2 })).toBe('1 # hi');
   });
 });
 

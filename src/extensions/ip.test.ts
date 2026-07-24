@@ -159,6 +159,213 @@ describe('ip — ip<<…>> / IP<<…>> (app-sequence form)', () => {
   });
 });
 
+describe('ip — preserveAppSequence', () => {
+  // By design, ip/IP regenerate their notation from the resolved address on
+  // every format() call — so <<...>> normally collapses to '...' even
+  // though both spell the same address. preserveAppSequence keeps the
+  // original bracketed spelling instead, without changing the parsed
+  // node's class (CborIpExt / CborIpPrefixExt / CborTaggedIpExt).
+
+  test("ip<<'...'>> keeps its bracketed notation when requested", () => {
+    expect(
+      CBOR.format("ip<<'192.0.2.42'>>", { preserveAppSequence: true })
+    ).toBe("ip<<'192.0.2.42'>>");
+    // Default output normalises to the ip'...' form.
+    expect(CBOR.format("ip<<'192.0.2.42'>>")).toBe("ip'192.0.2.42'");
+  });
+
+  test("IP<<'...'>> (tagged) keeps its bracketed notation when requested", () => {
+    expect(
+      CBOR.format("IP<<'192.0.2.42'>>", { preserveAppSequence: true })
+    ).toBe("IP<<'192.0.2.42'>>");
+  });
+
+  test("ip<<'.../prefix'>> (CIDR, untagged) keeps its bracketed notation", () => {
+    expect(
+      CBOR.format("ip<<'2001:db8::/32'>>", { preserveAppSequence: true })
+    ).toBe("ip<<'2001:db8::/32'>>");
+  });
+
+  test("IP<<'.../prefix'>> (CIDR, tagged) keeps its bracketed notation", () => {
+    expect(
+      CBOR.format("IP<<'2001:db8::/32'>>", { preserveAppSequence: true })
+    ).toBe("IP<<'2001:db8::/32'>>");
+  });
+
+  test('appStrings:false still wins over preserveAppSequence', () => {
+    expect(
+      CBOR.format("IP<<'192.0.2.42'>>", {
+        preserveAppSequence: true,
+        appStrings: false,
+      })
+    ).toBe("52(h'c000022a')");
+  });
+
+  test('keeps a non-canonical ip/IP app-string spelling too, not just <<...>>', () => {
+    // A leading zero and full (non-compressed) form are both valid IPv6
+    // spellings of the same address that formatAddress() would normally
+    // regenerate as the compressed canonical form.
+    expect(CBOR.format("ip'2001:0db8::1'", { preserveAppSequence: true })).toBe(
+      "ip'2001:0db8::1'"
+    );
+    expect(CBOR.format("ip'2001:0db8::1'")).toBe("ip'2001:db8::1'");
+  });
+
+  test('keeps prefix`...` (backtick app-rstring) notation when requested', () => {
+    expect(CBOR.format('ip`192.0.2.42`', { preserveAppSequence: true })).toBe(
+      'ip`192.0.2.42`'
+    );
+    expect(CBOR.format('IP`192.0.2.42`', { preserveAppSequence: true })).toBe(
+      'IP`192.0.2.42`'
+    );
+    // Default output normalises to the single-quoted form.
+    expect(CBOR.format('ip`192.0.2.42`')).toBe("ip'192.0.2.42'");
+  });
+
+  test('backtick node keeps its dedicated class/identity', () => {
+    const n = CBOR.fromCDN('ip`192.0.2.42`');
+    expect(n).toBeInstanceOf(CborIpExt);
+  });
+
+  test('keeps raw tag notation (52(...)) instead of upgrading to IP notation', () => {
+    expect(CBOR.format("52(h'c000022a')", { preserveAppSequence: true })).toBe(
+      "52(h'c000022a')"
+    );
+    // Default output normalises to the regenerated IP'...' form.
+    expect(CBOR.format("52(h'c000022a')")).toBe("IP'192.0.2.42'");
+  });
+
+  test('appStrings:false still wins over preserveAppSequence for raw tag notation', () => {
+    expect(
+      CBOR.format("52(h'c000022a')", {
+        preserveAppSequence: true,
+        appStrings: false,
+      })
+    ).toBe("52(h'c000022a')");
+  });
+
+  test('raw tag notation node keeps its dedicated class/identity', () => {
+    const n = CBOR.fromCDN("52(h'c000022a')");
+    expect(n).toBeInstanceOf(CborTaggedIpExt);
+  });
+
+  test('encodingIndicators applies structurally to raw tag notation, not verbatim', () => {
+    expect(
+      CBOR.format("52_1(h'c000022a'_2)", {
+        preserveAppSequence: true,
+        encodingIndicators: 'never',
+      })
+    ).toBe("52(h'c000022a')");
+    expect(
+      CBOR.format("52(h'c000022a')", {
+        preserveAppSequence: true,
+        encodingIndicators: 'always',
+      })
+    ).toBe("52_0(h'c000022a'_i)");
+  });
+
+  test('encodingIndicators: always adds a missing indicator to <<...>> notation', () => {
+    expect(
+      CBOR.format("IP<<'192.0.2.42'>>", {
+        preserveAppSequence: true,
+        encodingIndicators: 'always',
+      })
+    ).toBe("IP<<'192.0.2.42'>>_0");
+  });
+
+  test('encodingIndicators: never also strips an inner (item-level) indicator', () => {
+    expect(
+      CBOR.format("IP<<'192.0.2.42'_1>>_1", {
+        preserveAppSequence: true,
+        encodingIndicators: 'never',
+      })
+    ).toBe("IP<<'192.0.2.42'>>");
+  });
+
+  test('encodingIndicators: never strips an inner indicator across whitespace/comma before >>', () => {
+    expect(
+      CBOR.format("IP<<'192.0.2.42'_1, >>_1", {
+        preserveAppSequence: true,
+        encodingIndicators: 'never',
+      })
+    ).toBe("IP<<'192.0.2.42', >>");
+  });
+
+  test('encodingIndicators: never strips an inner indicator across a comment before >>', () => {
+    expect(
+      CBOR.format("IP<<'192.0.2.42'_1 # x\n>>_1", {
+        preserveAppSequence: true,
+        encodingIndicators: 'never',
+        indent: 2,
+      })
+    ).toBe("IP<<'192.0.2.42' # x\n>>");
+  });
+
+  test('untagged ip<<...>> keeps its bracketed notation under always/never too', () => {
+    expect(
+      CBOR.format("ip<<'192.0.2.42'>>", {
+        preserveAppSequence: true,
+        encodingIndicators: 'never',
+      })
+    ).toBe("ip<<'192.0.2.42'>>");
+    expect(
+      CBOR.format("ip<<'192.0.2.42'>>", {
+        preserveAppSequence: true,
+        encodingIndicators: 'always',
+      })
+    ).toBe("ip<<'192.0.2.42'>>_i");
+  });
+
+  test('preserveByteString: false overrides verbatim raw tag notation', () => {
+    // Verbatim raw-tag text is itself byte-string-literal spelling for ip's
+    // untagged content, so it must not be used when that's explicitly off.
+    expect(
+      CBOR.format("52(h'c000022a')", {
+        preserveAppSequence: true,
+        preserveByteString: false,
+        bstrEncoding: 'base64',
+      })
+    ).toBe("52(b64'wAACKg')");
+  });
+
+  test('preserveComments: false overrides verbatim raw tag notation', () => {
+    expect(
+      CBOR.format("52(/note/ h'c000022a')", {
+        preserveAll: true,
+        preserveComments: false,
+        indent: 2,
+      })
+    ).toBe("52(h'c000022a')");
+    expect(
+      CBOR.format("52(/note/ h'c000022a')", { preserveAppSequence: true })
+    ).toBe("52(/note/ h'c000022a')");
+  });
+
+  test('preserveComments: c-style/cdn-style override verbatim, normalising the marker', () => {
+    expect(
+      CBOR.format("52(/note/ h'c000022a')", {
+        preserveAll: true,
+        preserveComments: 'c-style',
+        indent: 2,
+      })
+    ).toBe("52(\n  /*note*/\n  h'c000022a'\n)");
+    expect(
+      CBOR.format("52(/note/ h'c000022a')", {
+        preserveAll: true,
+        preserveComments: 'cdn-style',
+        indent: 2,
+      })
+    ).toBe("52(\n  /note/\n  h'c000022a'\n)");
+  });
+
+  test('parsed node keeps its dedicated class/identity, unlike CborAppSeqResult wrapping', () => {
+    const n = CBOR.fromCDN("ip<<'192.0.2.42'>>");
+    expect(n).toBeInstanceOf(CborIpExt);
+    const t = CBOR.fromCDN("IP<<'192.0.2.42'>>");
+    expect(t).toBeInstanceOf(CborTaggedIpExt);
+  });
+});
+
 // ─── IP'…' — tagged ───────────────────────────────────────────────────────────
 
 describe("ip — IP'…' (uppercase, tagged)", () => {

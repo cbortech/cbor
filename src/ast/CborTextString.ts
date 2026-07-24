@@ -27,6 +27,13 @@ export class CborTextString extends CborItem {
   /** Original raw-string source text, when parsed from a single backtick literal. */
   readonly ednSource: string | undefined;
   /**
+   * Original double-quoted source text (including its escape sequences),
+   * when parsed from a single non-concatenated `"..."` literal. Used by
+   * `_toCDN()` to round-trip the literal's exact spelling when
+   * `preserveTextString` is set.
+   */
+  readonly quotedEdnSource: string | undefined;
+  /**
    * Original source text per `ednParts` entry, aligned by index; `undefined`
    * for parts that were not raw backtick literals.
    */
@@ -38,6 +45,7 @@ export class CborTextString extends CborItem {
       encodingWidth?: EncodingWidth;
       ednParts?: readonly string[];
       ednSource?: string;
+      quotedEdnSource?: string;
       ednPartSources?: readonly (string | undefined)[];
     }
   ) {
@@ -46,6 +54,7 @@ export class CborTextString extends CborItem {
     this.encodingWidth = options?.encodingWidth;
     this.ednParts = options?.ednParts;
     this.ednSource = options?.ednSource;
+    this.quotedEdnSource = options?.quotedEdnSource;
     this.ednPartSources = options?.ednPartSources;
   }
 
@@ -64,6 +73,7 @@ export class CborTextString extends CborItem {
       depth,
       this.ednParts,
       this.ednSource,
+      this.quotedEdnSource,
       this.ednPartSources
     );
   }
@@ -80,6 +90,7 @@ function formatTextString(
   depth: number,
   ednParts: readonly string[] | undefined,
   ednSource: string | undefined,
+  quotedEdnSource: string | undefined,
   ednPartSources: readonly (string | undefined)[] | undefined
 ): string {
   const indentStr = resolveIndent(options);
@@ -94,6 +105,15 @@ function formatTextString(
     (indentStr !== null || !/[\r\n]/.test(ednSource))
   ) {
     return ednSource + suffix;
+  }
+  // Likewise for a preserved double-quoted literal: keep its original
+  // escape-sequence spelling instead of re-escaping the decoded value.
+  if (
+    options?.preserveTextString &&
+    quotedEdnSource !== undefined &&
+    (indentStr !== null || !/[\r\n]/.test(quotedEdnSource))
+  ) {
+    return quotedEdnSource + suffix;
   }
   // Splits and preserved concatenation are layout features, disabled in
   // single-line mode: the string collapses to one literal.

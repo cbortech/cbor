@@ -56,7 +56,8 @@ export function parseCDN(text: string, options?: FromCDNOptions): CborItem {
   });
   const parser = new CDNParser(tokenizer, options ?? {});
   const node = parser.parse();
-  if (options?.preserveComments) attachComments(node, tokenizer.comments, text);
+  if (options?.preserveComments || options?.preserveAll)
+    attachComments(node, tokenizer.comments, text);
   return node;
 }
 
@@ -517,6 +518,14 @@ class CDNParser {
             // extension didn't handle it itself (e.g. dt'...'_2).
             if (appStrEw !== undefined)
               this._applyEiToResult(result, appStrEw, tok);
+            if (ext.preserveAppSeqSource === 'optional') {
+              // Same rationale as the APP_SEQUENCE case below: tack the
+              // source onto the same result node so preserveAppSequence can
+              // round-trip prefix`...` (and non-canonical prefix'...')
+              // spellings without changing the node's class/identity.
+              result.appSeqSource = tok.raw + appStrEiRaw;
+              return result;
+            }
             // Propagate ednSource so preserveByteString / appStrings round-trips correctly.
             // instanceof narrows the type; getPrototypeOf excludes subclasses like CborIpExt.
             if (
@@ -597,7 +606,19 @@ class CDNParser {
               tok.offset,
               this.t.lastEndOffset
             );
-            if (result instanceof CborFloat) {
+            if (seqExt.preserveAppSeqSource === 'optional') {
+              // Tack the source onto the same result node (preserving its
+              // class/identity) rather than wrapping it; the node's own
+              // _toCDN() decides whether to use it (see preserveAppSequence).
+              result.appSeqSource = rawSource;
+              // Exact split point for adjustAppSeqIndicator to strip the
+              // sole inner item's own indicator by position rather than by
+              // pattern-matching text near '>>' (which whitespace, a
+              // trailing comma, or a comment between the item and '>>'
+              // would defeat).
+              if (items.length === 1 && items[0].end !== undefined)
+                result.appSeqInnerEnd = items[0].end - tok.offset;
+            } else if (result instanceof CborFloat) {
               if (result.ednSource === undefined) result.ednSource = rawSource;
             } else if (seqExt.preserveAppSeqSource) {
               return new CborAppSeqResult(result, rawSource);
@@ -693,6 +714,18 @@ class CDNParser {
             )
               result.encodingWidth = encodingWidth;
             if (result.ednSource === undefined) result.ednSource = ednSource;
+            if (
+              ext.preserveAppSeqSource === 'optional' &&
+              result.appSeqSource === undefined
+            ) {
+              // Raw tag notation (e.g. 1(1749772800)) is itself a spelling
+              // that preserveAppSequence should be able to keep instead of
+              // upgrading it to regenerated DT'...' notation.
+              result.appSeqSource = this.t.source.slice(
+                tok.offset,
+                this.t.lastEndOffset
+              );
+            }
           }
           if (setupWarnings.length > 0) {
             result.warnings ??= [];
@@ -748,10 +781,10 @@ class CDNParser {
           ednSource: tok.raw,
           ...(ew !== undefined ? { encodingWidth: ew } : {}),
         });
-      return new CborTextString(
-        tok.value,
-        ew !== undefined ? { encodingWidth: ew } : undefined
-      );
+      return new CborTextString(tok.value, {
+        quotedEdnSource: tok.raw,
+        ...(ew !== undefined ? { encodingWidth: ew } : {}),
+      });
     }
 
     // Concatenation chain — may include ellipsis, producing CborEllipsis

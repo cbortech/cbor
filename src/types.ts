@@ -439,6 +439,18 @@ export interface FromCDNOptions {
   preserveComments?: boolean | 'c-style' | 'cdn-style';
 
   /**
+   * Shorthand for `ToCDNOptions.preserveAll`, so a single option enables
+   * round-tripping through both `fromCDN()` and `toCDN()` (as
+   * `CBOR.format()` does internally). On the parse side, this only implies
+   * `preserveComments: true` (comments must be captured while parsing to be
+   * re-emittable); the other `preserve*` behaviors are always captured by
+   * the parser and only need to be turned on for `toCDN()`.
+   *
+   * @default false
+   */
+  preserveAll?: boolean;
+
+  /**
    * Controls how CDN/EDN validity violations are handled.
    *
    * - `true` (default): recoverable violations call `onWarning` and then throw.
@@ -581,6 +593,30 @@ export interface ToCDNOptions {
   indent?: number | string;
 
   /**
+   * Master switch that turns on every `preserve*` option below at once —
+   * `preserveComments`, `preserveByteString`, `preserveRawString`,
+   * `preserveTextString`, `preserveConcatenation`, `preserveNumberFormat`,
+   * and `preserveAppSequence` — for reformatting CDN text (e.g. on save in
+   * an editor) with minimal changes: only whitespace/indentation, plus
+   * anything an explicitly-set individual option overrides.
+   *
+   * An option explicitly set to a value (including `false`) is left as-is;
+   * `preserveAll` only fills in the ones left `undefined`. So
+   * `{ preserveAll: true, preserveNumberFormat: false }` preserves
+   * everything except number literal spelling.
+   *
+   * When parsing via `CBOR.fromCDN()` separately from `toCDN()` (rather
+   * than through `CBOR.format()`, which passes the same options to both),
+   * also pass `preserveAll` (or `preserveComments`) to `FromCDNOptions` so
+   * comments are captured in the first place — see
+   * `FromCDNOptions.preserveAll`. Bignums are unaffected by
+   * `preserveNumberFormat` even under `preserveAll`; see that option.
+   *
+   * @default false
+   */
+  preserveAll?: boolean;
+
+  /**
    * Emit comments previously captured by `FromCDNOptions.preserveComments`.
    *
    * - `true`: emit comments with their original markers.
@@ -643,6 +679,27 @@ export interface ToCDNOptions {
   preserveRawString?: boolean;
 
   /**
+   * Re-emit double-quoted text strings (`"..."`) using their original CDN
+   * source spelling — escape sequences (`é` vs. the literal character),
+   * quoting choices, etc. — instead of re-escaping them from the decoded
+   * string value.
+   *
+   * Applies to non-concatenated double-quoted literals only; a string
+   * reached via `+` concatenation is normalised as usual regardless of this
+   * option. Preserved strings are emitted verbatim: they are never
+   * re-indented or split by `splitCdn` / `splitNewline`.
+   *
+   * Raw backtick literals (`` `...` ``) are covered by `preserveRawString`,
+   * not this option.
+   *
+   * In single-line output (no `indent`), a spelling that spans multiple
+   * lines falls back to normal escaping; single-line spellings are kept.
+   *
+   * @default false
+   */
+  preserveTextString?: boolean;
+
+  /**
    * Re-emit integer and floating-point literals using their original CDN
    * source spelling — base (`0xff` / `0o377` / `0b101` / decimal), digit
    * spelling, decimal point / exponent form, and encoding-indicator suffix
@@ -702,6 +759,33 @@ export interface ToCDNOptions {
    * @default true
    */
   appStrings?: boolean;
+
+  /**
+   * For built-in extensions that support application-string notation
+   * (`prefix'...'` or `` prefix`...` ``), application-sequence notation
+   * (`prefix<<...>>`), and/or a raw tag literal (`N(...)`), re-emit a value
+   * using its exact original spelling instead of normalizing it to the
+   * regenerated `prefix'...'` form.
+   *
+   * By default, an extension like `dt`/`DT` or `ip`/`IP` regenerates its
+   * notation from the resolved value on every call — so
+   * `` DT`1969-07-21T02:56:16Z` ``, `DT<<'1969-07-21T02:56:16Z'>>`, and even
+   * the raw tag form `1(1749772800)` all become
+   * `DT'2025-06-13T00:00:00Z'`-style `prefix'...'` notation, even though all
+   * of these denote the same value. `preserveAppSequence` keeps the
+   * original spelling instead — whichever quoting (`'...'` vs `` `...` ``),
+   * bracketing (`<<...>>`), or raw tag form was used. Has no effect when
+   * `appStrings` is `false` (raw tag notation is used either way regardless
+   * of the original spelling), or on values not parsed from one of these
+   * forms.
+   *
+   * In single-line output (no `indent`), a spelling that spans multiple
+   * lines falls back to normal (regenerated) notation; single-line
+   * spellings are kept.
+   *
+   * @default false
+   */
+  preserveAppSequence?: boolean;
 
   /**
    * Numeric format for integer values in CDN output.

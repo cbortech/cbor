@@ -529,56 +529,130 @@
           <label class="check">
             <input
               type="checkbox"
-              id="opt-comments"
-              aria-describedby="hint-opt-comments"
+              id="opt-preserve-all"
+              aria-describedby="hint-opt-preserve-all"
               checked
             />
-            Keep comments
-            <span class="opt-hint" role="tooltip" id="hint-opt-comments"
-              >Keep comments from the input and emit them in the formatted
-              output</span
+            <strong>Preserve everything</strong>
+            <span class="opt-hint" role="tooltip" id="hint-opt-preserve-all"
+              >Turn all options in the "Individual preserve options" submenu on
+              or off at once</span
             >
           </label>
-          <label class="check">
-            <input
-              type="checkbox"
-              id="opt-concat"
-              aria-describedby="hint-opt-concat"
-              checked
-            />
-            Keep concatenation
-            <span class="opt-hint" role="tooltip" id="hint-opt-concat"
-              >Keep + string concatenation boundaries from the input ("a" + "b")
-              instead of joining the parts into one literal</span
+          <div class="preserve-submenu">
+            <button
+              type="button"
+              id="preserve-opts-btn"
+              class="submenu-btn"
+              aria-haspopup="true"
+              aria-expanded="false"
+              aria-controls="preserve-popover"
             >
-          </label>
-          <label class="check">
-            <input
-              type="checkbox"
-              id="opt-raw-string"
-              aria-describedby="hint-opt-raw-string"
-              checked
-            />
-            Keep raw strings
-            <span class="opt-hint" role="tooltip" id="hint-opt-raw-string"
-              >Keep raw backtick text strings in their original source form
-              instead of converting them to double-quoted strings</span
-            >
-          </label>
-          <label class="check">
-            <input
-              type="checkbox"
-              id="opt-number-format"
-              aria-describedby="hint-opt-number-format"
-              checked
-            />
-            Keep number spelling
-            <span class="opt-hint" role="tooltip" id="hint-opt-number-format"
-              >Keep integer/float literals in their original source spelling
-              (0xff, 0o377, 1.50, 1.5_1) instead of normalizing them via the
-              Integers/Floats/Enc. indicators options above</span
-            >
-          </label>
+              Individual preserve options
+            </button>
+            <div id="preserve-popover" class="popover preserve-popover" hidden>
+              <label class="check">
+                <input
+                  type="checkbox"
+                  id="opt-comments"
+                  aria-describedby="hint-opt-comments"
+                  checked
+                />
+                Comments
+                <span class="opt-hint" role="tooltip" id="hint-opt-comments"
+                  >Keep comments from the input and emit them in the formatted
+                  output</span
+                >
+              </label>
+              <label class="check">
+                <input
+                  type="checkbox"
+                  id="opt-concat"
+                  aria-describedby="hint-opt-concat"
+                  checked
+                />
+                Concatenation
+                <span class="opt-hint" role="tooltip" id="hint-opt-concat"
+                  >Keep + string concatenation boundaries from the input ("a" +
+                  "b") instead of joining the parts into one literal</span
+                >
+              </label>
+              <label class="check">
+                <input
+                  type="checkbox"
+                  id="opt-byte-string"
+                  aria-describedby="hint-opt-byte-string"
+                  checked
+                />
+                Byte string spelling
+                <span class="opt-hint" role="tooltip" id="hint-opt-byte-string"
+                  >Keep non-concatenated byte string literals (h'…', b64'…',
+                  b32'…', h32'…', '…') in their original source form instead of
+                  re-encoding them via the Byte strings option above</span
+                >
+              </label>
+              <label class="check">
+                <input
+                  type="checkbox"
+                  id="opt-raw-string"
+                  aria-describedby="hint-opt-raw-string"
+                  checked
+                />
+                Raw strings
+                <span class="opt-hint" role="tooltip" id="hint-opt-raw-string"
+                  >Keep raw backtick text strings in their original source form
+                  instead of converting them to double-quoted strings</span
+                >
+              </label>
+              <label class="check">
+                <input
+                  type="checkbox"
+                  id="opt-text-string"
+                  aria-describedby="hint-opt-text-string"
+                  checked
+                />
+                String escapes
+                <span class="opt-hint" role="tooltip" id="hint-opt-text-string"
+                  >Keep non-concatenated double-quoted text strings in their
+                  original escape spelling instead of re-escaping them from the
+                  decoded value</span
+                >
+              </label>
+              <label class="check">
+                <input
+                  type="checkbox"
+                  id="opt-number-format"
+                  aria-describedby="hint-opt-number-format"
+                  checked
+                />
+                Number spelling
+                <span
+                  class="opt-hint"
+                  role="tooltip"
+                  id="hint-opt-number-format"
+                  >Keep integer/float literals in their original source spelling
+                  (0xff, 0o377, 1.50, 1.5_1) instead of normalizing them via the
+                  Integers/Floats/Enc. indicators options above</span
+                >
+              </label>
+              <label class="check">
+                <input
+                  type="checkbox"
+                  id="opt-app-sequence"
+                  aria-describedby="hint-opt-app-sequence"
+                  checked
+                />
+                App-string/-sequence notation
+                <span class="opt-hint" role="tooltip" id="hint-opt-app-sequence"
+                  >For values written as prefix`...` or
+                  prefix&lt;&lt;...&gt;&gt; (e.g. DT`...` or
+                  DT&lt;&lt;'...'&gt;&gt;), or a non-canonically spelled
+                  prefix'...', keep that exact notation instead of normalizing
+                  it. No effect when App strings is off</span
+                >
+              </label>
+            </div>
+          </div>
           <label class="check">
             <input
               type="checkbox"

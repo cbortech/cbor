@@ -12,6 +12,7 @@ import {
 import {
   resolveEiSuffix,
   canonicalEncodingWidth,
+  renderSingleChildWithComments,
 } from '../cdn/serialize-utils';
 import { bytesToSpacedHexUpper } from '../utils/hex';
 
@@ -59,7 +60,16 @@ export class CborTag extends CborItem {
       options?.preserveNumberFormat && this.ednSource !== undefined
         ? this.ednSource
         : this.tag.toString();
-    return `${tagStr}${suffix}(${this.content._toCDN(options, depth)})`;
+    const wrapped = renderSingleChildWithComments(
+      this.content,
+      this,
+      options,
+      depth,
+      (childDepth) => this.content._toCDN(options, childDepth),
+      '(',
+      ')'
+    );
+    return `${tagStr}${suffix}${wrapped}`;
   }
 
   override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
