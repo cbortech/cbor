@@ -643,6 +643,29 @@ export interface ToCDNOptions {
   preserveRawString?: boolean;
 
   /**
+   * Re-emit integer and floating-point literals using their original CDN
+   * source spelling — base (`0xff` / `0o377` / `0b101` / decimal), digit
+   * spelling, decimal point / exponent form, and encoding-indicator suffix
+   * (e.g. `1.5_1`) — instead of normalising them via `intFormat` /
+   * `floatFormat` and recomputed encoding indicators.
+   *
+   * Takes precedence over `intFormat` and `floatFormat` for literals parsed
+   * from CDN text. Values that did not originate from CDN text (e.g. built
+   * via `CBOR.from()` or decoded from CBOR bytes) always fall back to normal
+   * formatting, since there is no original spelling to preserve. Bignums
+   * (integers outside the uint64/int64 range) are unaffected and always
+   * render as plain decimal.
+   *
+   * Combine with `preserveByteString`, `preserveRawString`,
+   * `preserveConcatenation`, and `preserveComments` to reformat CDN text
+   * (e.g. whitespace/indentation only) with minimal changes to the rest of
+   * the source.
+   *
+   * @default false
+   */
+  preserveNumberFormat?: boolean;
+
+  /**
    * Whether to emit commas between array/map elements.
    * - `'comma'`: emit commas (`[1, 2, 3]`)
    * - `'none'`: omit commas, use spaces only (`[1 2 3]`)

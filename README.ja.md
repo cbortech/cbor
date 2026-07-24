@@ -330,6 +330,27 @@ CBOR.format('`\\d+`', { preserveRawString: true });
 // '`\\d+`'
 ```
 
+### 数値リテラルの表記を保持する
+
+デフォルトでは、`CBOR.format()` は整数・浮動小数点数リテラルを正規化します。
+16進数・8進数・2進数の整数(`0xff`、`0o377`、`0b101`)は10進数に変換され、
+末尾のゼロや冗長なエンコーディング指標のサフィックス(`1.50`、`1.5_1`)は
+省略されます。`preserveNumberFormat` を指定すると、これらのリテラルを元の
+CDN ソース表記のまま再出力します。`intFormat` / `floatFormat` より優先され
+ます。CDN テキストからパースされたリテラルにのみ効果があり、`CBOR.from()`
+で構築した値や CBOR バイト列からデコードした値には効果がありません(通常
+どおりの整形になります)。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+CBOR.format('{"a": 0xff, "b": 1.50}');
+// '{"a":255,"b":1.5}'
+
+CBOR.format('{"a": 0xff, "b": 1.50}', { preserveNumberFormat: true });
+// '{"a":0xff,"b":1.50}'
+```
+
 ### `+` による文字列連結を保持する
 
 注意: `+` による文字列連結構文は draft-26 で削除されました。この節は legacy
@@ -362,6 +383,33 @@ CBOR.format("h'68' + b64'aQ'", {
 });
 // h'68' +
 //   b64'aQ'
+```
+
+### 変更を最小限にとどめてフォーマットする
+
+すべての `preserve*` 系オプションを組み合わせると、たとえばエディタの
+保存時フォーマットのように、空白・インデントだけを変更し、ほとんどの
+リテラルの元の表記には手を加えずに CDN テキストを整形できます(bignum
+だけは例外です。上記の `preserveNumberFormat` の説明を参照してください)。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const layoutOnly = {
+  indent: 2,
+  preserveComments: true,
+  preserveByteString: true,
+  preserveRawString: true,
+  preserveConcatenation: true,
+  preserveNumberFormat: true,
+};
+
+CBOR.format('{"a":0xff,"b":1.5_1,"c":b64\'aGk=\'}', layoutOnly);
+// {
+//   "a": 0xff,
+//   "b": 1.5_1,
+//   "c": b64'aGk='
+// }
 ```
 
 ### CBOR / CDN / hex dump のバリデーション

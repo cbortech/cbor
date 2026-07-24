@@ -15,12 +15,20 @@ import type { CborWriter } from '../cbor/encode';
  */
 export class CborSimple extends CborItem {
   readonly value: number;
+  /**
+   * Original CDN digit spelling of the argument to `simple(...)` (base +
+   * digits), set by the parser when this value came from CDN text. Used by
+   * `_toCDN()` to round-trip the argument's base (`0x10`, decimal, …) when
+   * `preserveNumberFormat` is set.
+   */
+  readonly ednSource?: string;
 
-  constructor(value: number) {
+  constructor(value: number, options?: { ednSource?: string }) {
     super();
     if (!Number.isInteger(value) || value < 0 || value > 255)
       throw new RangeError('CborSimple value must be an integer in 0–255');
     this.value = value;
+    this.ednSource = options?.ednSource;
   }
 
   static readonly FALSE = new CborSimple(20);
@@ -39,7 +47,14 @@ export class CborSimple extends CborItem {
     writer.writeByte(this.value);
   }
 
-  _toCDN(_options: ToCDNOptions | undefined, _depth: number): string {
+  _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
+    // A value written as simple(20) etc. is a different spelling choice from
+    // the false/true/null/undefined keywords, even though it denotes the
+    // same value — so preserveNumberFormat must keep simple(...) notation
+    // (checked before the keyword shortcuts below, which only apply to
+    // values that were never parsed via simple(...) in the first place).
+    if (options?.preserveNumberFormat && this.ednSource !== undefined)
+      return `simple(${this.ednSource})`;
     switch (this.value) {
       case 20:
         return 'false';

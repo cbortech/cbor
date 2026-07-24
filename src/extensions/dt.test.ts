@@ -122,6 +122,48 @@ describe('dt — toCDN', () => {
   });
 });
 
+describe('dt — preserveNumberFormat', () => {
+  // parseTag() rebuilds a fresh CborEpochDtExt* node from the tagged
+  // content; it must carry the original ednSource/literalSource along so
+  // preserveNumberFormat isn't silently dropped for values reached via
+  // 1(...) tag notation (as opposed to dt'...' / DT'...' app-strings).
+  test('0x1(0xff) + appStrings:false preserves both tag number and content base', () => {
+    expect(
+      CBOR.format('0x1(0xff)', {
+        preserveNumberFormat: true,
+        appStrings: false,
+      })
+    ).toBe('0x1(0xff)');
+  });
+
+  test('0x1(-0x10) + appStrings:false preserves negative content base', () => {
+    expect(
+      CBOR.format('0x1(-0x10)', {
+        preserveNumberFormat: true,
+        appStrings: false,
+      })
+    ).toBe('0x1(-0x10)');
+  });
+
+  test('0x1(1.5_1) + appStrings:false preserves float spelling and indicator', () => {
+    expect(
+      CBOR.format('0x1(1.5_1)', {
+        preserveNumberFormat: true,
+        appStrings: false,
+      })
+    ).toBe('0x1(1.5_1)');
+  });
+
+  test('appStrings default still prefers DT notation over raw tag spelling', () => {
+    // appStrings takes precedence over preserveNumberFormat by design: it
+    // controls whether known tags use application-string notation at all,
+    // independently of how any underlying integer/float literal is spelled.
+    expect(CBOR.format('0x1(0xff)', { preserveNumberFormat: true })).toBe(
+      "DT'1970-01-01T00:04:15Z'"
+    );
+  });
+});
+
 // ─── fromCBOR round-trip (DT_EXT built-in, no extensions option needed) ───────
 
 describe('dt — fromCBOR round-trip', () => {

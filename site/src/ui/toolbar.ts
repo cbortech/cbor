@@ -191,6 +191,10 @@ export function readFormatOptions(): FromCDNOptions & ToCDNOptions {
     options.preserveConcatenation = true;
   if ((document.getElementById('opt-raw-string') as HTMLInputElement).checked)
     options.preserveRawString = true;
+  if (
+    (document.getElementById('opt-number-format') as HTMLInputElement).checked
+  )
+    options.preserveNumberFormat = true;
   if (!(document.getElementById('opt-app-strings') as HTMLInputElement).checked)
     options.appStrings = false;
   return options;

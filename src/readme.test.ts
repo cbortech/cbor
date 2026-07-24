@@ -156,6 +156,28 @@ describe('README examples', () => {
     ).toBe("h'68' +\n  b64'aQ'");
   });
 
+  test('preserveNumberFormat keeps original number literal spelling', () => {
+    expect(CBOR.format('{"a": 0xff, "b": 1.50}')).toBe('{"a":255,"b":1.5}');
+    expect(
+      CBOR.format('{"a": 0xff, "b": 1.50}', { preserveNumberFormat: true })
+    ).toBe('{"a":0xff,"b":1.50}');
+  });
+
+  test('format with minimal changes (layout-only recipe)', () => {
+    const layoutOnly = {
+      indent: 2,
+      preserveComments: true,
+      preserveByteString: true,
+      preserveRawString: true,
+      preserveConcatenation: true,
+      preserveNumberFormat: true,
+    };
+
+    expect(
+      CBOR.format('{"a":0xff,"b":1.5_1,"c":b64\'aGk=\'}', layoutOnly)
+    ).toBe('{\n  "a": 0xff,\n  "b": 1.5_1,\n  "c": b64\'aGk=\'\n}');
+  });
+
   test('AST item methods', () => {
     const item = CBOR.fromCDN('{ "x": 1 }');
 

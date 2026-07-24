@@ -161,7 +161,7 @@ export const TAG_EPOCH = 1n;
 export class CborEpochDtExtUint extends CborUint {
   constructor(
     value: number | bigint,
-    options?: { encodingWidth?: EncodingWidth }
+    options?: { encodingWidth?: EncodingWidth; ednSource?: string }
   ) {
     super(value, options);
   }
@@ -182,7 +182,7 @@ export class CborEpochDtExtUint extends CborUint {
 export class CborEpochDtExtNint extends CborNint {
   constructor(
     value: number | bigint,
-    options?: { encodingWidth?: EncodingWidth }
+    options?: { encodingWidth?: EncodingWidth; ednSource?: string }
   ) {
     super(value, options);
   }
@@ -203,7 +203,10 @@ export class CborEpochDtExtNint extends CborNint {
 export class CborEpochDtExtFloat extends CborFloat {
   constructor(
     value: number,
-    options?: { precision?: 'half' | 'single' | 'double' }
+    options?: {
+      precision?: 'half' | 'single' | 'double';
+      literalSource?: string;
+    }
   ) {
     super(value, options);
   }
@@ -338,16 +341,20 @@ export function createDtExtension(options?: {
       if (value instanceof CborUint) {
         content = new CborEpochDtExtUint(value.value, {
           encodingWidth: value.encodingWidth,
+          ednSource: value.ednSource,
         });
       } else if (value instanceof CborNint) {
         content = new CborEpochDtExtNint(value.value, {
           encodingWidth: value.encodingWidth,
+          ednSource: value.ednSource,
         });
       } else if (value instanceof CborFloat) {
         // Always preserve as float to avoid losing the original CBOR encoding
         // type (e.g. float64(1.0) must not silently become uint(1)).
-        content = new CborEpochDtExtFloat(value.value);
-        if (value.precision !== undefined) content.precision = value.precision;
+        content = new CborEpochDtExtFloat(value.value, {
+          precision: value.precision,
+          literalSource: value.literalSource,
+        });
       } else {
         return undefined;
       }

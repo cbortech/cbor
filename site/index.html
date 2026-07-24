@@ -568,6 +568,20 @@
           <label class="check">
             <input
               type="checkbox"
+              id="opt-number-format"
+              aria-describedby="hint-opt-number-format"
+              checked
+            />
+            Keep number spelling
+            <span class="opt-hint" role="tooltip" id="hint-opt-number-format"
+              >Keep integer/float literals in their original source spelling
+              (0xff, 0o377, 1.50, 1.5_1) instead of normalizing them via the
+              Integers/Floats/Enc. indicators options above</span
+            >
+          </label>
+          <label class="check">
+            <input
+              type="checkbox"
               id="opt-app-strings"
               aria-describedby="hint-opt-app-strings"
               checked

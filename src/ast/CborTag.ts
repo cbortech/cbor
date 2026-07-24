@@ -20,11 +20,18 @@ export class CborTag extends CborItem {
   readonly tag: bigint;
   readonly content: CborItem;
   encodingWidth: EncodingWidth | undefined;
+  /**
+   * Original CDN digit spelling of the tag number (base + digits, without
+   * the encoding-indicator suffix), set by the parser when this tag came
+   * from CDN text. Used by `_toCDN()` to round-trip the tag number's base
+   * (`0x3e7`, decimal, …) when `preserveNumberFormat` is set.
+   */
+  ednSource?: string;
 
   constructor(
     tag: number | bigint,
     content: CborItem,
-    options?: { encodingWidth?: EncodingWidth }
+    options?: { encodingWidth?: EncodingWidth; ednSource?: string }
   ) {
     super();
     this.tag = BigInt(tag);
@@ -32,6 +39,7 @@ export class CborTag extends CborItem {
       throw new RangeError('CborTag tag number must be non-negative');
     this.content = content;
     this.encodingWidth = options?.encodingWidth;
+    this.ednSource = options?.ednSource;
   }
 
   override get _containsCdnContainer(): boolean {
@@ -47,7 +55,11 @@ export class CborTag extends CborItem {
     const suffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(this.tag)
     );
-    return `${this.tag}${suffix}(${this.content._toCDN(options, depth)})`;
+    const tagStr =
+      options?.preserveNumberFormat && this.ednSource !== undefined
+        ? this.ednSource
+        : this.tag.toString();
+    return `${tagStr}${suffix}(${this.content._toCDN(options, depth)})`;
   }
 
   override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {

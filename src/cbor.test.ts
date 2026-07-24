@@ -645,6 +645,147 @@ describe('CBOR.format()', () => {
     ).toBe("'hi'");
   });
 
+  test('preserves integer literal base and spelling when requested', () => {
+    expect(CBOR.format('0xff', { preserveNumberFormat: true })).toBe('0xff');
+    expect(CBOR.format('0XFF', { preserveNumberFormat: true })).toBe('0XFF');
+    expect(CBOR.format('0o377', { preserveNumberFormat: true })).toBe('0o377');
+    expect(CBOR.format('0b101', { preserveNumberFormat: true })).toBe('0b101');
+    expect(CBOR.format('-0x1f', { preserveNumberFormat: true })).toBe('-0x1f');
+    // Default output normalises to decimal.
+    expect(CBOR.format('0xff')).toBe('255');
+    expect(CBOR.format('0o377')).toBe('255');
+  });
+
+  test('preserves integer encoding-indicator suffix when requested', () => {
+    expect(CBOR.format('5_i', { preserveNumberFormat: true })).toBe('5_i');
+    expect(CBOR.format('0x2a_1', { preserveNumberFormat: true })).toBe(
+      '0x2a_1'
+    );
+    // encodingIndicators: 'never' still strips the suffix.
+    expect(
+      CBOR.format('5_i', {
+        preserveNumberFormat: true,
+        encodingIndicators: 'never',
+      })
+    ).toBe('5');
+  });
+
+  test('preserves float literal spelling and indicator when requested', () => {
+    expect(CBOR.format('1.50', { preserveNumberFormat: true })).toBe('1.50');
+    expect(CBOR.format('1.5_1', { preserveNumberFormat: true })).toBe('1.5_1');
+    expect(CBOR.format('0x1.8p+0_1', { preserveNumberFormat: true })).toBe(
+      '0x1.8p+0_1'
+    );
+    // Default output drops the redundant indicator and trailing zero.
+    expect(CBOR.format('1.5_1')).toBe('1.5');
+    expect(CBOR.format('1.50')).toBe('1.5');
+    // encodingIndicators: 'never' still strips the suffix.
+    expect(
+      CBOR.format('1.5_1', {
+        preserveNumberFormat: true,
+        encodingIndicators: 'never',
+      })
+    ).toBe('1.5');
+  });
+
+  test('preserveNumberFormat has no effect on values without CDN source', () => {
+    expect(CBOR.stringify(255, { preserveNumberFormat: true })).toBe('255');
+    expect(CBOR.stringify(1.5, { preserveNumberFormat: true })).toBe('1.5');
+  });
+
+  test('preserves numbers nested in containers under indent', () => {
+    expect(
+      CBOR.format('{"a": 0xff, "b": [1.50, 0o17]}', {
+        indent: 2,
+        preserveNumberFormat: true,
+      })
+    ).toBe('{\n  "a": 0xff,\n  "b": [\n    1.50,\n    0o17\n  ]\n}');
+  });
+
+  test('preserves a leading + sign on numbers when requested', () => {
+    expect(CBOR.format('+42', { preserveNumberFormat: true })).toBe('+42');
+    expect(CBOR.format('+0xff', { preserveNumberFormat: true })).toBe('+0xff');
+    expect(CBOR.format('+1.50', { preserveNumberFormat: true })).toBe('+1.50');
+    expect(CBOR.format('+Infinity', { preserveNumberFormat: true })).toBe(
+      '+Infinity'
+    );
+    // Default output drops the redundant explicit sign.
+    expect(CBOR.format('+42')).toBe('42');
+    expect(CBOR.format('+1.50')).toBe('1.5');
+    expect(CBOR.format('+Infinity')).toBe('Infinity');
+  });
+
+  test('encodingIndicators: always forces a suffix onto a plain float literal', () => {
+    expect(
+      CBOR.format('1.5', {
+        preserveNumberFormat: true,
+        encodingIndicators: 'always',
+      })
+    ).toBe('1.5_1');
+    // A literal that already carries a suffix is left untouched.
+    expect(
+      CBOR.format('1.5_1', {
+        preserveNumberFormat: true,
+        encodingIndicators: 'always',
+      })
+    ).toBe('1.5_1');
+  });
+
+  test('encodingIndicators: never strips an invalid suffix parsed leniently', () => {
+    let warned = false;
+    expect(
+      CBOR.format('1.5_7', {
+        preserveNumberFormat: true,
+        encodingIndicators: 'never',
+        strict: false,
+        onWarning: () => {
+          warned = true;
+        },
+      })
+    ).toBe('1.5');
+    expect(warned).toBe(true);
+  });
+
+  test('preserves tag number base when requested', () => {
+    expect(CBOR.format('0x3e7(2)', { preserveNumberFormat: true })).toBe(
+      '0x3e7(2)'
+    );
+    // Default output normalises the tag number to decimal.
+    expect(CBOR.format('0x3e7(2)')).toBe('999(2)');
+  });
+
+  test('preserves simple() argument base when requested', () => {
+    expect(CBOR.format('simple(0x10)', { preserveNumberFormat: true })).toBe(
+      'simple(0x10)'
+    );
+    // Default output normalises the argument to decimal.
+    expect(CBOR.format('simple(0x10)')).toBe('simple(16)');
+  });
+
+  test('preserves simple(20..23) notation instead of collapsing to keywords', () => {
+    // simple(0x14) and simple(+20) both denote the same value as `false`
+    // (simple value 20), but preserveNumberFormat must keep the simple(...)
+    // spelling the user actually wrote rather than the false/true/null/
+    // undefined keyword shortcuts, which only apply to values that were
+    // never written via simple(...) in the first place.
+    expect(CBOR.format('simple(0x14)', { preserveNumberFormat: true })).toBe(
+      'simple(0x14)'
+    );
+    expect(CBOR.format('simple(+20)', { preserveNumberFormat: true })).toBe(
+      'simple(+20)'
+    );
+    // Default output still collapses to the keyword.
+    expect(CBOR.format('simple(0x14)')).toBe('false');
+    // A literal `false` keyword (no simple(...) source) is unaffected.
+    expect(CBOR.format('false', { preserveNumberFormat: true })).toBe('false');
+  });
+
+  test('bignum literals are unaffected by preserveNumberFormat', () => {
+    expect(
+      CBOR.format('0x10000000000000000', { preserveNumberFormat: true })
+    ).toBe('18446744073709551616');
+  });
+
   test('preserves raw text string literals when requested', () => {
     expect(CBOR.format('`hi there`', { preserveRawString: true })).toBe(
       '`hi there`'

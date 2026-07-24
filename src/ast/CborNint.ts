@@ -26,10 +26,18 @@ export class CborNint extends CborItem {
   /** CBOR raw argument n, where actual value = −1 − n. */
   readonly argument: bigint;
   encodingWidth: EncodingWidth | undefined;
+  /**
+   * Original CDN digit spelling (sign + base + digits, without the
+   * encoding-indicator suffix), set by the parser when this value came
+   * from CDN text. Used by `_toCDN()` to round-trip the literal's base
+   * (`-0xff`, `-0o377`, `-0b101`, decimal) when `preserveNumberFormat` is
+   * set.
+   */
+  readonly ednSource?: string;
 
   constructor(
     value: number | bigint,
-    options?: { encodingWidth?: EncodingWidth }
+    options?: { encodingWidth?: EncodingWidth; ednSource?: string }
   ) {
     super();
     const v = BigInt(value);
@@ -38,6 +46,7 @@ export class CborNint extends CborItem {
       throw new RangeError('CborNint value exceeds minimum int64');
     this.argument = -1n - v;
     this.encodingWidth = options?.encodingWidth;
+    this.ednSource = options?.ednSource;
   }
 
   /** The actual decoded negative value (−1 − argument). */
@@ -53,6 +62,9 @@ export class CborNint extends CborItem {
     const suffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(this.argument)
     );
+    if (options?.preserveNumberFormat && this.ednSource !== undefined) {
+      return this.ednSource + suffix;
+    }
     const abs = this.argument + 1n; // absolute value of the negative number
     switch (options?.intFormat) {
       case 'hex':

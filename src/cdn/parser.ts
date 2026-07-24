@@ -640,6 +640,10 @@ class CDNParser {
         ? this._resolveEncodingWidth(rawSuffix, tok)
         : this.consumeEncodingIndicator();
     const n = parseBigInt(numStr);
+    // tok.raw keeps a leading '+' that tok.value drops (e.g. "+42" → value
+    // "42", raw "+42"); mirror the same suffix stripping applied to numStr
+    // so the preserved spelling matches what the user actually wrote.
+    const ednSource = rawSuffix !== undefined ? tok.raw.slice(0, -2) : tok.raw;
 
     // Out-of-range integers become bignum tags per RFC 8949 §3.4.3.
     // Tag numbers must fit in uint64, so a value > UINT64_MAX before '(' is an error.
@@ -665,14 +669,8 @@ class CDNParser {
 
     const intNode =
       n >= 0n
-        ? new CborUint(
-            n,
-            encodingWidth !== undefined ? { encodingWidth } : undefined
-          )
-        : new CborNint(
-            n,
-            encodingWidth !== undefined ? { encodingWidth } : undefined
-          );
+        ? new CborUint(n, { encodingWidth, ednSource })
+        : new CborNint(n, { encodingWidth, ednSource });
 
     // integer followed by '(' → tagged data item
     if (this.t.peek().type === 'LPAREN') {
@@ -688,12 +686,14 @@ class CDNParser {
       if (ext?.parseTag) {
         const result = ext.parseTag(tagNum, content);
         if (result !== undefined) {
-          if (
-            result instanceof CborTag &&
-            encodingWidth !== undefined &&
-            result.encodingWidth === undefined
-          )
-            result.encodingWidth = encodingWidth;
+          if (result instanceof CborTag) {
+            if (
+              encodingWidth !== undefined &&
+              result.encodingWidth === undefined
+            )
+              result.encodingWidth = encodingWidth;
+            if (result.ednSource === undefined) result.ednSource = ednSource;
+          }
           if (setupWarnings.length > 0) {
             result.warnings ??= [];
             result.warnings.push(...setupWarnings);
@@ -701,11 +701,10 @@ class CDNParser {
           return result;
         }
       }
-      const tagResult = new CborTag(
-        tagNum,
-        content,
-        encodingWidth !== undefined ? { encodingWidth } : undefined
-      );
+      const tagResult = new CborTag(tagNum, content, {
+        encodingWidth,
+        ednSource,
+      });
       if (setupWarnings.length > 0) {
         tagResult.warnings ??= [];
         tagResult.warnings.push(...setupWarnings);
@@ -731,10 +730,9 @@ class CDNParser {
           `${value} cannot be exactly represented as ${precision === 'half' ? 'f16 (_1)' : 'f32 (_2)'}; use _3 or remove the indicator`
         );
     }
-    return new CborFloat(
-      value,
-      precision !== undefined ? { precision } : undefined
-    );
+    // tok.raw keeps a leading '+' that tok.value drops (e.g. "+1.5" → value
+    // "1.5", raw "+1.5"; likewise "+Infinity" → value "Infinity").
+    return new CborFloat(value, { precision, literalSource: tok.raw });
   }
 
   private parseString(): CborItem {
@@ -1091,7 +1089,7 @@ class CDNParser {
     const { numStr } = parseIntegerRaw(numTok.value);
     const n = Number(parseBigInt(numStr));
     this.expect('RPAREN');
-    return new CborSimple(n);
+    return new CborSimple(n, { ednSource: numTok.raw });
   }
 
   private parseEmbeddedCBOR(): CborEmbeddedCBOR {

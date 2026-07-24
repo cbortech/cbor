@@ -336,6 +336,26 @@ CBOR.format('`\\d+`', { preserveRawString: true });
 // '`\\d+`'
 ```
 
+### Preserve number literal spelling
+
+By default, `CBOR.format()` normalizes integer and floating-point literals:
+hex/octal/binary integers (`0xff`, `0o377`, `0b101`) become decimal, trailing
+zeros and redundant encoding-indicator suffixes (`1.50`, `1.5_1`) are
+dropped. `preserveNumberFormat` re-emits these literals using their original
+CDN source spelling instead, taking precedence over `intFormat` /
+`floatFormat`. It only affects literals parsed from CDN text — values built
+with `CBOR.from()` or decoded from CBOR bytes always use normal formatting.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+CBOR.format('{"a": 0xff, "b": 1.50}');
+// '{"a":255,"b":1.5}'
+
+CBOR.format('{"a": 0xff, "b": 1.50}', { preserveNumberFormat: true });
+// '{"a":0xff,"b":1.50}'
+```
+
 ### Preserve `+` string concatenation
 
 Note: `+` string concatenation was removed in draft-26. This section is for
@@ -370,6 +390,33 @@ CBOR.format("h'68' + b64'aQ'", {
 });
 // h'68' +
 //   b64'aQ'
+```
+
+### Format with minimal changes
+
+Combine all `preserve*` options to reformat CDN text — e.g. when
+reformatting on save in an editor — touching only whitespace/indentation
+and leaving most literals' original spelling untouched (bignums are the one
+exception; see `preserveNumberFormat` above):
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const layoutOnly = {
+  indent: 2,
+  preserveComments: true,
+  preserveByteString: true,
+  preserveRawString: true,
+  preserveConcatenation: true,
+  preserveNumberFormat: true,
+};
+
+CBOR.format('{"a":0xff,"b":1.5_1,"c":b64\'aGk=\'}', layoutOnly);
+// {
+//   "a": 0xff,
+//   "b": 1.5_1,
+//   "c": b64'aGk='
+// }
 ```
 
 ### Validate CBOR / CDN / hex dump

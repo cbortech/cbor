@@ -149,6 +149,34 @@ describe('playground', () => {
       expect(cmText('editor').split('\n').length).toBeGreaterThan(5);
     });
 
+    test('Keep number spelling preserves original int/float literals', async () => {
+      const importNums = () =>
+        uploadTo(
+          'cdn-import-input',
+          new File(['{"a": 0xff, "b": 1.5_1}'], 'nums.cdn', {
+            type: 'text/plain',
+          })
+        );
+
+      // Default: "Keep number spelling" is on, so the literal spelling
+      // survives Format.
+      await importNums();
+      await vi.waitFor(() => expect(cmText('editor')).toContain('0xff'));
+      byId('format-opts-btn').click();
+      byId<HTMLSelectElement>('opt-indent').value = '';
+      expect(byId<HTMLInputElement>('opt-number-format').checked).toBe(true);
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe('{"a":0xff,"b":1.5_1}');
+
+      // Re-import (format-btn already reformatted the editor text above) and
+      // reformat again with "Keep number spelling" disabled.
+      await importNums();
+      await vi.waitFor(() => expect(cmText('editor')).toContain('0xff'));
+      byId<HTMLInputElement>('opt-number-format').checked = false;
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe('{"a":255,"b":1.5}');
+    });
+
     test('Copy button copies the CDN text to the clipboard', () => {
       const spy = vi.spyOn(Clipboard.prototype, 'writeText');
       byId('copy-cdn').click();
