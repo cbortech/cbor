@@ -479,7 +479,18 @@ function attachComments(
       }
     }
 
-    addComment(container?.node ?? root, 'dangling', comment);
+    // No enclosing node and no following node: the comment lies entirely
+    // after `root.end` (a comment before `root.start` is always caught by
+    // the `next`-leading branch above, since `root` is itself a collected
+    // node). This happens when this parse is one item of a CDN Sequence
+    // (`allowTrailing: true`) — the tokenizer's one-token lookahead reads
+    // past this item's closing bracket into a comment that actually
+    // belongs to whatever follows. Attaching it here would duplicate the
+    // sequence-level leading-comment assignment `fromCDNSeq` already makes
+    // for the next item, so it is dropped instead of defaulting to `root`.
+    if (!container) continue;
+
+    addComment(container.node, 'dangling', comment);
   }
 }
 
