@@ -10,7 +10,11 @@ import type {
   ParseWarning,
 } from '../types';
 import { CBOR_OMIT } from '../types';
-import { convertCommentText, resolveIndent } from '../cdn/serialize-utils';
+import {
+  convertCommentText,
+  resolveIndent,
+  splitLeadingComments,
+} from '../cdn/serialize-utils';
 import { CborWriter } from '../cbor/encode';
 import { bytesToSpacedHexUpper } from '../utils/hex';
 
@@ -59,6 +63,7 @@ function expandPreserveAll(options: ToCDNOptions): ToCDNOptions {
     preserveConcatenation: options.preserveConcatenation ?? true,
     preserveNumberFormat: options.preserveNumberFormat ?? true,
     preserveAppSequence: options.preserveAppSequence ?? true,
+    preserveBlankLines: options.preserveBlankLines ?? true,
   };
 }
 
@@ -89,6 +94,17 @@ export abstract class CborItem {
    * They do not affect CBOR bytes or JS conversion.
    */
   comments?: CborComments;
+
+  /**
+   * `true` when this node is an array/map entry (or indefinite-length
+   * string chunk) immediately preceded by a blank line in the parsed CDN
+   * source — set unconditionally by the parser, regardless of any
+   * `preserve*` option, mirroring `start`/`end`. Only consulted by
+   * `toCDN()` when `ToCDNOptions.preserveBlankLines` is set; otherwise
+   * ignored. Left `undefined` for nodes not parsed as a container entry, or
+   * with no blank line before them.
+   */
+  blankLineBefore?: boolean;
 
   /**
    * Original application-string/-sequence source text — `prefix'...'`,
@@ -168,9 +184,12 @@ export abstract class CborItem {
   /**
    * @internal
    * True when this node is, or contains through wrapper nodes (tags,
-   * embedded CBOR, app-sequence results), an array or map.
-   * `inlineLeafContainers` never inlines a container whose entries contain
-   * another container, even one that renders on a single line.
+   * app-sequence results), an array or map. `inlineLeafContainers` never
+   * inlines a container whose entries contain another container, even one
+   * that renders on a single line. `CborEmbeddedCBOR` (`<<...>>`) is the one
+   * exception: it inlines its own entries based purely on whether they
+   * render without a line break, regardless of this flag — see its
+   * `_toCDN()`, which omits `entryIsLeaf` for that reason.
    */
   get _containsCdnContainer(): boolean {
     return false;
@@ -197,14 +216,13 @@ export abstract class CborItem {
     // that single-line output contains no newlines.
     if (!pv || resolveIndent(merged) === null) return body;
     const style = typeof pv === 'string' ? pv : undefined;
-    const leading =
-      this.comments?.leading?.map((c) => convertCommentText(c, style)) ?? [];
+    const { ownLines, inlinePrefix } = splitLeadingComments(this, '', style);
     const trailing = this.comments?.trailing ?? [];
     const bodyWithTrailing =
       trailing.length === 0
         ? body
         : `${body} ${trailing.map((c) => convertCommentText(c, style).trimEnd()).join(' ')}`;
-    return [...leading, bodyWithTrailing].join('\n');
+    return [...ownLines, `${inlinePrefix}${bodyWithTrailing}`].join('\n');
   }
 
   /**

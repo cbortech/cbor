@@ -588,7 +588,8 @@ export interface ToCDNOptions {
    * Like `JSON.stringify`, `0` and `''` are equivalent to omitting the
    * option: the output is a single line. Single-line output is guaranteed
    * to contain no newlines; layout-dependent options (`preserveComments`,
-   * `splitCdn`, `splitNewline`, `preserveConcatenation`) are ignored.
+   * `preserveBlankLines`, `splitCdn`, `splitNewline`, `preserveConcatenation`)
+   * are ignored.
    */
   indent?: number | string;
 
@@ -596,9 +597,10 @@ export interface ToCDNOptions {
    * Master switch that turns on every `preserve*` option below at once —
    * `preserveComments`, `preserveByteString`, `preserveRawString`,
    * `preserveTextString`, `preserveConcatenation`, `preserveNumberFormat`,
-   * and `preserveAppSequence` — for reformatting CDN text (e.g. on save in
-   * an editor) with minimal changes: only whitespace/indentation, plus
-   * anything an explicitly-set individual option overrides.
+   * `preserveAppSequence`, and `preserveBlankLines` — for reformatting CDN
+   * text (e.g. on save in an editor) with minimal changes: only
+   * whitespace/indentation, plus anything an explicitly-set individual
+   * option overrides.
    *
    * An option explicitly set to a value (including `false`) is left as-is;
    * `preserveAll` only fills in the ones left `undefined`. So
@@ -637,22 +639,48 @@ export interface ToCDNOptions {
   preserveComments?: boolean | 'c-style' | 'cdn-style';
 
   /**
+   * Re-emit a blank line above an array/map entry (or indefinite-length
+   * string chunk) that had one before it anywhere in the parsed CDN source,
+   * so paragraph-like groupings of entries survive a reformat. At most one
+   * blank line is ever emitted per gap, regardless of how many blank lines
+   * were originally there.
+   *
+   * Detection is based purely on entry source positions — it does not
+   * require `preserveComments` and is unaffected by whether comments are
+   * emitted.
+   *
+   * Only effective when `indent` enables pretty-printing. A container with
+   * a preserved blank line is always emitted one-entry-per-line, the same
+   * as a container with preserved comments (see `inlineLeafContainers`).
+   *
+   * @default false
+   */
+  preserveBlankLines?: boolean;
+
+  /**
    * Re-emit byte string literals parsed from CDN using their original source
    * text when available.
    *
    * This preserves the spelling and interior layout of non-concatenated
    * `h'...'`, `b64'...'`, `b32'...'`, `h32'...'`, raw-backtick byte strings,
-   * and single-quoted byte strings, including comments inside those literals.
-   * Byte strings produced by `+` concatenation are normalised as usual;
-   * combine with `preserveConcatenation` to keep both the part boundaries
-   * and each part's spelling.
+   * and single-quoted byte strings — including a `h'xx...yy'`-family elided
+   * literal (§4.2), whose spelling is kept independently of
+   * `preserveConcatenation` when it has no `+` of its own (see that
+   * option). Byte strings produced by `+` concatenation are normalised as
+   * usual; combine with `preserveConcatenation` to keep both the part
+   * boundaries and each part's spelling.
+   *
+   * A comment inside the literal is stripped unless `preserveComments` is
+   * also set — `preserveByteString` alone preserves everything about the
+   * literal's spelling *except* its comments, the same as an unpreserved
+   * literal (re-derived from the decoded value) never has comments either.
    *
    * When enabled, this takes precedence over `bstrEncoding` and `sqstr` for
    * byte strings that carry original EDN source text.
    *
    * In single-line output (no `indent`), an original spelling that spans
-   * multiple lines (e.g. a byte string literal with interior line comments)
-   * falls back to normal serialization; single-line spellings are kept.
+   * multiple lines — after any comment is stripped — falls back to normal
+   * serialization; single-line spellings are kept.
    *
    * @default false
    */
@@ -874,6 +902,19 @@ export interface ToCDNOptions {
    * concatenation, and only takes effect when `indent` enables
    * pretty-printing (single-line output joins the parts into one literal).
    *
+   * Also applies within an elision (`...`, §4.2 of
+   * draft-ietf-cbor-edn-literals-25): a `+`-joined fragment on either side of
+   * an ellipsis keeps its own part boundaries too (e.g. `'test' +
+   * h'1234...abcd' + ...` stays exactly as written instead of merging
+   * `'test'` into the byte fragment before it), and byte-string elision
+   * keeps the `h'xx' + ... + h'yy'` spelling instead of the default compact
+   * `h'xx...yy'` literal. Unlike the text/byte-string case above, this
+   * applies regardless of `indent`, and the parts stay on one line even
+   * under `indent` (elision is always single-line): a `+` boundary inside an
+   * ellipsis is never a lossless merge — the elided middle can't be "joined
+   * in" — so there's no indent-dependent fallback to prefer, and no reason
+   * to reflow it.
+   *
    * @default false
    */
   preserveConcatenation?: boolean;
@@ -884,6 +925,12 @@ export interface ToCDNOptions {
    * tag) and every entry serializes without a line break (e.g. `[1, 2, 3]`,
    * `{"a": 1}`, `(_ "a", "b")`). Nested leaf containers still collapse
    * individually: `[[1, 2], [3, 4]]` renders with one inner array per line.
+   *
+   * `<<...>>` (CBOR Sequence Literal / embedded CBOR) is the one exception:
+   * since it's a flat sequence of encoded items rather than a
+   * nested-structure display, an entry that is itself an array/map still
+   * inlines there as long as its own rendering fits on one line — e.g.
+   * `<<{1: -7}>>` stays on one line, even though `[{1: -7}]` would not.
    *
    * Containers with preserved comments are always emitted in multi-line
    * form. Has no effect when `indent` is omitted.
@@ -926,6 +973,15 @@ export interface CborComment {
   end: number;
   line: number;
   col: number;
+  /**
+   * `true` when this is a `leading` comment that ends on the same source
+   * line as the node it's attached to — e.g. `/ protected / << ... >>` in an
+   * RFC 9052-style annotated array, as opposed to a comment on its own line
+   * above the value. `toCDN()` renders these as an inline prefix on the
+   * value's own line instead of a separate line above it. `undefined` for
+   * `trailing`/`dangling` comments, where it doesn't apply.
+   */
+  sameLine?: boolean;
 }
 
 export interface CborComments {

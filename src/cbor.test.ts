@@ -9,6 +9,7 @@ import { CborArray } from './ast/CborArray';
 import { CborMap } from './ast/CborMap';
 import { CborFloat } from './ast/CborFloat';
 import { CborSimple } from './ast/CborSimple';
+import type { CborExtension } from './types';
 
 /** Convert a hex string to Uint8Array. */
 function hex(s: string): Uint8Array {
@@ -585,14 +586,62 @@ describe('CBOR.format()', () => {
     );
   });
 
+  test('preserves blank lines between array/map entries when requested', () => {
+    const src = '[\n  1,\n  2,\n\n  3,\n  4\n]';
+    expect(CBOR.format(src, { indent: 2 })).toBe('[\n  1,\n  2,\n  3,\n  4\n]');
+    expect(CBOR.format(src, { indent: 2, preserveBlankLines: true })).toBe(src);
+
+    const mapSrc = '{\n  "a": 1,\n\n  "b": 2\n}';
+    expect(CBOR.format(mapSrc, { indent: 2, preserveBlankLines: true })).toBe(
+      mapSrc
+    );
+  });
+
+  test('preserveBlankLines collapses multiple blank lines to one, including before the first entry', () => {
+    expect(
+      CBOR.format('[\n\n1,\n\n\n2\n]', { indent: 2, preserveBlankLines: true })
+    ).toBe('[\n\n  1,\n\n  2\n]');
+    expect(
+      CBOR.format('[1,\n2]', { indent: 2, preserveBlankLines: true })
+    ).toBe('[\n  1,\n  2\n]');
+  });
+
+  test('preserveBlankLines has no effect on single-line output or without the option', () => {
+    const src = '[\n1,\n\n2\n]';
+    expect(CBOR.format(src, { preserveBlankLines: true })).toBe('[1,2]');
+    expect(CBOR.format(src, { indent: 2 })).toBe('[\n  1,\n  2\n]');
+  });
+
+  test('preserveAll includes preserveBlankLines', () => {
+    const src = '[\n  1,\n\n  2\n]';
+    expect(CBOR.format(src, { indent: 2, preserveAll: true })).toBe(src);
+    expect(
+      CBOR.format(src, {
+        indent: 2,
+        preserveAll: true,
+        preserveBlankLines: false,
+      })
+    ).toBe('[\n  1,\n  2\n]');
+  });
+
   test('preserves non-concatenated byte string literals when requested', () => {
     expect(CBOR.format("h'6869'", { preserveByteString: true })).toBe(
       "h'6869'"
     );
+    // preserveByteString alone strips a comment inside the literal (the
+    // remaining interior line break survives, since it's a real line break,
+    // not part of the comment) — combine with preserveComments to keep it.
     expect(
       CBOR.format("h'01 # first\n 02'", {
         indent: 2,
         preserveByteString: true,
+      })
+    ).toBe("h'01 \n 02'");
+    expect(
+      CBOR.format("h'01 # first\n 02'", {
+        indent: 2,
+        preserveByteString: true,
+        preserveComments: true,
       })
     ).toBe("h'01 # first\n 02'");
     expect(
@@ -600,21 +649,21 @@ describe('CBOR.format()', () => {
         indent: 2,
         preserveByteString: true,
       })
-    ).toBe("b64' aGk # greeting\n '");
+    ).toBe("b64' aGk \n '");
     expect(
       CBOR.format("b32' NBUQ # b32\n '", {
         indent: 2,
         preserveByteString: true,
         extensions: [b32],
       })
-    ).toBe("b32' NBUQ # b32\n '");
+    ).toBe("b32' NBUQ \n '");
     expect(
       CBOR.format("h32' D1KG # h32\n '", {
         indent: 2,
         preserveByteString: true,
         extensions: [h32],
       })
-    ).toBe("h32' D1KG # h32\n '");
+    ).toBe("h32' D1KG \n '");
     expect(CBOR.format("'hi'", { preserveByteString: true })).toBe("'hi'");
   });
 
@@ -622,10 +671,18 @@ describe('CBOR.format()', () => {
     expect(
       CBOR.format("h'01 # first\n 02'", { preserveByteString: true })
     ).toBe("h'0102'");
-    // Single-line spellings (including interior block comments) are kept.
+    // A single-line spelling still has its interior comment stripped, same
+    // as the multi-line case — preserveByteString alone never keeps
+    // comments, regardless of indent/single-line-ness.
     expect(CBOR.format("h'01 / mid / 02'", { preserveByteString: true })).toBe(
-      "h'01 / mid / 02'"
+      "h'01  02'"
     );
+    expect(
+      CBOR.format("h'01 / mid / 02'", {
+        preserveByteString: true,
+        preserveComments: true,
+      })
+    ).toBe("h'01 / mid / 02'");
   });
 
   test('preserves raw byte string literals when requested', () => {
@@ -634,7 +691,77 @@ describe('CBOR.format()', () => {
         indent: 2,
         preserveByteString: true,
       })
+    ).toBe('h`01 \n 02`');
+    expect(
+      CBOR.format('h`01 # first\n 02`', {
+        indent: 2,
+        preserveByteString: true,
+        preserveComments: true,
+      })
     ).toBe('h`01 # first\n 02`');
+  });
+
+  test("comment stripping respects each literal family's own comment syntax", () => {
+    // Standard base64 (b64'...') only recognizes `#` as a comment — `/` is
+    // valid base64 data (e.g. "//8=" decodes to 0xFFFF), never a comment
+    // marker. Stripping must not corrupt it by treating `/`/`//` as comments.
+    expect(CBOR.format("b64'//8='", { preserveByteString: true })).toBe(
+      "b64'//8='"
+    );
+    expect(CBOR.fromCDN("b64'//8='").toCBOR()).toEqual(
+      new Uint8Array([0x42, 0xff, 0xff])
+    );
+    // A real `#` comment in b64 is still stripped.
+    expect(
+      CBOR.format("b64' aGk # greeting\n '", {
+        indent: 2,
+        preserveByteString: true,
+      })
+    ).toBe("b64' aGk \n '");
+
+    // A bare single-quoted byte string ('...', sqstr) has no comment syntax
+    // at all — its content is the literal UTF-8-encoded payload, so `#` and
+    // `/` inside it are data, not comments.
+    expect(CBOR.format("'a#b'", { preserveByteString: true })).toBe("'a#b'");
+    expect(CBOR.format("'a/b'", { preserveByteString: true })).toBe("'a/b'");
+  });
+
+  test('comment stripping never touches an unrecognized app-string prefix', () => {
+    // The parser propagates ednSource to *any* extension whose
+    // parseAppString returns a plain CborByteString (see parser.ts),
+    // regardless of what that extension's own content syntax is. A `#`/`/`
+    // there could be the extension's own ordinary data — stripping must not
+    // guess at comment syntax for a prefix it doesn't specifically know.
+    const textEncoder = new TextEncoder();
+    const xExtension: CborExtension = {
+      appStringPrefixes: ['x'],
+      parseAppString: (_prefix, content) =>
+        new CborByteString(textEncoder.encode(content)),
+    };
+    const opts = { extensions: [xExtension], preserveByteString: true };
+    expect(CBOR.format("x'a#b'", opts)).toBe("x'a#b'");
+    expect(
+      CBOR.fromCDN("x'a#b'", { extensions: [xExtension] }).toCBOR()
+    ).toEqual(new Uint8Array([0x43, 0x61, 0x23, 0x62]));
+    expect(CBOR.format("x'a/b'", opts)).toBe("x'a/b'");
+  });
+
+  test('comment stripping is not fooled by a user extension overriding a built-in prefix', () => {
+    // A user extension registered under the same prefix as a built-in
+    // (`b32`) overrides it (see parser.ts's extension registration) — the
+    // resolved extension is this custom one, not the real b32, so its
+    // content must not be treated as hex/b32 comment syntax.
+    const textEncoder = new TextEncoder();
+    const customB32: CborExtension = {
+      appStringPrefixes: ['b32'],
+      parseAppString: (_prefix, content) =>
+        new CborByteString(textEncoder.encode(content)),
+    };
+    const opts = { extensions: [customB32], preserveByteString: true };
+    expect(CBOR.format("b32'a#b'", opts)).toBe("b32'a#b'");
+    expect(
+      CBOR.fromCDN("b32'a#b'", { extensions: [customB32] }).toCBOR()
+    ).toEqual(new Uint8Array([0x43, 0x61, 0x23, 0x62]));
   });
 
   test('does not preserve byte string literals across concatenation', () => {
@@ -899,22 +1026,34 @@ describe('CBOR.format()', () => {
     ).toBe('`[1,2]` +\n  ""');
   });
 
-  test('preserves raw string parts around ellipsis', () => {
+  test('preserves raw string parts around ellipsis, always single-line', () => {
+    // Every `+`-joined fragment stays on its original boundary — including
+    // "b" and "c", which aren't raw strings and so have no source spelling
+    // of their own, but still sit on the correct side of the ellipsis and
+    // don't get merged into their raw-string neighbor. Unlike a real (non-
+    // elision) `+` concatenation, this is indent-independent: `indent` only
+    // changes whether the *value* is pretty-printed at all, not whether
+    // these boundaries are shown.
+    const expected = '`a` + "b" + ... + "c" + ``d`e``';
     expect(
       CBOR.format('`a` + "b" + ... + "c" + ``d`e``', {
         indent: 2,
         preserveConcatenation: true,
         preserveRawString: true,
       })
-    ).toBe('`a` +\n  "b" +\n  ... +\n  "c" +\n  ``d`e``');
-    // Single-line output joins each fragment, but the ellipsis itself
-    // (not a layout feature) is still ` + `-joined between fragments.
+    ).toBe(expected);
     expect(
       CBOR.format('`a` + "b" + ... + "c" + ``d`e``', {
         preserveConcatenation: true,
         preserveRawString: true,
       })
-    ).toBe('"ab" + ... + "cd`e"');
+    ).toBe(expected);
+  });
+
+  test('without preserveConcatenation, adjacent fragments around an ellipsis still merge', () => {
+    expect(CBOR.format('`a` + "b" + ... + "c" + ``d`e``')).toBe(
+      '"ab" + ... + "cd`e"'
+    );
   });
 
   test('joins text string concatenation by default', () => {
@@ -1104,6 +1243,22 @@ describe('CBOR.format()', () => {
     expect(
       CBOR.format('# start\n42 # end', { indent: 2, preserveComments: true })
     ).toBe('# start\n42 # end');
+  });
+
+  test('root leading comment on the same source line as the value stays inline', () => {
+    // Same source line as the root value: stays inline instead of forcing a
+    // line break above it.
+    expect(
+      CBOR.format('/ note / 1', { indent: 2, preserveComments: true })
+    ).toBe('/ note / 1');
+    // Own source line: still gets its own line above the value.
+    expect(
+      CBOR.format('/ note /\n1', { indent: 2, preserveComments: true })
+    ).toBe('/ note /\n1');
+    // Own-line comment followed by a same-line one: only the latter inlines.
+    expect(
+      CBOR.format('// a\n/ note / 1', { indent: 2, preserveComments: true })
+    ).toBe('// a\n/ note / 1');
   });
 
   test('single-line output ignores preserveComments', () => {

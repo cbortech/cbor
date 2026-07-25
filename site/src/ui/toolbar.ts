@@ -147,6 +147,7 @@ const LAYOUT_OPTION_IDS = [
   'opt-split-cdn',
   'opt-inline-leaf',
   'opt-comments',
+  'opt-blank-lines',
   'opt-concat',
 ] as const;
 
@@ -156,6 +157,7 @@ const LAYOUT_OPTION_IDS = [
  */
 const PRESERVE_OPTION_IDS = [
   'opt-comments',
+  'opt-blank-lines',
   'opt-concat',
   'opt-byte-string',
   'opt-raw-string',
@@ -249,6 +251,8 @@ export function readFormatOptions(): FromCDNOptions & ToCDNOptions {
     options.inlineLeafContainers = true;
   if ((document.getElementById('opt-comments') as HTMLInputElement).checked)
     options.preserveComments = true;
+  if ((document.getElementById('opt-blank-lines') as HTMLInputElement).checked)
+    options.preserveBlankLines = true;
   if ((document.getElementById('opt-concat') as HTMLInputElement).checked)
     options.preserveConcatenation = true;
   if ((document.getElementById('opt-byte-string') as HTMLInputElement).checked)

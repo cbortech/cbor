@@ -44,6 +44,7 @@ export function joinConcatParts(
 
 export interface Commented {
   comments?: CborComments;
+  blankLineBefore?: boolean;
 }
 
 export function hasPreservedComments(item: Commented): boolean {
@@ -102,14 +103,37 @@ export function convertCommentText(
   return text; // already # or /.../
 }
 
-export function formatLeadingComments(
+/**
+ * Split an item's leading comments into ones that get their own line above
+ * it, and a trailing run of comments the parser found on the same source
+ * line as the item itself (`CborComment.sameLine`) — e.g.
+ * `/ protected / << ... >>,` in an RFC 9052-style annotated array. Since
+ * comments and the item they lead up to appear in strictly increasing
+ * source order, `sameLine` comments always form a contiguous run at the end
+ * of the list (nothing can sit between a same-line comment and the item
+ * without itself being on that same line).
+ *
+ * `ownLines` renders like `formatLeadingComments` used to; `inlinePrefix` is
+ * meant to be prepended directly to the item's own rendered line (already
+ * includes a trailing space per comment, or `''` when there is none).
+ */
+export function splitLeadingComments(
   item: Commented,
   indent: string,
   style?: 'c-style' | 'cdn-style' | undefined
-): string[] {
-  return (item.comments?.leading ?? []).map(
-    (comment) => indent + convertCommentText(comment, style)
-  );
+): { ownLines: string[]; inlinePrefix: string } {
+  const leading = item.comments?.leading ?? [];
+  let splitAt = leading.length;
+  while (splitAt > 0 && leading[splitAt - 1]!.sameLine) splitAt--;
+  return {
+    ownLines: leading
+      .slice(0, splitAt)
+      .map((comment) => indent + convertCommentText(comment, style)),
+    inlinePrefix: leading
+      .slice(splitAt)
+      .map((comment) => convertCommentText(comment, style) + ' ')
+      .join(''),
+  };
 }
 
 export function formatTrailingComments(
@@ -179,26 +203,46 @@ export function resolveSeparators(
  * comments — line comments can only be terminated by a newline.
  *
  * Entries are accessed through per-index callbacks (not materialised entry
- * objects) so the common no-comments path allocates nothing per entry.
- * `hasEntryComments`, `entryLeadingNode`, and `entryTrailing` are consulted
- * only when `preserveComments` is set.  `renderEntry` receives the resolved
- * `colSep` (': ' or ':' depending on compact mode) for rendering map pairs.
+ * objects) so the common no-comments/no-blank-line path allocates nothing
+ * per entry. `hasEntryComments` and `entryTrailing` are consulted only when
+ * `preserveComments` is set; `entryLeadingNode` is also consulted when
+ * `preserveBlankLines` is set, independently of `preserveComments`, to read
+ * its `blankLineBefore` flag. `renderEntry` receives the resolved `colSep`
+ * (': ' or ':' depending on compact mode) for rendering map pairs.
  */
 export function serializeContainer(p: {
   node: Commented;
   options: ToCDNOptions | undefined;
   depth: number;
-  openChar: '[' | '{' | '(';
-  closeChar: ']' | '}' | ')';
+  openChar: string;
+  closeChar: string;
   count: number;
   indefiniteLength: boolean;
   encodingWidth: EncodingWidth | undefined;
+  /**
+   * Where the resolved encoding-indicator suffix is placed.
+   * - `'open'` (default): right after `openChar`, before the content
+   *   (`[_2 1,2,3]`) — the head this indicator describes encodes entry count.
+   * - `'close'`: right after `closeChar`, with no separating space
+   *   (`<<1,2>>_1`) — for `CborEmbeddedCBOR`, whose byte-string head encodes
+   *   content byte length, not entry count.
+   */
+  eiPosition?: 'open' | 'close';
+  /**
+   * Basis for canonical-encoding-width detection (`encodingIndicators:
+   * 'auto'`/`'always'` with no explicit `encodingWidth`). Defaults to
+   * `count`, matching the CBOR array/map head. `CborEmbeddedCBOR` overrides
+   * this to its encoded content's byte length instead.
+   */
+  canonicalCount?: () => bigint;
   hasEntryComments: () => boolean;
   /** Render entry `i` at child depth (`item` or `key: value`). */
   renderEntry: (i: number, colSep: string) => string;
   /**
    * Whether entry `i` contains no nested array/map, so it may stay on the
-   * container's line under `inlineLeafContainers`. Omitted = always a leaf.
+   * container's line under `inlineLeafContainers`. Omitted = always a leaf
+   * (used by `CborEmbeddedCBOR`, where an entry that is itself a container
+   * still inlines as long as its own rendering fits on one line).
    */
   entryIsLeaf?: (i: number) => boolean;
   /** Node whose leading comments are emitted above entry `i` (item / map key). */
@@ -218,16 +262,31 @@ export function serializeContainer(p: {
     indentStr !== null &&
     preserveComments &&
     (hasContainerLayoutComments(p.node) || p.hasEntryComments());
+  const preserveBlankLines =
+    indentStr !== null && !!options?.preserveBlankLines;
+  let hasBlankLines = false;
+  if (preserveBlankLines) {
+    for (let i = 0; i < count; i++) {
+      if (p.entryLeadingNode(i).blankLineBefore) {
+        hasBlankLines = true;
+        break;
+      }
+    }
+  }
   const { inlineSep, multilineSep, trailSep, colSep } = resolveSeparators(
     options,
     indentStr === null
   );
+  const eiPosition = p.eiPosition ?? 'open';
   const eiRaw = p.indefiniteLength
     ? ''
     : resolveEiSuffix(options, p.encodingWidth, () =>
-        canonicalEncodingWidth(BigInt(count))
+        canonicalEncodingWidth(
+          p.canonicalCount ? p.canonicalCount() : BigInt(count)
+        )
       );
-  const eiSuffix = eiRaw ? eiRaw + ' ' : '';
+  const eiSuffix = eiPosition === 'open' && eiRaw ? eiRaw + ' ' : '';
+  const closeSuffix = eiPosition === 'close' ? eiRaw : '';
   const showIndef =
     p.indefiniteLength && (options?.encodingIndicators ?? 'auto') !== 'never';
 
@@ -239,7 +298,7 @@ export function serializeContainer(p: {
           : `${openChar}_ ${inner}${closeChar}`
         : `${openChar}${inner}${closeChar}`;
     }
-    return `${openChar}${eiSuffix}${inner}${closeChar}`;
+    return `${openChar}${eiSuffix}${inner}${closeChar}${closeSuffix}`;
   };
 
   if (indentStr === null || (count === 0 && !hasComments)) {
@@ -257,7 +316,12 @@ export function serializeContainer(p: {
   // Entries rendered while probing are reused below if the probe fails, so a
   // node is never serialized more than once per parent render.
   let probed: string[] | null = null;
-  if (options?.inlineLeafContainers && count > 0 && !hasComments) {
+  if (
+    options?.inlineLeafContainers &&
+    count > 0 &&
+    !hasComments &&
+    !hasBlankLines
+  ) {
     const rendered: string[] = [];
     let flat = true;
     for (let i = 0; i < count; i++) {
@@ -286,25 +350,29 @@ export function serializeContainer(p: {
     : `${openChar}${eiSuffix}`;
   const lines: string[] = [];
   for (let i = 0; i < count; i++) {
+    if (preserveBlankLines && p.entryLeadingNode(i).blankLineBefore) {
+      lines.push('');
+    }
+    let inlinePrefix = '';
     if (preserveComments) {
-      lines.push(
-        ...formatLeadingComments(
-          p.entryLeadingNode(i),
-          childIndent,
-          commentStyle
-        )
+      const { ownLines, inlinePrefix: prefix } = splitLeadingComments(
+        p.entryLeadingNode(i),
+        childIndent,
+        commentStyle
       );
+      lines.push(...ownLines);
+      inlinePrefix = prefix;
     }
     const sep = i < count - 1 ? multilineSep : trailSep;
     const entry = probed?.[i] ?? p.renderEntry(i, colSep);
     lines.push(
-      `${childIndent}${entry}${sep}${preserveComments ? p.entryTrailing(i, commentStyle) : ''}`
+      `${childIndent}${inlinePrefix}${entry}${sep}${preserveComments ? p.entryTrailing(i, commentStyle) : ''}`
     );
   }
   if (preserveComments)
     lines.push(...formatDanglingComments(p.node, childIndent, commentStyle));
   const body = lines.join('\n');
-  return `${open}\n${body}\n${closeIndent}${closeChar}`;
+  return `${open}\n${body}\n${closeIndent}${closeChar}${closeSuffix}`;
 }
 
 /**
@@ -347,9 +415,14 @@ export function renderSingleChildWithComments(
     typeof preserveComments === 'string' ? preserveComments : undefined;
   const childIndent = indentOf(indentStr!, depth + 1);
   const closeIndent = indentOf(indentStr!, depth);
+  const { ownLines, inlinePrefix } = splitLeadingComments(
+    child,
+    childIndent,
+    commentStyle
+  );
   const lines = [
-    ...formatLeadingComments(child, childIndent, commentStyle),
-    `${childIndent}${renderChild(depth + 1)}${formatTrailingComments(child, commentStyle)}`,
+    ...ownLines,
+    `${childIndent}${inlinePrefix}${renderChild(depth + 1)}${formatTrailingComments(child, commentStyle)}`,
     ...formatDanglingComments(wrapper, childIndent, commentStyle),
   ];
   return `${openChar}\n${lines.join('\n')}\n${closeIndent}${closeChar}`;
@@ -438,6 +511,112 @@ export function serializeBytes(
     default:
       return `h'${toHex(bytes)}'`;
   }
+}
+
+/**
+ * Which comment syntax a byte-string literal's raw source recognizes —
+ * `undefined` when it has none at all (its content is data, not a comment
+ * host). Set once, at parse time, by whoever actually knows the literal's
+ * real origin (the tokenizer for `h'...'`/`b64'...'`/bare sqstr, or the
+ * parser comparing the resolved extension against the specific built-in
+ * `b32`/`h32` objects by reference — never guessed later from the prefix
+ * string, since a user extension can register under any prefix, including
+ * one a built-in also uses; see `CborByteString.ednCommentSyntax`).
+ *   - `'full'`: `#`, `//`, `/* *\/`, and `/ /` (§5.2.1/§5.3.3) — `h'...'`
+ *     and its backtick form, and the built-in `b32'...'`/`h32'...'`
+ *     extensions, which share hex's comment syntax (`utils/strip-comments.ts`).
+ *   - `'hash-only'`: only `#` line comments — standard base64 (`b64'...'`),
+ *     where `/` is valid data (e.g. `//8=` decodes to 0xFFFF), never a
+ *     comment marker (see Tokenizer._readByteContent, §5.2.2).
+ */
+export type ByteCommentSyntax = 'full' | 'hash-only';
+
+/**
+ * Strip comments from inside a preserved byte-string literal's raw source,
+ * keeping everything else — case, whitespace, `...` — untouched. Used when
+ * `preserveByteString` is set but `preserveComments` is not: the preserved
+ * spelling should still drop comments, the same as an unpreserved literal
+ * re-derived from its decoded value would. `syntax` selects the comment
+ * rules to apply (see `ByteCommentSyntax`); the caller is responsible for
+ * knowing which one is correct — this function does not guess from `raw`.
+ *
+ * Only scans the quote-delimited content (not the prefix or a trailing
+ * encoding-indicator suffix), and mirrors the tokenizer's own
+ * comment-recognition closely enough for realistic input; a comment
+ * containing a literal copy of the delimiter quote character is not
+ * specially handled (the input is already known-valid, so at worst this
+ * shifts where the content/comment boundary is drawn, never produces
+ * unparseable output).
+ */
+export function stripByteLiteralComments(
+  raw: string,
+  syntax: ByteCommentSyntax
+): string {
+  let open = 0;
+  while (open < raw.length && raw[open] !== "'" && raw[open] !== '`') open++;
+  if (open >= raw.length) return raw;
+  const quote = raw[open];
+  const close = raw.lastIndexOf(quote);
+  if (close <= open) return raw;
+  const content = raw.slice(open + 1, close);
+  const stripped =
+    syntax === 'hash-only'
+      ? _stripHashOnlyComments(content)
+      : _stripFullByteCommentSyntax(content);
+  return raw.slice(0, open + 1) + stripped + raw.slice(close);
+}
+
+/** `#` line comments only — used by standard base64 (`b64'...'`). */
+function _stripHashOnlyComments(content: string): string {
+  let out = '';
+  let i = 0;
+  while (i < content.length) {
+    if (content[i] === '#') {
+      while (i < content.length && content[i] !== '\n') {
+        i += content[i] === '\\' && i + 1 < content.length ? 2 : 1;
+      }
+      continue;
+    }
+    out += content[i];
+    i++;
+  }
+  return out;
+}
+
+/**
+ * `#`, `//`, `/* *\/`, and `/ /` comments — used by `h'...'`/backtick raw hex
+ * and extension-defined byte literals sharing that syntax (b32, h32, ...).
+ */
+function _stripFullByteCommentSyntax(content: string): string {
+  let out = '';
+  let i = 0;
+  while (i < content.length) {
+    const ch = content[i];
+    const next = content[i + 1];
+    if (ch === '#' || (ch === '/' && next === '/')) {
+      i += ch === '#' ? 1 : 2;
+      while (i < content.length && content[i] !== '\n') {
+        i += content[i] === '\\' && i + 1 < content.length ? 2 : 1;
+      }
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = content.indexOf('*/', i + 2);
+      i = end === -1 ? content.length : end + 2;
+      continue;
+    }
+    if (ch === '/') {
+      let j = i + 1;
+      while (j < content.length && content[j] !== '/') {
+        j += content[j] === '\\' && j + 1 < content.length ? 2 : 1;
+      }
+      i = j < content.length ? j + 1 : content.length;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out;
 }
 
 const _utf8Strict = new TextDecoder('utf-8', { fatal: true });

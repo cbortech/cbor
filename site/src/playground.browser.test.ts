@@ -225,6 +225,36 @@ describe('playground', () => {
       expect(cmText('editor')).toBe('"café"');
     });
 
+    test('Keep blank lines preserves a blank line between array entries', async () => {
+      const importArray = () =>
+        uploadTo(
+          'cdn-import-input',
+          new File(['[\n  1,\n  2,\n\n  3\n]'], 'blank-lines.cdn', {
+            type: 'text/plain',
+          })
+        );
+
+      // Default: "Keep blank lines" is on and indent defaults to 2 spaces,
+      // so the blank line between 2 and 3 survives Format.
+      await importArray();
+      await vi.waitFor(() => expect(cmText('editor')).toContain('3'));
+      byId('format-opts-btn').click();
+      byId<HTMLSelectElement>('opt-indent').value = '2';
+      expect(byId<HTMLInputElement>('opt-blank-lines').checked).toBe(true);
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe('[\n  1,\n  2,\n\n  3\n]');
+
+      // Off: with no blank line and no comments left to preserve, the flat
+      // array collapses onto one line via the (default-on) "Inline leaf
+      // containers" option.
+      await importArray();
+      await vi.waitFor(() => expect(cmText('editor')).toContain('3'));
+      byId<HTMLInputElement>('opt-blank-lines').checked = false;
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe('[1, 2, 3]');
+      byId<HTMLInputElement>('opt-blank-lines').checked = true; // restore
+    });
+
     test('individual preserve options open in their own submenu popover', () => {
       byId('format-opts-btn').click();
       const preserveBtn = byId<HTMLButtonElement>('preserve-opts-btn');
@@ -275,6 +305,7 @@ describe('playground', () => {
       const master = byId<HTMLInputElement>('opt-preserve-all');
       const ids = [
         'opt-comments',
+        'opt-blank-lines',
         'opt-concat',
         'opt-byte-string',
         'opt-raw-string',
@@ -511,6 +542,47 @@ describe('playground', () => {
       await vi.waitFor(() => expect(cmText('editor')).toContain('fromHex'), {
         timeout: 2000,
       });
+      document
+        .querySelector<HTMLButtonElement>(
+          '.mode-tabs .tab[data-mode=annotated]'
+        )!
+        .click();
+    });
+
+    test('Edit mode honors the CDN format options (inline leaf containers, Compact indent)', async () => {
+      document
+        .querySelector<HTMLButtonElement>('.mode-tabs .tab[data-mode=edit]')!
+        .click();
+      const textarea = byId<HTMLTextAreaElement>('bytes-edit');
+      const hex = '84 18 74 19 03 af 18 ea 19 97 89';
+
+      // A prior failed run of this test can leave opt-indent at Compact;
+      // force the known starting state instead of assuming it.
+      byId<HTMLSelectElement>('opt-indent').value = '2';
+
+      // Default options have "Inline leaf containers" checked, so a flat
+      // array of scalars decoded from pasted bytes must stay on one line.
+      // (The default sample's "IDs" field already contains this same array,
+      // so wait for the exact single-line replacement rather than a substring
+      // match, which the stale pre-conversion text would also satisfy.)
+      textarea.value = hex;
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      await vi.waitFor(
+        () => expect(cmText('editor')).toBe('[116, 943, 234, 38793]'),
+        { timeout: 2000 }
+      );
+
+      // Compact indent must also flow through to the bytes → CDN conversion.
+      byId('format-opts-btn').click();
+      byId<HTMLSelectElement>('opt-indent').value = '';
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      await vi.waitFor(
+        () => expect(cmText('editor')).toBe('[116,943,234,38793]'),
+        { timeout: 2000 }
+      );
+
+      byId<HTMLSelectElement>('opt-indent').value = '2';
+      byId('format-opts-btn').click();
       document
         .querySelector<HTMLButtonElement>(
           '.mode-tabs .tab[data-mode=annotated]'

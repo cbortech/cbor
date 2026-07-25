@@ -273,6 +273,17 @@ console.log(text);
 // }
 ```
 
+`<<...>>` (CBOR Sequence Literal / embedded CBOR) is the one exception to
+the "no entry contains an array or map" rule: since it's a flat sequence of
+encoded items rather than a nested-structure display, an entry that is
+itself an array/map still inlines there as long as its own rendering fits
+on one line:
+
+```ts
+CBOR.format('<<{1: -7}>>', { indent: 2, inlineLeafContainers: true });
+// "<<{1: -7}>>"
+```
+
 ### Split text strings while formatting
 
 `splitNewline` splits long text strings at newline characters using CDN
@@ -441,6 +452,45 @@ CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", { preserveAppSequence: true });
 
 CBOR.format('DT`1969-07-21T02:56:16Z`', { preserveAppSequence: true });
 // "DT`1969-07-21T02:56:16Z`"
+```
+
+### Preserve blank lines
+
+By default, `CBOR.format()` drops blank lines between array/map entries (and
+`(_ ...)` chunks) when re-serializing. `preserveBlankLines` re-emits a single
+blank line above an entry that had one anywhere before it in the source, so
+paragraph-like groupings of entries survive a reformat — at most one blank
+line per gap, regardless of how many were originally there. Detection is
+based on entry positions alone: it does not require `preserveComments` and is
+unaffected by whether comments are emitted. Only effective when `indent`
+enables pretty-printing; a container with a preserved blank line is always
+rendered one entry per line, even under `inlineLeafContainers`. Included in
+`preserveAll`.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const src = `[
+  1,
+  2,
+
+  3
+]`;
+
+CBOR.format(src, { indent: 2 });
+// [
+//   1,
+//   2,
+//   3
+// ]
+
+CBOR.format(src, { indent: 2, preserveBlankLines: true });
+// [
+//   1,
+//   2,
+//
+//   3
+// ]
 ```
 
 ### Format with minimal changes
