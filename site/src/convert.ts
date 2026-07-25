@@ -6,7 +6,7 @@
  * §2) are supported.  CBOR Sequence output (RFC 8742) is produced automatically
  * when the input contains more than one item.
  */
-import { CBOR, type ParseWarning } from '@cbortech/cbor';
+import { CBOR, type ParseWarning, type ToCDNOptions } from '@cbortech/cbor';
 import type { CborItem } from '@cbortech/cbor/ast';
 import { buildRangeMap, type NodeRange } from './mapping/lockstep';
 import { buildRows, type HexRow } from './hexview/build-rows';
@@ -117,7 +117,10 @@ export function convertCdn(text: string): Conversion {
  * Parse pasted bytes (plain hex or an annotated hex dump) back to CDN text.
  * Handles CBOR Sequences: each item is converted to CDN on its own line.
  */
-export function bytesToCdnText(hexDumpText: string): {
+export function bytesToCdnText(
+  hexDumpText: string,
+  formatOptions?: ToCDNOptions
+): {
   cdn: string;
   warnings: string[];
 } {
@@ -132,7 +135,8 @@ export function bytesToCdnText(hexDumpText: string): {
     }),
   ];
   if (items.length === 0) return { cdn: '', warnings };
-  const cdn = items.map((item) => item.toCDN({ indent: 2 })).join('\n');
+  const opts: ToCDNOptions = formatOptions ?? { indent: 2 };
+  const cdn = items.map((item) => item.toCDN(opts)).join('\n');
   return { cdn, warnings };
 }
 

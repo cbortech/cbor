@@ -149,6 +149,204 @@ describe('playground', () => {
       expect(cmText('editor').split('\n').length).toBeGreaterThan(5);
     });
 
+    test('Keep number spelling preserves original int/float literals', async () => {
+      const importNums = () =>
+        uploadTo(
+          'cdn-import-input',
+          new File(['{"a": 0xff, "b": 1.5_1}'], 'nums.cdn', {
+            type: 'text/plain',
+          })
+        );
+
+      // Default: "Keep number spelling" is on, so the literal spelling
+      // survives Format.
+      await importNums();
+      await vi.waitFor(() => expect(cmText('editor')).toContain('0xff'));
+      byId('format-opts-btn').click();
+      byId<HTMLSelectElement>('opt-indent').value = '';
+      expect(byId<HTMLInputElement>('opt-number-format').checked).toBe(true);
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe('{"a":0xff,"b":1.5_1}');
+
+      // Re-import (format-btn already reformatted the editor text above) and
+      // reformat again with "Keep number spelling" disabled.
+      await importNums();
+      await vi.waitFor(() => expect(cmText('editor')).toContain('0xff'));
+      byId<HTMLInputElement>('opt-number-format').checked = false;
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe('{"a":255,"b":1.5}');
+    });
+
+    test('Keep byte strings preserves original byte string literal spelling', async () => {
+      const importBytes = () =>
+        uploadTo(
+          'cdn-import-input',
+          new File(["h'48656c6c6f'"], 'bytes.cdn', { type: 'text/plain' })
+        );
+
+      // Default: "Keep byte strings" is on, so the literal spelling survives
+      // Format instead of being rewritten to the printable-string form.
+      await importBytes();
+      await vi.waitFor(() => expect(cmText('editor')).toContain("h'"));
+      byId('format-opts-btn').click();
+      byId<HTMLSelectElement>('opt-indent').value = '';
+      expect(byId<HTMLInputElement>('opt-byte-string').checked).toBe(true);
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe("h'48656c6c6f'");
+
+      await importBytes();
+      await vi.waitFor(() => expect(cmText('editor')).toContain("h'"));
+      byId<HTMLInputElement>('opt-byte-string').checked = false;
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe("'Hello'");
+    });
+
+    test('Keep string escapes preserves original double-quoted string spelling', async () => {
+      const importText = () =>
+        uploadTo(
+          'cdn-import-input',
+          new File(['"caf\\u00e9"'], 'text.cdn', { type: 'text/plain' })
+        );
+
+      // Default: "Keep string escapes" is on, so the é escape survives
+      // Format instead of being decoded into the literal character.
+      await importText();
+      await vi.waitFor(() => expect(cmText('editor')).toContain('caf'));
+      byId('format-opts-btn').click();
+      byId<HTMLSelectElement>('opt-indent').value = '';
+      expect(byId<HTMLInputElement>('opt-text-string').checked).toBe(true);
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe('"caf\\u00e9"');
+
+      await importText();
+      await vi.waitFor(() => expect(cmText('editor')).toContain('caf'));
+      byId<HTMLInputElement>('opt-text-string').checked = false;
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe('"café"');
+    });
+
+    test('Keep blank lines preserves a blank line between array entries', async () => {
+      const importArray = () =>
+        uploadTo(
+          'cdn-import-input',
+          new File(['[\n  1,\n  2,\n\n  3\n]'], 'blank-lines.cdn', {
+            type: 'text/plain',
+          })
+        );
+
+      // Default: "Keep blank lines" is on and indent defaults to 2 spaces,
+      // so the blank line between 2 and 3 survives Format.
+      await importArray();
+      await vi.waitFor(() => expect(cmText('editor')).toContain('3'));
+      byId('format-opts-btn').click();
+      byId<HTMLSelectElement>('opt-indent').value = '2';
+      expect(byId<HTMLInputElement>('opt-blank-lines').checked).toBe(true);
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe('[\n  1,\n  2,\n\n  3\n]');
+
+      // Off: with no blank line and no comments left to preserve, the flat
+      // array collapses onto one line via the (default-on) "Inline leaf
+      // containers" option.
+      await importArray();
+      await vi.waitFor(() => expect(cmText('editor')).toContain('3'));
+      byId<HTMLInputElement>('opt-blank-lines').checked = false;
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe('[1, 2, 3]');
+      byId<HTMLInputElement>('opt-blank-lines').checked = true; // restore
+    });
+
+    test('individual preserve options open in their own submenu popover', () => {
+      byId('format-opts-btn').click();
+      const preserveBtn = byId<HTMLButtonElement>('preserve-opts-btn');
+      const preservePopover = byId('preserve-popover');
+
+      // Starts closed; the individual checkboxes live inside it.
+      expect(preservePopover.hidden).toBe(true);
+      expect(preserveBtn.getAttribute('aria-expanded')).toBe('false');
+      expect(preservePopover.contains(byId('opt-comments'))).toBe(true);
+
+      preserveBtn.click();
+      expect(preservePopover.hidden).toBe(false);
+      expect(preserveBtn.getAttribute('aria-expanded')).toBe('true');
+
+      // Clicking a checkbox inside the submenu doesn't close it or the
+      // parent format-popover.
+      byId('opt-comments').click();
+      expect(preservePopover.hidden).toBe(false);
+      expect(byId('format-popover').hidden).toBe(false);
+      byId('opt-comments').click(); // restore
+
+      // Clicking fully outside closes both.
+      byId('editor').click();
+      expect(preservePopover.hidden).toBe(true);
+      expect(byId('format-popover').hidden).toBe(true);
+    });
+
+    test('closing format-popover also force-closes the preserve submenu', () => {
+      byId('format-opts-btn').click();
+      byId<HTMLButtonElement>('preserve-opts-btn').click();
+      expect(byId('preserve-popover').hidden).toBe(false);
+
+      // Toggling format-popover closed stops propagation before it can
+      // reach the submenu's own document-level close listener, so
+      // initFormatPopover() force-closes it explicitly instead.
+      byId('format-opts-btn').click();
+      expect(byId('format-popover').hidden).toBe(true);
+      expect(byId('preserve-popover').hidden).toBe(true);
+      expect(
+        byId<HTMLButtonElement>('preserve-opts-btn').getAttribute(
+          'aria-expanded'
+        )
+      ).toBe('false');
+    });
+
+    test('Preserve everything toggles all "Keep …" checkboxes together', () => {
+      byId('format-opts-btn').click();
+      const master = byId<HTMLInputElement>('opt-preserve-all');
+      const ids = [
+        'opt-comments',
+        'opt-blank-lines',
+        'opt-concat',
+        'opt-byte-string',
+        'opt-raw-string',
+        'opt-text-string',
+        'opt-number-format',
+        'opt-app-sequence',
+      ] as const;
+
+      // Normalize to a known all-checked state first: earlier tests in this
+      // file may have left individual boxes unchecked (the DOM is shared
+      // across tests — see beforeAll above).
+      for (const id of ids) {
+        const box = byId<HTMLInputElement>(id);
+        if (!box.checked) box.click();
+      }
+      expect(master.checked).toBe(true);
+      expect(master.indeterminate).toBe(false);
+
+      // Unchecking the master unchecks every "Keep …" checkbox.
+      master.click();
+      expect(master.checked).toBe(false);
+      for (const id of ids)
+        expect(byId<HTMLInputElement>(id).checked).toBe(false);
+
+      // Checking the master re-checks every one.
+      master.click();
+      expect(master.checked).toBe(true);
+      for (const id of ids)
+        expect(byId<HTMLInputElement>(id).checked).toBe(true);
+
+      // Unchecking a single option makes the master indeterminate.
+      byId<HTMLInputElement>('opt-comments').click();
+      expect(master.checked).toBe(false);
+      expect(master.indeterminate).toBe(true);
+
+      // Re-checking it makes the master fully checked again.
+      byId<HTMLInputElement>('opt-comments').click();
+      expect(master.checked).toBe(true);
+      expect(master.indeterminate).toBe(false);
+    });
+
     test('Copy button copies the CDN text to the clipboard', () => {
       const spy = vi.spyOn(Clipboard.prototype, 'writeText');
       byId('copy-cdn').click();
@@ -344,6 +542,47 @@ describe('playground', () => {
       await vi.waitFor(() => expect(cmText('editor')).toContain('fromHex'), {
         timeout: 2000,
       });
+      document
+        .querySelector<HTMLButtonElement>(
+          '.mode-tabs .tab[data-mode=annotated]'
+        )!
+        .click();
+    });
+
+    test('Edit mode honors the CDN format options (inline leaf containers, Compact indent)', async () => {
+      document
+        .querySelector<HTMLButtonElement>('.mode-tabs .tab[data-mode=edit]')!
+        .click();
+      const textarea = byId<HTMLTextAreaElement>('bytes-edit');
+      const hex = '84 18 74 19 03 af 18 ea 19 97 89';
+
+      // A prior failed run of this test can leave opt-indent at Compact;
+      // force the known starting state instead of assuming it.
+      byId<HTMLSelectElement>('opt-indent').value = '2';
+
+      // Default options have "Inline leaf containers" checked, so a flat
+      // array of scalars decoded from pasted bytes must stay on one line.
+      // (The default sample's "IDs" field already contains this same array,
+      // so wait for the exact single-line replacement rather than a substring
+      // match, which the stale pre-conversion text would also satisfy.)
+      textarea.value = hex;
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      await vi.waitFor(
+        () => expect(cmText('editor')).toBe('[116, 943, 234, 38793]'),
+        { timeout: 2000 }
+      );
+
+      // Compact indent must also flow through to the bytes → CDN conversion.
+      byId('format-opts-btn').click();
+      byId<HTMLSelectElement>('opt-indent').value = '';
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      await vi.waitFor(
+        () => expect(cmText('editor')).toBe('[116,943,234,38793]'),
+        { timeout: 2000 }
+      );
+
+      byId<HTMLSelectElement>('opt-indent').value = '2';
+      byId('format-opts-btn').click();
       document
         .querySelector<HTMLButtonElement>(
           '.mode-tabs .tab[data-mode=annotated]'

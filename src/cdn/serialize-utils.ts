@@ -44,6 +44,7 @@ export function joinConcatParts(
 
 export interface Commented {
   comments?: CborComments;
+  blankLineBefore?: boolean;
 }
 
 export function hasPreservedComments(item: Commented): boolean {
@@ -55,9 +56,12 @@ export function hasPreservedComments(item: Commented): boolean {
 }
 
 export function hasContainerLayoutComments(item: Commented): boolean {
-  return Boolean(
-    item.comments?.trailing?.length || item.comments?.dangling?.length
-  );
+  // Only dangling comments force the container itself onto multiple lines —
+  // they live inside the brackets on their own line. A trailing comment on
+  // the container is appended after the closing bracket by the caller (root
+  // `toCDN()` or the parent's `entryTrailing`), so it never needs the body
+  // to break, and single/flat rendering stays available.
+  return Boolean(item.comments?.dangling?.length);
 }
 
 /**
@@ -99,14 +103,37 @@ export function convertCommentText(
   return text; // already # or /.../
 }
 
-export function formatLeadingComments(
+/**
+ * Split an item's leading comments into ones that get their own line above
+ * it, and a trailing run of comments the parser found on the same source
+ * line as the item itself (`CborComment.sameLine`) — e.g.
+ * `/ protected / << ... >>,` in an RFC 9052-style annotated array. Since
+ * comments and the item they lead up to appear in strictly increasing
+ * source order, `sameLine` comments always form a contiguous run at the end
+ * of the list (nothing can sit between a same-line comment and the item
+ * without itself being on that same line).
+ *
+ * `ownLines` renders like `formatLeadingComments` used to; `inlinePrefix` is
+ * meant to be prepended directly to the item's own rendered line (already
+ * includes a trailing space per comment, or `''` when there is none).
+ */
+export function splitLeadingComments(
   item: Commented,
   indent: string,
   style?: 'c-style' | 'cdn-style' | undefined
-): string[] {
-  return (item.comments?.leading ?? []).map(
-    (comment) => indent + convertCommentText(comment, style)
-  );
+): { ownLines: string[]; inlinePrefix: string } {
+  const leading = item.comments?.leading ?? [];
+  let splitAt = leading.length;
+  while (splitAt > 0 && leading[splitAt - 1]!.sameLine) splitAt--;
+  return {
+    ownLines: leading
+      .slice(0, splitAt)
+      .map((comment) => indent + convertCommentText(comment, style)),
+    inlinePrefix: leading
+      .slice(splitAt)
+      .map((comment) => convertCommentText(comment, style) + ' ')
+      .join(''),
+  };
 }
 
 export function formatTrailingComments(
@@ -176,26 +203,46 @@ export function resolveSeparators(
  * comments — line comments can only be terminated by a newline.
  *
  * Entries are accessed through per-index callbacks (not materialised entry
- * objects) so the common no-comments path allocates nothing per entry.
- * `hasEntryComments`, `entryLeadingNode`, and `entryTrailing` are consulted
- * only when `preserveComments` is set.  `renderEntry` receives the resolved
- * `colSep` (': ' or ':' depending on compact mode) for rendering map pairs.
+ * objects) so the common no-comments/no-blank-line path allocates nothing
+ * per entry. `hasEntryComments` and `entryTrailing` are consulted only when
+ * `preserveComments` is set; `entryLeadingNode` is also consulted when
+ * `preserveBlankLines` is set, independently of `preserveComments`, to read
+ * its `blankLineBefore` flag. `renderEntry` receives the resolved `colSep`
+ * (': ' or ':' depending on compact mode) for rendering map pairs.
  */
 export function serializeContainer(p: {
   node: Commented;
   options: ToCDNOptions | undefined;
   depth: number;
-  openChar: '[' | '{' | '(';
-  closeChar: ']' | '}' | ')';
+  openChar: string;
+  closeChar: string;
   count: number;
   indefiniteLength: boolean;
   encodingWidth: EncodingWidth | undefined;
+  /**
+   * Where the resolved encoding-indicator suffix is placed.
+   * - `'open'` (default): right after `openChar`, before the content
+   *   (`[_2 1,2,3]`) — the head this indicator describes encodes entry count.
+   * - `'close'`: right after `closeChar`, with no separating space
+   *   (`<<1,2>>_1`) — for `CborEmbeddedCBOR`, whose byte-string head encodes
+   *   content byte length, not entry count.
+   */
+  eiPosition?: 'open' | 'close';
+  /**
+   * Basis for canonical-encoding-width detection (`encodingIndicators:
+   * 'auto'`/`'always'` with no explicit `encodingWidth`). Defaults to
+   * `count`, matching the CBOR array/map head. `CborEmbeddedCBOR` overrides
+   * this to its encoded content's byte length instead.
+   */
+  canonicalCount?: () => bigint;
   hasEntryComments: () => boolean;
   /** Render entry `i` at child depth (`item` or `key: value`). */
   renderEntry: (i: number, colSep: string) => string;
   /**
    * Whether entry `i` contains no nested array/map, so it may stay on the
-   * container's line under `inlineLeafContainers`. Omitted = always a leaf.
+   * container's line under `inlineLeafContainers`. Omitted = always a leaf
+   * (used by `CborEmbeddedCBOR`, where an entry that is itself a container
+   * still inlines as long as its own rendering fits on one line).
    */
   entryIsLeaf?: (i: number) => boolean;
   /** Node whose leading comments are emitted above entry `i` (item / map key). */
@@ -215,16 +262,31 @@ export function serializeContainer(p: {
     indentStr !== null &&
     preserveComments &&
     (hasContainerLayoutComments(p.node) || p.hasEntryComments());
+  const preserveBlankLines =
+    indentStr !== null && !!options?.preserveBlankLines;
+  let hasBlankLines = false;
+  if (preserveBlankLines) {
+    for (let i = 0; i < count; i++) {
+      if (p.entryLeadingNode(i).blankLineBefore) {
+        hasBlankLines = true;
+        break;
+      }
+    }
+  }
   const { inlineSep, multilineSep, trailSep, colSep } = resolveSeparators(
     options,
     indentStr === null
   );
+  const eiPosition = p.eiPosition ?? 'open';
   const eiRaw = p.indefiniteLength
     ? ''
     : resolveEiSuffix(options, p.encodingWidth, () =>
-        canonicalEncodingWidth(BigInt(count))
+        canonicalEncodingWidth(
+          p.canonicalCount ? p.canonicalCount() : BigInt(count)
+        )
       );
-  const eiSuffix = eiRaw ? eiRaw + ' ' : '';
+  const eiSuffix = eiPosition === 'open' && eiRaw ? eiRaw + ' ' : '';
+  const closeSuffix = eiPosition === 'close' ? eiRaw : '';
   const showIndef =
     p.indefiniteLength && (options?.encodingIndicators ?? 'auto') !== 'never';
 
@@ -236,7 +298,7 @@ export function serializeContainer(p: {
           : `${openChar}_ ${inner}${closeChar}`
         : `${openChar}${inner}${closeChar}`;
     }
-    return `${openChar}${eiSuffix}${inner}${closeChar}`;
+    return `${openChar}${eiSuffix}${inner}${closeChar}${closeSuffix}`;
   };
 
   if (indentStr === null || (count === 0 && !hasComments)) {
@@ -254,7 +316,12 @@ export function serializeContainer(p: {
   // Entries rendered while probing are reused below if the probe fails, so a
   // node is never serialized more than once per parent render.
   let probed: string[] | null = null;
-  if (options?.inlineLeafContainers && count > 0 && !hasComments) {
+  if (
+    options?.inlineLeafContainers &&
+    count > 0 &&
+    !hasComments &&
+    !hasBlankLines
+  ) {
     const rendered: string[] = [];
     let flat = true;
     for (let i = 0; i < count; i++) {
@@ -283,25 +350,82 @@ export function serializeContainer(p: {
     : `${openChar}${eiSuffix}`;
   const lines: string[] = [];
   for (let i = 0; i < count; i++) {
+    if (preserveBlankLines && p.entryLeadingNode(i).blankLineBefore) {
+      lines.push('');
+    }
+    let inlinePrefix = '';
     if (preserveComments) {
-      lines.push(
-        ...formatLeadingComments(
-          p.entryLeadingNode(i),
-          childIndent,
-          commentStyle
-        )
+      const { ownLines, inlinePrefix: prefix } = splitLeadingComments(
+        p.entryLeadingNode(i),
+        childIndent,
+        commentStyle
       );
+      lines.push(...ownLines);
+      inlinePrefix = prefix;
     }
     const sep = i < count - 1 ? multilineSep : trailSep;
     const entry = probed?.[i] ?? p.renderEntry(i, colSep);
     lines.push(
-      `${childIndent}${entry}${sep}${preserveComments ? p.entryTrailing(i, commentStyle) : ''}`
+      `${childIndent}${inlinePrefix}${entry}${sep}${preserveComments ? p.entryTrailing(i, commentStyle) : ''}`
     );
   }
   if (preserveComments)
     lines.push(...formatDanglingComments(p.node, childIndent, commentStyle));
   const body = lines.join('\n');
-  return `${open}\n${body}\n${closeIndent}${closeChar}`;
+  return `${open}\n${body}\n${closeIndent}${closeChar}${closeSuffix}`;
+}
+
+/**
+ * Single-child counterpart to `serializeContainer`, for a wrapper that
+ * holds exactly one child inside `openChar`/`closeChar` (currently just
+ * `CborTag`'s `(content)`) rather than a comma-separated list of entries.
+ *
+ * Emits the child's own leading/trailing comments, and the wrapper node's
+ * `dangling` comments (a comment positioned after the child but still
+ * inside the brackets, with nothing following it to attach to as leading —
+ * mirroring how `serializeContainer` handles a container's own dangling
+ * comments). Falls back to the plain single-line `(content)` form — the
+ * common, zero-allocation-beyond-string-concat path — when comments aren't
+ * requested/applicable (no indent, no `preserveComments`, or neither the
+ * child nor the wrapper has any).
+ *
+ * `renderChild` is called with the child's depth exactly once, resolved
+ * *before* calling it: `depth + 1` when comments force multi-line
+ * rendering, `depth` otherwise (matching a plain value's existing
+ * "transparent" nesting — `tag(content)` doesn't indent `content` an extra
+ * level when there's nothing to justify going multi-line for).
+ */
+export function renderSingleChildWithComments(
+  child: Commented,
+  wrapper: Commented,
+  options: ToCDNOptions | undefined,
+  depth: number,
+  renderChild: (childDepth: number) => string,
+  openChar: '(',
+  closeChar: ')'
+): string {
+  const indentStr = resolveIndent(options);
+  const preserveComments = options?.preserveComments;
+  const hasComments =
+    indentStr !== null &&
+    !!preserveComments &&
+    (hasPreservedComments(child) || hasContainerLayoutComments(wrapper));
+  if (!hasComments) return `${openChar}${renderChild(depth)}${closeChar}`;
+  const commentStyle =
+    typeof preserveComments === 'string' ? preserveComments : undefined;
+  const childIndent = indentOf(indentStr!, depth + 1);
+  const closeIndent = indentOf(indentStr!, depth);
+  const { ownLines, inlinePrefix } = splitLeadingComments(
+    child,
+    childIndent,
+    commentStyle
+  );
+  const lines = [
+    ...ownLines,
+    `${childIndent}${inlinePrefix}${renderChild(depth + 1)}${formatTrailingComments(child, commentStyle)}`,
+    ...formatDanglingComments(wrapper, childIndent, commentStyle),
+  ];
+  return `${openChar}\n${lines.join('\n')}\n${closeIndent}${closeChar}`;
 }
 
 // ─── Byte string encoding ─────────────────────────────────────────────────────
@@ -387,6 +511,112 @@ export function serializeBytes(
     default:
       return `h'${toHex(bytes)}'`;
   }
+}
+
+/**
+ * Which comment syntax a byte-string literal's raw source recognizes —
+ * `undefined` when it has none at all (its content is data, not a comment
+ * host). Set once, at parse time, by whoever actually knows the literal's
+ * real origin (the tokenizer for `h'...'`/`b64'...'`/bare sqstr, or the
+ * parser comparing the resolved extension against the specific built-in
+ * `b32`/`h32` objects by reference — never guessed later from the prefix
+ * string, since a user extension can register under any prefix, including
+ * one a built-in also uses; see `CborByteString.ednCommentSyntax`).
+ *   - `'full'`: `#`, `//`, `/* *\/`, and `/ /` (§5.2.1/§5.3.3) — `h'...'`
+ *     and its backtick form, and the built-in `b32'...'`/`h32'...'`
+ *     extensions, which share hex's comment syntax (`utils/strip-comments.ts`).
+ *   - `'hash-only'`: only `#` line comments — standard base64 (`b64'...'`),
+ *     where `/` is valid data (e.g. `//8=` decodes to 0xFFFF), never a
+ *     comment marker (see Tokenizer._readByteContent, §5.2.2).
+ */
+export type ByteCommentSyntax = 'full' | 'hash-only';
+
+/**
+ * Strip comments from inside a preserved byte-string literal's raw source,
+ * keeping everything else — case, whitespace, `...` — untouched. Used when
+ * `preserveByteString` is set but `preserveComments` is not: the preserved
+ * spelling should still drop comments, the same as an unpreserved literal
+ * re-derived from its decoded value would. `syntax` selects the comment
+ * rules to apply (see `ByteCommentSyntax`); the caller is responsible for
+ * knowing which one is correct — this function does not guess from `raw`.
+ *
+ * Only scans the quote-delimited content (not the prefix or a trailing
+ * encoding-indicator suffix), and mirrors the tokenizer's own
+ * comment-recognition closely enough for realistic input; a comment
+ * containing a literal copy of the delimiter quote character is not
+ * specially handled (the input is already known-valid, so at worst this
+ * shifts where the content/comment boundary is drawn, never produces
+ * unparseable output).
+ */
+export function stripByteLiteralComments(
+  raw: string,
+  syntax: ByteCommentSyntax
+): string {
+  let open = 0;
+  while (open < raw.length && raw[open] !== "'" && raw[open] !== '`') open++;
+  if (open >= raw.length) return raw;
+  const quote = raw[open];
+  const close = raw.lastIndexOf(quote);
+  if (close <= open) return raw;
+  const content = raw.slice(open + 1, close);
+  const stripped =
+    syntax === 'hash-only'
+      ? _stripHashOnlyComments(content)
+      : _stripFullByteCommentSyntax(content);
+  return raw.slice(0, open + 1) + stripped + raw.slice(close);
+}
+
+/** `#` line comments only — used by standard base64 (`b64'...'`). */
+function _stripHashOnlyComments(content: string): string {
+  let out = '';
+  let i = 0;
+  while (i < content.length) {
+    if (content[i] === '#') {
+      while (i < content.length && content[i] !== '\n') {
+        i += content[i] === '\\' && i + 1 < content.length ? 2 : 1;
+      }
+      continue;
+    }
+    out += content[i];
+    i++;
+  }
+  return out;
+}
+
+/**
+ * `#`, `//`, `/* *\/`, and `/ /` comments — used by `h'...'`/backtick raw hex
+ * and extension-defined byte literals sharing that syntax (b32, h32, ...).
+ */
+function _stripFullByteCommentSyntax(content: string): string {
+  let out = '';
+  let i = 0;
+  while (i < content.length) {
+    const ch = content[i];
+    const next = content[i + 1];
+    if (ch === '#' || (ch === '/' && next === '/')) {
+      i += ch === '#' ? 1 : 2;
+      while (i < content.length && content[i] !== '\n') {
+        i += content[i] === '\\' && i + 1 < content.length ? 2 : 1;
+      }
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = content.indexOf('*/', i + 2);
+      i = end === -1 ? content.length : end + 2;
+      continue;
+    }
+    if (ch === '/') {
+      let j = i + 1;
+      while (j < content.length && content[j] !== '/') {
+        j += content[j] === '\\' && j + 1 < content.length ? 2 : 1;
+      }
+      i = j < content.length ? j + 1 : content.length;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out;
 }
 
 const _utf8Strict = new TextDecoder('utf-8', { fatal: true });
@@ -559,4 +789,259 @@ export function resolveEiSuffix(
   if (mode === 'never') return '';
   if (mode === 'always') return `_${encodingWidth ?? getCanonical()}`;
   return encodingWidth !== undefined ? `_${encodingWidth}` : '';
+}
+
+/** How a node should render under `preserveAppSequence`. */
+export type AppSeqRenderDecision =
+  'verbatim' | 'adjusted' | 'source' | 'structural' | 'normal';
+
+interface AppSeqSourceFeatures {
+  byteString?: boolean;
+  textString?: boolean;
+  rawString?: boolean;
+  concatenation?: boolean;
+}
+
+/**
+ * Decide how an extension result node — from a `prefix'...'` /
+ * `` prefix`...` `` / `prefix<<...>>` source, or (for a tag-wrapper node
+ * that also has a generic `CborTag` fallback to delegate to) a raw tag
+ * literal `N(...)` — should render under `ToCDNOptions.preserveAppSequence`.
+ *
+ * A raw-tag source is recognised by `ednSource !== undefined`: the parser
+ * only ever sets a tag-wrapper's `ednSource` (the tag *number's* digit
+ * spelling) when it was reached via `N(...)`, never via one of the
+ * app-string/-sequence forms. Leaf (non-tag-wrapper) nodes have no raw-tag
+ * form at all — always pass `undefined` for `ednSource` there.
+ *
+ * Returns:
+ * - `'verbatim'`: re-emit `appSeqSource` as-is. Only reachable for a
+ *   raw-tag source: its encoding-indicator suffixes are nested at two
+ *   independent positions (tag number and inner content), so this is only
+ *   safe in `'auto'` mode with no relevant sibling option overridden.
+ * - `'source'`: keep a raw-tag source structurally verbatim, applying
+ *   comment and encoding-indicator changes by their captured source spans.
+ *   This avoids changing unrelated literal spelling or layout.
+ * - `'adjusted'`: for an app-string/-sequence source, strip whatever
+ *   *outer* indicator suffix is already at the end of `appSeqSource` (or,
+ *   under `'never'`, also an *inner* one immediately before `<<...>>`'s
+ *   closing `>>` — the app-sequence's sole item's own indicator) and let
+ *   the caller append one recomputed via `resolveEiSuffix`/`floatSuffix`
+ *   for the current mode via `adjustAppSeqIndicator` — correct in every
+ *   mode, without losing the source's notation family. (An inner indicator
+ *   can only be *stripped*, not *recomputed*: the item's own encoding
+ *   width isn't tracked once resolved to a plain date/address string, so
+ *   `'always'` cannot add a missing one — it is left absent.)
+ * - `'structural'`: keep the raw-tag notation *family* (as opposed to
+ *   upgrading to `prefix'...'`) but re-derive it structurally — via the
+ *   node's own `CborTag` rendering — instead of using `appSeqSource`
+ *   verbatim. Needed whenever verbatim text would ignore a sibling option
+ *   that must apply per nested node: an explicit `preserveNumberFormat` /
+ *   `preserveByteString` / `preserveTextString` / `preserveRawString` /
+ *   `preserveConcatenation` override.
+ *   Verbatim raw-tag text inherently contains the nested literal spelling.
+ * - `'normal'`: fall through to the class's own notation regeneration
+ *   (`prefix'...'`), unaffected by `preserveAppSequence`. For `<<...>>`,
+ *   this is also used when replaying its sole inner item would defeat an
+ *   explicitly disabled, relevant literal-preservation option.
+ *
+ * `editsComplete` (from `CborItem.appSeqEncodingEditsComplete`, raw-tag
+ * sources only) is `false` when the tag's content contains a node type
+ * `collectContentEncodingEdits` doesn't cover (e.g. a `CborMap` nested in an
+ * `ip` array's raw-tag content). `'source'` relies on those edits to apply
+ * `encodingIndicators: 'always'`/`'never'`, so incomplete coverage would
+ * silently leave the uncovered node's own indicator unchanged; `'structural'`
+ * is used instead, since it re-derives every nested indicator recursively.
+ */
+export function decideTaggedAppSeqRendering(
+  options: ToCDNOptions | undefined,
+  appSeqSource: string | undefined,
+  ednSource: string | undefined,
+  sourceFeatures?: AppSeqSourceFeatures,
+  editsComplete?: boolean
+): AppSeqRenderDecision {
+  if (!options?.preserveAppSequence || appSeqSource === undefined)
+    return 'normal';
+  if (resolveIndent(options) === null && /[\r\n]/.test(appSeqSource))
+    return 'normal';
+  const isRawTagSource = ednSource !== undefined;
+  // App-string/-sequence sources carry relative comment spans, so their
+  // spelling can stay intact while adjustAppSeqIndicator converts or removes
+  // comments. Raw tags instead have a structural CborTag fallback that
+  // applies comment formatting together with all other nested-node options.
+  if (!isRawTagSource) {
+    const innerSourceOverridden =
+      (sourceFeatures?.byteString && options?.preserveByteString === false) ||
+      (sourceFeatures?.textString && options?.preserveTextString === false) ||
+      (sourceFeatures?.rawString && options?.preserveRawString === false) ||
+      (sourceFeatures?.concatenation &&
+        options?.preserveConcatenation === false);
+    return innerSourceOverridden ? 'normal' : 'adjusted';
+  }
+  const commentsNeedEditing =
+    options?.preserveComments === false ||
+    typeof options?.preserveComments === 'string' ||
+    (options?.preserveComments === true && resolveIndent(options) === null);
+  const mode = options?.encodingIndicators ?? 'auto';
+  const siblingOverridden =
+    options?.preserveNumberFormat === false ||
+    (sourceFeatures?.byteString && options?.preserveByteString === false) ||
+    (sourceFeatures?.textString && options?.preserveTextString === false) ||
+    (sourceFeatures?.rawString && options?.preserveRawString === false) ||
+    (sourceFeatures?.concatenation && options?.preserveConcatenation === false);
+  if (siblingOverridden) return 'structural';
+  if (mode !== 'auto' && editsComplete === false) return 'structural';
+  return mode !== 'auto' || commentsNeedEditing ? 'source' : 'verbatim';
+}
+
+/**
+ * Replacement text for a comment being stripped entirely (not converted):
+ * empty, unless removing it would fuse two otherwise-separate tokens
+ * together — e.g. "24/x/h'...'" would become "24h'...'", which the parser
+ * rejects as two array items with no separator between them. A single
+ * space keeps the tokens apart in that case, the same concern
+ * `sourceSuffixEdit`'s own separator handles for an inserted indicator.
+ *
+ * The two neighbouring characters are checked generically (any non-space,
+ * non-comma character needs a separator), not just "word" characters —
+ * `24/x/'abc'` needs the same space as `24/x/h'...'` even though `'` isn't
+ * itself part of a token that could lexically fuse with `24`: the parser's
+ * "array items must be separated" check is purely positional (are the two
+ * tokens flush against each other), not about what those tokens are. A
+ * comma on either side never needs a separator of its own, since it's
+ * already a valid separator by itself.
+ *
+ * `text`/`start`/`end` share one coordinate space (the source being edited
+ * and the comment's offsets within it).
+ */
+function stripCommentReplacement(
+  text: string,
+  start: number,
+  end: number
+): string {
+  const before = start > 0 ? text[start - 1]! : '';
+  const after = end < text.length ? text[end]! : '';
+  const needsSeparator = (ch: string) => ch !== '' && !/[\s,]/.test(ch);
+  return needsSeparator(before) && needsSeparator(after) ? ' ' : '';
+}
+
+function rewriteAppSeqComments(
+  appSeqSource: string,
+  options: ToCDNOptions | undefined,
+  comments: readonly CborComment[] | undefined,
+  removedAt?: number
+): string {
+  const preserveComments = options?.preserveComments;
+  if (preserveComments === undefined || !comments?.length) return appSeqSource;
+  const stripComments =
+    preserveComments === false || resolveIndent(options) === null;
+  const style =
+    typeof preserveComments === 'string' ? preserveComments : undefined;
+  let text = appSeqSource;
+  // Apply replacements from right to left so an earlier comment's offsets
+  // are unaffected by a later replacement. Account for characters already
+  // removed before a following comment.
+  const ordered = [...comments].sort((a, b) => b.start - a.start);
+  for (const comment of ordered) {
+    const shift =
+      removedAt !== undefined && comment.start >= removedAt ? -2 : 0;
+    const start = comment.start + shift;
+    const end = comment.end + shift;
+    const replacement = stripComments
+      ? stripCommentReplacement(text, start, end)
+      : convertCommentText(comment, style);
+    text = text.slice(0, start) + replacement + text.slice(end);
+  }
+  return text;
+}
+
+/** Apply comment/EI options directly to a preserved raw-tag source. */
+export function adjustRawAppSeqSource(
+  appSeqSource: string,
+  options: ToCDNOptions | undefined,
+  comments: readonly CborComment[] | undefined,
+  encodingEdits:
+    | readonly {
+        start: number;
+        end: number;
+        always: string;
+        never: string;
+      }[]
+    | undefined
+): string {
+  const replacements: {
+    start: number;
+    end: number;
+    replacement: string;
+  }[] = [];
+  const preserveComments = options?.preserveComments;
+  if (preserveComments !== undefined && comments?.length) {
+    const stripComments =
+      preserveComments === false || resolveIndent(options) === null;
+    const style =
+      typeof preserveComments === 'string' ? preserveComments : undefined;
+    for (const comment of comments)
+      replacements.push({
+        start: comment.start,
+        end: comment.end,
+        replacement: stripComments
+          ? stripCommentReplacement(appSeqSource, comment.start, comment.end)
+          : convertCommentText(comment, style),
+      });
+  }
+  const mode = options?.encodingIndicators ?? 'auto';
+  if (mode !== 'auto' && encodingEdits)
+    for (const edit of encodingEdits)
+      replacements.push({
+        start: edit.start,
+        end: edit.end,
+        replacement: mode === 'always' ? edit.always : edit.never,
+      });
+
+  // Right-to-left edits keep every stored source offset valid. At the same
+  // offset, replace a non-empty span before performing a zero-width insert.
+  replacements.sort((a, b) => b.start - a.start || b.end - a.end);
+  let text = appSeqSource;
+  for (const edit of replacements)
+    text = text.slice(0, edit.start) + edit.replacement + text.slice(edit.end);
+  return text;
+}
+
+/**
+ * Adjust an `'adjusted'` app-string/-sequence source: apply requested comment
+ * conversion/removal by captured source span, strip the existing
+ * encoding-indicator suffix(es), then append `newSuffix` (the outer/wrapper
+ * indicator recomputed for the current mode) — see
+ * `decideTaggedAppSeqRendering`.
+ *
+ * Under `encodingIndicators: 'never'`, an inner (item-level) indicator is
+ * also stripped, using
+ * `innerItemEnd` (see `CborItem.appSeqInnerEnd`) to find it by its actual
+ * parsed position rather than by pattern-matching text near the closing
+ * `>>` — whitespace, a trailing comma, and/or a comment can all separate
+ * the two, in any combination, so a position-based cut is the only fully
+ * reliable way to locate it.
+ */
+export function adjustAppSeqIndicator(
+  appSeqSource: string,
+  newSuffix: string,
+  options: ToCDNOptions | undefined,
+  innerItemEnd: number | undefined,
+  comments: readonly CborComment[] | undefined
+): string {
+  let text = appSeqSource;
+  let removedInnerAt: number | undefined;
+  if (
+    (options?.encodingIndicators ?? 'auto') === 'never' &&
+    innerItemEnd !== undefined
+  ) {
+    const beforeInner = text.slice(0, innerItemEnd);
+    if (/_[0-3i]$/.test(beforeInner)) {
+      removedInnerAt = innerItemEnd - 2;
+      text = beforeInner.slice(0, -2) + text.slice(innerItemEnd);
+    }
+  }
+
+  text = rewriteAppSeqComments(text, options, comments, removedInnerAt);
+  return text.replace(/_[0-3i]$/, '') + newSuffix;
 }

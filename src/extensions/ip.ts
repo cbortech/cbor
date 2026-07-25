@@ -32,6 +32,9 @@ import { parseIPv4, parseIPv6, formatIPv4, formatIPv6 } from '../utils/ip';
 import {
   resolveEiSuffix,
   canonicalEncodingWidth,
+  decideTaggedAppSeqRendering,
+  adjustRawAppSeqSource,
+  adjustAppSeqIndicator,
 } from '../cdn/serialize-utils';
 
 const PREFIX_IP = 'ip';
@@ -100,6 +103,20 @@ export class CborIpExt extends CborByteString {
     const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(BigInt(this.value.length))
     );
+    const decision = decideTaggedAppSeqRendering(
+      options,
+      this.appSeqSource,
+      undefined,
+      this.appSeqSourceFeatures
+    );
+    if (decision === 'adjusted')
+      return adjustAppSeqIndicator(
+        this.appSeqSource!,
+        eiSuffix,
+        options,
+        this.appSeqInnerEnd,
+        this.appSeqComments
+      );
     return `${PREFIX_IP}'${formatAddress(this.value)}'${eiSuffix}`;
   }
 }
@@ -118,6 +135,22 @@ export class CborIpPrefixExt extends CborArray {
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     if (options?.appStrings === false) return super._toCDN(options, depth);
+    const decision = decideTaggedAppSeqRendering(
+      options,
+      this.appSeqSource,
+      undefined,
+      this.appSeqSourceFeatures
+    );
+    // This form never emits an encoding indicator of its own (unlike the
+    // other ip/dt notations), so 'adjusted' only ever strips one.
+    if (decision === 'adjusted')
+      return adjustAppSeqIndicator(
+        this.appSeqSource!,
+        '',
+        options,
+        this.appSeqInnerEnd,
+        this.appSeqComments
+      );
     const prefixLen = Number((this.items[0] as CborUint).value);
     const truncated = (this.items[1] as CborByteString).value;
     const full = expandToFull(truncated, this._isV4 ? 4 : 16);
@@ -137,6 +170,38 @@ export class CborTaggedIpExt extends CborTag {
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     if (options?.appStrings === false) return super._toCDN(options, depth);
+    const decision = decideTaggedAppSeqRendering(
+      options,
+      this.appSeqSource,
+      this.ednSource,
+      this.appSeqSourceFeatures,
+      this.appSeqEncodingEditsComplete
+    );
+    if (decision === 'verbatim') return this.appSeqSource!;
+    if (decision === 'source')
+      return adjustRawAppSeqSource(
+        this.appSeqSource!,
+        options,
+        this.appSeqComments,
+        this.appSeqEncodingEdits
+      );
+    // Unlike dt's content classes, ip's content (CborByteString / CborArray
+    // / CborUint) never self-switches on `appStrings`, so no need to force
+    // it false here — doing so would also force hex byte-string encoding
+    // (see CborByteString._toCDN), overriding `bstrEncoding`/`sqstr`.
+    if (decision === 'structural') return super._toCDN(options, depth);
+    if (decision === 'adjusted') {
+      const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
+        canonicalEncodingWidth(this.tag)
+      );
+      return adjustAppSeqIndicator(
+        this.appSeqSource!,
+        eiSuffix,
+        options,
+        this.appSeqInnerEnd,
+        this.appSeqComments
+      );
+    }
     const fullLen = this.tag === TAG_IPV4 ? 4 : 16;
     const c = this.content as CborItem;
     if (c instanceof CborByteString) {
@@ -232,6 +297,12 @@ function buildIpValue(prefix: string, content: string): CborItem {
 export const ip: CborExtension = {
   appStringPrefixes: [PREFIX_IP, PREFIX_IP_TAGGED],
   tagNumbers: [TAG_IPV4, TAG_IPV6],
+  // ip/IP results always have a dedicated subclass (CborIpExt /
+  // CborIpPrefixExt / CborTaggedIpExt) that regenerates its notation by
+  // default; 'optional' preserves the <<...>> spelling only when
+  // ToCDNOptions.preserveAppSequence is set, without changing the
+  // returned node's class/identity (see preservedAppSeqSpelling).
+  preserveAppSeqSource: 'optional',
 
   parseAppString(prefix: string, content: string): CborItem {
     return buildIpValue(prefix, content);

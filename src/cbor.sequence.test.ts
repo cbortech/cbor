@@ -292,9 +292,26 @@ describe('CBOR.fromCDNSeq', () => {
       expect(roundtrip('1\n# lead\n2')).toEqual(['1', '# lead\n2']);
     });
 
+    test('comment on its own line is not duplicated as a dangling comment of the previous container item', () => {
+      // Regression: parsing a sequence item with `allowTrailing: true` used
+      // to let the tokenizer's one-token lookahead past the item's closing
+      // bracket leak the following comment into that item's own comments
+      // (as a spurious "dangling" one, since a container item — unlike a
+      // scalar — renders dangling comments before its closing bracket).
+      // fromCDNSeq already assigns the same comment as the next item's
+      // leading comment, so it appeared twice.
+      expect(roundtrip('{"a":1}\n# lead\n2')).toEqual([
+        '{\n  "a": 1\n}',
+        '# lead\n2',
+      ]);
+      expect(roundtrip('[1]\n# lead\n2')).toEqual(['[\n  1\n]', '# lead\n2']);
+    });
+
     test('block comments round-trip across items', () => {
+      // /* a */ and 1 were on the same source line, so the leading comment
+      // stays inline instead of getting pushed onto its own line above.
       expect(roundtrip('/* a */ 1 /* b */ 2')).toEqual([
-        '/* a */\n1 /* b */',
+        '/* a */ 1 /* b */',
         '2',
       ]);
     });

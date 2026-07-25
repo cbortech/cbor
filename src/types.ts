@@ -439,6 +439,18 @@ export interface FromCDNOptions {
   preserveComments?: boolean | 'c-style' | 'cdn-style';
 
   /**
+   * Shorthand for `ToCDNOptions.preserveAll`, so a single option enables
+   * round-tripping through both `fromCDN()` and `toCDN()` (as
+   * `CBOR.format()` does internally). On the parse side, this only implies
+   * `preserveComments: true` (comments must be captured while parsing to be
+   * re-emittable); the other `preserve*` behaviors are always captured by
+   * the parser and only need to be turned on for `toCDN()`.
+   *
+   * @default false
+   */
+  preserveAll?: boolean;
+
+  /**
    * Controls how CDN/EDN validity violations are handled.
    *
    * - `true` (default): recoverable violations call `onWarning` and then throw.
@@ -576,9 +588,35 @@ export interface ToCDNOptions {
    * Like `JSON.stringify`, `0` and `''` are equivalent to omitting the
    * option: the output is a single line. Single-line output is guaranteed
    * to contain no newlines; layout-dependent options (`preserveComments`,
-   * `splitCdn`, `splitNewline`, `preserveConcatenation`) are ignored.
+   * `preserveBlankLines`, `splitCdn`, `splitNewline`, `preserveConcatenation`)
+   * are ignored.
    */
   indent?: number | string;
+
+  /**
+   * Master switch that turns on every `preserve*` option below at once —
+   * `preserveComments`, `preserveByteString`, `preserveRawString`,
+   * `preserveTextString`, `preserveConcatenation`, `preserveNumberFormat`,
+   * `preserveAppSequence`, and `preserveBlankLines` — for reformatting CDN
+   * text (e.g. on save in an editor) with minimal changes: only
+   * whitespace/indentation, plus anything an explicitly-set individual
+   * option overrides.
+   *
+   * An option explicitly set to a value (including `false`) is left as-is;
+   * `preserveAll` only fills in the ones left `undefined`. So
+   * `{ preserveAll: true, preserveNumberFormat: false }` preserves
+   * everything except number literal spelling.
+   *
+   * When parsing via `CBOR.fromCDN()` separately from `toCDN()` (rather
+   * than through `CBOR.format()`, which passes the same options to both),
+   * also pass `preserveAll` (or `preserveComments`) to `FromCDNOptions` so
+   * comments are captured in the first place — see
+   * `FromCDNOptions.preserveAll`. Bignums are unaffected by
+   * `preserveNumberFormat` even under `preserveAll`; see that option.
+   *
+   * @default false
+   */
+  preserveAll?: boolean;
 
   /**
    * Emit comments previously captured by `FromCDNOptions.preserveComments`.
@@ -601,22 +639,48 @@ export interface ToCDNOptions {
   preserveComments?: boolean | 'c-style' | 'cdn-style';
 
   /**
+   * Re-emit a blank line above an array/map entry (or indefinite-length
+   * string chunk) that had one before it anywhere in the parsed CDN source,
+   * so paragraph-like groupings of entries survive a reformat. At most one
+   * blank line is ever emitted per gap, regardless of how many blank lines
+   * were originally there.
+   *
+   * Detection is based purely on entry source positions — it does not
+   * require `preserveComments` and is unaffected by whether comments are
+   * emitted.
+   *
+   * Only effective when `indent` enables pretty-printing. A container with
+   * a preserved blank line is always emitted one-entry-per-line, the same
+   * as a container with preserved comments (see `inlineLeafContainers`).
+   *
+   * @default false
+   */
+  preserveBlankLines?: boolean;
+
+  /**
    * Re-emit byte string literals parsed from CDN using their original source
    * text when available.
    *
    * This preserves the spelling and interior layout of non-concatenated
    * `h'...'`, `b64'...'`, `b32'...'`, `h32'...'`, raw-backtick byte strings,
-   * and single-quoted byte strings, including comments inside those literals.
-   * Byte strings produced by `+` concatenation are normalised as usual;
-   * combine with `preserveConcatenation` to keep both the part boundaries
-   * and each part's spelling.
+   * and single-quoted byte strings — including a `h'xx...yy'`-family elided
+   * literal (§4.2), whose spelling is kept independently of
+   * `preserveConcatenation` when it has no `+` of its own (see that
+   * option). Byte strings produced by `+` concatenation are normalised as
+   * usual; combine with `preserveConcatenation` to keep both the part
+   * boundaries and each part's spelling.
+   *
+   * A comment inside the literal is stripped unless `preserveComments` is
+   * also set — `preserveByteString` alone preserves everything about the
+   * literal's spelling *except* its comments, the same as an unpreserved
+   * literal (re-derived from the decoded value) never has comments either.
    *
    * When enabled, this takes precedence over `bstrEncoding` and `sqstr` for
    * byte strings that carry original EDN source text.
    *
    * In single-line output (no `indent`), an original spelling that spans
-   * multiple lines (e.g. a byte string literal with interior line comments)
-   * falls back to normal serialization; single-line spellings are kept.
+   * multiple lines — after any comment is stripped — falls back to normal
+   * serialization; single-line spellings are kept.
    *
    * @default false
    */
@@ -641,6 +705,50 @@ export interface ToCDNOptions {
    * @default false
    */
   preserveRawString?: boolean;
+
+  /**
+   * Re-emit double-quoted text strings (`"..."`) using their original CDN
+   * source spelling — escape sequences (`é` vs. the literal character),
+   * quoting choices, etc. — instead of re-escaping them from the decoded
+   * string value.
+   *
+   * Applies to non-concatenated double-quoted literals only; a string
+   * reached via `+` concatenation is normalised as usual regardless of this
+   * option. Preserved strings are emitted verbatim: they are never
+   * re-indented or split by `splitCdn` / `splitNewline`.
+   *
+   * Raw backtick literals (`` `...` ``) are covered by `preserveRawString`,
+   * not this option.
+   *
+   * In single-line output (no `indent`), a spelling that spans multiple
+   * lines falls back to normal escaping; single-line spellings are kept.
+   *
+   * @default false
+   */
+  preserveTextString?: boolean;
+
+  /**
+   * Re-emit integer and floating-point literals using their original CDN
+   * source spelling — base (`0xff` / `0o377` / `0b101` / decimal), digit
+   * spelling, decimal point / exponent form, and encoding-indicator suffix
+   * (e.g. `1.5_1`) — instead of normalising them via `intFormat` /
+   * `floatFormat` and recomputed encoding indicators.
+   *
+   * Takes precedence over `intFormat` and `floatFormat` for literals parsed
+   * from CDN text. Values that did not originate from CDN text (e.g. built
+   * via `CBOR.from()` or decoded from CBOR bytes) always fall back to normal
+   * formatting, since there is no original spelling to preserve. Bignums
+   * (integers outside the uint64/int64 range) are unaffected and always
+   * render as plain decimal.
+   *
+   * Combine with `preserveByteString`, `preserveRawString`,
+   * `preserveConcatenation`, and `preserveComments` to reformat CDN text
+   * (e.g. whitespace/indentation only) with minimal changes to the rest of
+   * the source.
+   *
+   * @default false
+   */
+  preserveNumberFormat?: boolean;
 
   /**
    * Whether to emit commas between array/map elements.
@@ -679,6 +787,38 @@ export interface ToCDNOptions {
    * @default true
    */
   appStrings?: boolean;
+
+  /**
+   * For built-in extensions that support application-string notation
+   * (`prefix'...'` or `` prefix`...` ``), application-sequence notation
+   * (`prefix<<...>>`), and/or a raw tag literal (`N(...)`), re-emit a value
+   * using its exact original spelling instead of normalizing it to the
+   * regenerated `prefix'...'` form.
+   *
+   * By default, an extension like `dt`/`DT` or `ip`/`IP` regenerates its
+   * notation from the resolved value on every call — so
+   * `` DT`1969-07-21T02:56:16Z` ``, `DT<<'1969-07-21T02:56:16Z'>>`, and even
+   * the raw tag form `1(1749772800)` all become
+   * `DT'2025-06-13T00:00:00Z'`-style `prefix'...'` notation, even though all
+   * of these denote the same value. `preserveAppSequence` keeps the
+   * original spelling instead — whichever quoting (`'...'` vs `` `...` ``),
+   * bracketing (`<<...>>`), or raw tag form was used. Has no effect when
+   * `appStrings` is `false` (raw tag notation is used either way regardless
+   * of the original spelling), or on values not parsed from one of these
+   * forms.
+   *
+   * In single-line output (no `indent`), a spelling that spans multiple
+   * lines falls back to normal (regenerated) notation; single-line
+   * spellings are kept.
+   *
+   * An explicit `preserveComments` setting is still applied to comments
+   * inside a preserved application-sequence spelling: marker styles are
+   * normalised without changing the notation family, and `false` removes
+   * the comments while retaining the surrounding source spelling.
+   *
+   * @default false
+   */
+  preserveAppSequence?: boolean;
 
   /**
    * Numeric format for integer values in CDN output.
@@ -762,6 +902,19 @@ export interface ToCDNOptions {
    * concatenation, and only takes effect when `indent` enables
    * pretty-printing (single-line output joins the parts into one literal).
    *
+   * Also applies within an elision (`...`, §4.2 of
+   * draft-ietf-cbor-edn-literals-25): a `+`-joined fragment on either side of
+   * an ellipsis keeps its own part boundaries too (e.g. `'test' +
+   * h'1234...abcd' + ...` stays exactly as written instead of merging
+   * `'test'` into the byte fragment before it), and byte-string elision
+   * keeps the `h'xx' + ... + h'yy'` spelling instead of the default compact
+   * `h'xx...yy'` literal. Unlike the text/byte-string case above, this
+   * applies regardless of `indent`, and the parts stay on one line even
+   * under `indent` (elision is always single-line): a `+` boundary inside an
+   * ellipsis is never a lossless merge — the elided middle can't be "joined
+   * in" — so there's no indent-dependent fallback to prefer, and no reason
+   * to reflow it.
+   *
    * @default false
    */
   preserveConcatenation?: boolean;
@@ -772,6 +925,12 @@ export interface ToCDNOptions {
    * tag) and every entry serializes without a line break (e.g. `[1, 2, 3]`,
    * `{"a": 1}`, `(_ "a", "b")`). Nested leaf containers still collapse
    * individually: `[[1, 2], [3, 4]]` renders with one inner array per line.
+   *
+   * `<<...>>` (CBOR Sequence Literal / embedded CBOR) is the one exception:
+   * since it's a flat sequence of encoded items rather than a
+   * nested-structure display, an entry that is itself an array/map still
+   * inlines there as long as its own rendering fits on one line — e.g.
+   * `<<{1: -7}>>` stays on one line, even though `[{1: -7}]` would not.
    *
    * Containers with preserved comments are always emitted in multi-line
    * form. Has no effect when `indent` is omitted.
@@ -814,6 +973,15 @@ export interface CborComment {
   end: number;
   line: number;
   col: number;
+  /**
+   * `true` when this is a `leading` comment that ends on the same source
+   * line as the node it's attached to — e.g. `/ protected / << ... >>` in an
+   * RFC 9052-style annotated array, as opposed to a comment on its own line
+   * above the value. `toCDN()` renders these as an inline prefix on the
+   * value's own line instead of a separate line above it. `undefined` for
+   * `trailing`/`dangling` comments, where it doesn't apply.
+   */
+  sameLine?: boolean;
 }
 
 export interface CborComments {

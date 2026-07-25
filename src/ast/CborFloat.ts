@@ -36,6 +36,16 @@ export class CborFloat extends CborItem {
   ednSource?: string;
 
   /**
+   * Original CDN literal source text (e.g. `1.50`, `1.5_1`, `0x1.8p+0_1`),
+   * set by the parser when this float came from a plain CDN float literal
+   * (as opposed to a `float'...'` app-string, which uses `ednSource`
+   * above). Used by `_toCDN()` to round-trip the literal's exact spelling,
+   * including its encoding-indicator suffix, when `preserveNumberFormat`
+   * is set.
+   */
+  literalSource?: string;
+
+  /**
    * Original encoded payload bytes (big-endian, without the initial byte),
    * set by the decoder when the value is NaN so that NaN payloads survive a
    * decode → encode round-trip (a JS `number` cannot carry them).
@@ -46,12 +56,17 @@ export class CborFloat extends CborItem {
 
   constructor(
     value: number,
-    options?: { precision?: FloatPrecision; rawBits?: Uint8Array }
+    options?: {
+      precision?: FloatPrecision;
+      rawBits?: Uint8Array;
+      literalSource?: string;
+    }
   ) {
     super();
     this.value = value;
     this.precision = options?.precision;
     this.rawBits = options?.rawBits;
+    this.literalSource = options?.literalSource;
   }
 
   override _encodeTo(writer: CborWriter, _options?: ToCBOROptions): void {
@@ -97,6 +112,23 @@ export class CborFloat extends CborItem {
         return ednSource + suffix;
       }
       return ednSource;
+    }
+    if (options?.preserveNumberFormat && this.literalSource !== undefined) {
+      const literalSource = this.literalSource;
+      // Encoding-indicator suffixes are embedded directly in the literal
+      // text; _[0-7i] matches the full grammar (not just _[0-3i]) so that a
+      // syntactically-present-but-semantically-invalid suffix (e.g. the "_7"
+      // in a leniently-parsed "1.5_7") is still recognised and stripped.
+      if (mode === 'never') return literalSource.replace(/_[0-7i]$/, '');
+      if (mode === 'always') {
+        if (/_[0-7i]$/.test(literalSource)) return literalSource;
+        const autoSelected = autoSelectFloatPrecision(this.value);
+        return (
+          literalSource +
+          floatSuffix(this.value, this.precision, autoSelected, 'always')
+        );
+      }
+      return literalSource;
     }
     const autoSelected = autoSelectFloatPrecision(this.value);
     const numStr =

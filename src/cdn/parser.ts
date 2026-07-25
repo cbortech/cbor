@@ -6,7 +6,11 @@ import {
   type TokenType,
 } from './tokenizer';
 import { CdnSyntaxError } from './errors';
-import type { CborItem } from '../ast/CborItem';
+import type {
+  AppSeqEncodingEdit,
+  AppSeqSourceFeatures,
+  CborItem,
+} from '../ast/CborItem';
 import type {
   CborComment,
   FromCDNOptions,
@@ -25,7 +29,16 @@ import { CborTag } from '../ast/CborTag';
 import { CborFloat, type FloatPrecision } from '../ast/CborFloat';
 import { CborSimple } from '../ast/CborSimple';
 import { CborEmbeddedCBOR } from '../ast/CborEmbeddedCBOR';
-import { maxForEncodingWidth, type EncodingWidth } from '../cbor/encode';
+import {
+  autoSelectFloatPrecision,
+  maxForEncodingWidth,
+  type EncodingWidth,
+} from '../cbor/encode';
+import {
+  canonicalEncodingWidth,
+  type ByteCommentSyntax,
+} from './serialize-utils';
+import { b32, h32 } from '../extensions/b32';
 import { parseHexFloat } from '../utils/hexfloat';
 import { hexToBytes } from '../utils/hex';
 import { base64ToBytes } from '../utils/base64';
@@ -56,7 +69,8 @@ export function parseCDN(text: string, options?: FromCDNOptions): CborItem {
   });
   const parser = new CDNParser(tokenizer, options ?? {});
   const node = parser.parse();
-  if (options?.preserveComments) attachComments(node, tokenizer.comments, text);
+  if (options?.preserveComments || options?.preserveAll)
+    attachComments(node, tokenizer.comments, text);
   return node;
 }
 
@@ -80,6 +94,111 @@ function parseIntegerRaw(raw: string): {
 function parseBigInt(raw: string): bigint {
   if (raw.startsWith('-')) return -BigInt(raw.slice(1));
   return BigInt(raw);
+}
+
+/**
+ * `item`'s own literal-preservation features, combined with those of
+ * whatever it structurally contains.
+ *
+ * A node can carry `appSeqSourceFeatures` on itself — set when it is *also*
+ * the result of parsing a `prefix<<item>>` / `prefix'...'` source, recording
+ * features of *that* inner item (see the `appSeqSourceFeatures` field on
+ * `CborItem`) — independently of whatever `structuralAppSeqSourceFeatures`
+ * finds by walking its children. Both must be combined: a nested extension
+ * result (e.g. a `dt<<b64'...'>>` that resolved to a plain epoch number, so
+ * `structuralAppSeqSourceFeatures` finds nothing byte-string-like in it
+ * structurally) still carries its own inner byte-string literal's features
+ * on itself, and an explicitly disabled sibling `preserve*` option must see
+ * that when this node is nested inside an outer `preserveAppSequence`
+ * raw-tag/`<<...>>` source (e.g. `ip`'s array content).
+ */
+function appSeqSourceFeatures(
+  item: CborItem | undefined
+): AppSeqSourceFeatures | undefined {
+  if (item === undefined) return undefined;
+  return combineAppSeqSourceFeatures([
+    item.appSeqSourceFeatures,
+    structuralAppSeqSourceFeatures(item),
+  ]);
+}
+
+function structuralAppSeqSourceFeatures(
+  item: CborItem
+): AppSeqSourceFeatures | undefined {
+  if (item instanceof CborByteString) {
+    return {
+      byteString: true,
+      concatenation: item.ednParts !== undefined && item.ednParts.length > 1,
+    };
+  }
+  if (item instanceof CborTextString) {
+    const hasParts = item.ednParts !== undefined;
+    const rawPartCount =
+      item.ednPartSources?.filter((source) => source !== undefined).length ?? 0;
+    // A part with no preserved raw source is ambiguous by itself — it could
+    // be an unpreservable double-quoted literal (textString) or a
+    // byte-string literal decoded to text per §5.1 (byteString); only
+    // ednPartIsByteString distinguishes them.
+    const byteStringPartCount = hasParts
+      ? item.ednParts!.reduce((count, _text, i) => {
+          const hasSource = item.ednPartSources?.[i] !== undefined;
+          const isByteString = item.ednPartIsByteString?.[i] ?? false;
+          return hasSource || !isByteString ? count : count + 1;
+        }, 0)
+      : 0;
+    const unpreservedTextPartCount =
+      (hasParts ? item.ednParts!.length : 0) -
+      rawPartCount -
+      byteStringPartCount;
+    return {
+      byteString: byteStringPartCount > 0,
+      textString:
+        item.quotedEdnSource !== undefined || unpreservedTextPartCount > 0,
+      rawString: item.ednSource !== undefined || rawPartCount > 0,
+      concatenation: hasParts && item.ednParts!.length > 1,
+    };
+  }
+  if (item instanceof CborArray) {
+    return combineAppSeqSourceFeatures(item.items.map(appSeqSourceFeatures));
+  }
+  if (item instanceof CborMap) {
+    // ip accepts an arbitrary CborArray as tag content, so a nested map's
+    // own byte-string/text-string/concatenation literals must also be
+    // detected — otherwise an explicitly disabled sibling `preserve*`
+    // option silently has no effect on them (see collectContentEncodingEdits,
+    // which has the analogous "unsupported nested node" concern for
+    // encoding-indicator edits).
+    return combineAppSeqSourceFeatures(
+      item.entries.flatMap(([k, v]) => [
+        appSeqSourceFeatures(k),
+        appSeqSourceFeatures(v),
+      ])
+    );
+  }
+  if (item instanceof CborTag) return appSeqSourceFeatures(item.content);
+  if (
+    item instanceof CborIndefiniteByteString ||
+    item instanceof CborIndefiniteTextString ||
+    item instanceof CborEmbeddedCBOR
+  ) {
+    const children: CborItem[] =
+      item instanceof CborEmbeddedCBOR ? item.items : item.chunks;
+    return combineAppSeqSourceFeatures(children.map(appSeqSourceFeatures));
+  }
+  return undefined;
+}
+
+function combineAppSeqSourceFeatures(
+  values: (AppSeqSourceFeatures | undefined)[]
+): AppSeqSourceFeatures | undefined {
+  const features = values.filter((value) => value !== undefined);
+  if (features.length === 0) return undefined;
+  return {
+    byteString: features.some((value) => value.byteString),
+    textString: features.some((value) => value.textString),
+    rawString: features.some((value) => value.rawString),
+    concatenation: features.some((value) => value.concatenation),
+  };
 }
 
 function parseFloatToken(
@@ -138,12 +257,153 @@ function parseFloatToken(
   return { value: parseFloat(numStr), precision };
 }
 
+// ─── Blank-line tracking ─────────────────────────────────────────────────────
+
+/**
+ * A blank line is a line containing only whitespace between two other lines
+ * — i.e. two newlines with nothing but horizontal whitespace between them.
+ * Applied to the raw gap between one container entry and the next
+ * (comments and all), so a blank line is detected regardless of whether it
+ * sits before, after, or inside a leading comment block.
+ */
+const BLANK_LINE_RE = /\r?\n[ \t]*\r?\n/;
+
+function hasBlankLineBetween(
+  text: string,
+  start: number,
+  end: number
+): boolean {
+  return BLANK_LINE_RE.test(text.slice(start, end));
+}
+
 // ─── Comment attachment ──────────────────────────────────────────────────────
 
 interface NodeInfo {
   node: CborItem;
   start: number;
   end: number;
+}
+
+function relativeComments(
+  comments: readonly EdnComment[],
+  fromIndex: number,
+  start: number,
+  end: number
+): CborComment[] {
+  const result: CborComment[] = [];
+  for (let i = fromIndex; i < comments.length; i++) {
+    const comment = comments[i]!;
+    if (comment.start >= end) break;
+    if (comment.start >= start && comment.end <= end)
+      result.push({
+        ...comment,
+        start: comment.start - start,
+        end: comment.end - start,
+      });
+  }
+  return result;
+}
+
+function sourceSuffixEdit(
+  source: string,
+  sourceStart: number,
+  node: CborItem,
+  always: string
+): AppSeqEncodingEdit | undefined {
+  if (node.end === undefined) return undefined;
+  const hasIndicator = /_[0-7i]$/.test(
+    source.slice(Math.max(0, node.end - 2), node.end)
+  );
+  const start = (hasIndicator ? node.end - 2 : node.end) - sourceStart;
+  return {
+    start,
+    end: node.end - sourceStart,
+    always,
+    never: '',
+  };
+}
+
+/**
+ * Collect source-span edits for every encoding indicator nested inside a
+ * raw-tag's content, for `adjustRawAppSeqSource`.
+ *
+ * Returns `undefined` — instead of a partial edit list — when `node` (or
+ * anything nested inside it) is a type this function doesn't know how to
+ * produce an edit for (e.g. `CborMap`, `CborTag`, `CborSimple`, an
+ * indefinite-length string). A partial list would silently leave that
+ * node's own indicator un-edited under `encodingIndicators: 'always'` /
+ * `'never'`; the caller must fall back to structural re-serialization
+ * instead so every nested indicator is actually applied. `ip` accepts an
+ * arbitrary `CborArray` as tag content, so this bails out for any element
+ * type beyond the ones explicitly handled below rather than assuming
+ * coverage is complete.
+ */
+function collectContentEncodingEdits(
+  source: string,
+  sourceStart: number,
+  node: CborItem
+): AppSeqEncodingEdit[] | undefined {
+  if (node instanceof CborUint) {
+    const width = node.encodingWidth ?? canonicalEncodingWidth(node.value);
+    const edit = sourceSuffixEdit(source, sourceStart, node, `_${width}`);
+    return edit ? [edit] : [];
+  }
+  if (node instanceof CborNint) {
+    const width = node.encodingWidth ?? canonicalEncodingWidth(node.argument);
+    const edit = sourceSuffixEdit(source, sourceStart, node, `_${width}`);
+    return edit ? [edit] : [];
+  }
+  if (node instanceof CborFloat) {
+    const precision = node.precision ?? autoSelectFloatPrecision(node.value);
+    const suffix =
+      precision === 'half' ? '_1' : precision === 'single' ? '_2' : '_3';
+    const edit = sourceSuffixEdit(source, sourceStart, node, suffix);
+    return edit ? [edit] : [];
+  }
+  if (node instanceof CborByteString) {
+    const width =
+      node.encodingWidth ?? canonicalEncodingWidth(BigInt(node.value.length));
+    const edit = sourceSuffixEdit(source, sourceStart, node, `_${width}`);
+    return edit ? [edit] : [];
+  }
+  if (node instanceof CborTextString) {
+    const width =
+      node.encodingWidth ??
+      canonicalEncodingWidth(BigInt(textEncoder.encode(node.value).length));
+    const edit = sourceSuffixEdit(source, sourceStart, node, `_${width}`);
+    return edit ? [edit] : [];
+  }
+  if (node instanceof CborArray) {
+    const edits: AppSeqEncodingEdit[] = [];
+    if (node.indefiniteLength) return undefined;
+    if (node.start !== undefined) {
+      const tokenizer = new Tokenizer(source, { offset: node.start });
+      const open = tokenizer.consume();
+      const next = tokenizer.peek();
+      const hasIndicator = next.type === 'ENCODING_INDICATOR';
+      const width =
+        node.encodingWidth ?? canonicalEncodingWidth(BigInt(node.items.length));
+      const suffix = `_${width}`;
+      const nextSourceChar = source[open.endOffset] ?? '';
+      const separator =
+        !hasIndicator && /[+\-.0-9A-Z_a-z]/.test(nextSourceChar) ? ' ' : '';
+      edits.push({
+        start: (hasIndicator ? next.offset : open.endOffset) - sourceStart,
+        end: (hasIndicator ? next.endOffset : open.endOffset) - sourceStart,
+        // An inserted container indicator needs a separator before an
+        // immediately-adjacent item (`[_i24]` lexes as one identifier).
+        always: suffix + separator,
+        never: '',
+      });
+    }
+    for (const item of node.items) {
+      const itemEdits = collectContentEncodingEdits(source, sourceStart, item);
+      if (itemEdits === undefined) return undefined;
+      edits.push(...itemEdits);
+    }
+    return edits;
+  }
+  return undefined;
 }
 
 function attachComments(
@@ -237,12 +497,24 @@ function attachComments(
 
     if (!container || (next && next.end <= container.end)) {
       if (next) {
+        comment.sameLine = lineAt(raw.end) === lineAt(next.start);
         addComment(next.node, 'leading', comment);
         continue;
       }
     }
 
-    addComment(container?.node ?? root, 'dangling', comment);
+    // No enclosing node and no following node: the comment lies entirely
+    // after `root.end` (a comment before `root.start` is always caught by
+    // the `next`-leading branch above, since `root` is itself a collected
+    // node). This happens when this parse is one item of a CDN Sequence
+    // (`allowTrailing: true`) — the tokenizer's one-token lookahead reads
+    // past this item's closing bracket into a comment that actually
+    // belongs to whatever follows. Attaching it here would duplicate the
+    // sequence-level leading-comment assignment `fromCDNSeq` already makes
+    // for the next item, so it is dropped instead of defaulting to `root`.
+    if (!container) continue;
+
+    addComment(container.node, 'dangling', comment);
   }
 }
 
@@ -340,6 +612,32 @@ const MISSING_EXTENSION_HINTS: ReadonlyMap<string, string> = new Map([
   ['ilts', builtinDisabledHint('ilts')],
   ['float', builtinDisabledHint('float')],
 ]);
+
+/**
+ * One atom of a byte-string `+`/ellipsis chain: either a byte fragment or an
+ * ellipsis marker, tagged with whether a genuine `+` from the source
+ * precedes it (`real`) as opposed to sitting inside a single `h'xx...yy'`
+ * literal's own `...` notation. An ellipsis atom also tracks whether it came
+ * from such a literal at all (`fromByteLiteral`), regardless of its own
+ * position within it (leading, trailing, or in the middle) — as opposed to a
+ * bare standalone `...` token — and, when it did, that literal's own raw
+ * source text (`literalSource`, e.g. `h'AB...CD'` verbatim, case/whitespace/
+ * comments and all) for `preserveByteString` to round-trip. See
+ * `CDNParser._consumeByteEllipsisChain`.
+ */
+type ByteEllipsisAtom =
+  | {
+      bytes: Uint8Array;
+      source?: string;
+      commentSyntax?: ByteCommentSyntax;
+      real: boolean;
+    }
+  | {
+      ellipsis: true;
+      real: boolean;
+      fromByteLiteral: boolean;
+      literalSource?: string;
+    };
 
 // ─── Parser ───────────────────────────────────────────────────────────────────
 
@@ -517,6 +815,14 @@ class CDNParser {
             // extension didn't handle it itself (e.g. dt'...'_2).
             if (appStrEw !== undefined)
               this._applyEiToResult(result, appStrEw, tok);
+            if (ext.preserveAppSeqSource === 'optional') {
+              // Same rationale as the APP_SEQUENCE case below: tack the
+              // source onto the same result node so preserveAppSequence can
+              // round-trip prefix`...` (and non-canonical prefix'...')
+              // spellings without changing the node's class/identity.
+              result.appSeqSource = tok.raw + appStrEiRaw;
+              return result;
+            }
             // Propagate ednSource so preserveByteString / appStrings round-trips correctly.
             // instanceof narrows the type; getPrototypeOf excludes subclasses like CborIpExt.
             if (
@@ -528,6 +834,15 @@ class CDNParser {
                 ednEncoding: result.ednEncoding,
                 encodingWidth: result.encodingWidth,
                 ednSource: tok.raw + appStrEiRaw,
+                // A prefix name alone can't say which comment syntax (if
+                // any) this content actually uses: a user extension may be
+                // registered under the same prefix as a built-in (`ext`
+                // here is whichever one actually resolved — see the
+                // registration order in the constructor). Only strip
+                // comments from preserveByteString's spelling when `ext` is
+                // provably the specific built-in b32/h32 object.
+                ednCommentSyntax:
+                  ext === b32 || ext === h32 ? 'full' : undefined,
               });
             if (result instanceof CborFloat && result.ednSource === undefined)
               result.ednSource = tok.raw + appStrEiRaw;
@@ -543,6 +858,7 @@ class CDNParser {
         }
       }
       case 'APP_SEQUENCE': {
+        const commentStartIndex = this.t.comments.length;
         this.t.consume();
         const items: CborItem[] = [];
         while (this.t.peek().type !== 'GT_GT') {
@@ -597,7 +913,28 @@ class CDNParser {
               tok.offset,
               this.t.lastEndOffset
             );
-            if (result instanceof CborFloat) {
+            if (seqExt.preserveAppSeqSource === 'optional') {
+              // Tack the source onto the same result node (preserving its
+              // class/identity) rather than wrapping it; the node's own
+              // _toCDN() decides whether to use it (see preserveAppSequence).
+              result.appSeqSource = rawSource;
+              result.appSeqComments = relativeComments(
+                this.t.comments,
+                commentStartIndex,
+                tok.offset,
+                this.t.lastEndOffset
+              );
+              // Exact split point for adjustAppSeqIndicator to strip the
+              // sole inner item's own indicator by position rather than by
+              // pattern-matching text near '>>' (which whitespace, a
+              // trailing comma, or a comment between the item and '>>'
+              // would defeat).
+              if (items.length === 1) {
+                if (items[0].end !== undefined)
+                  result.appSeqInnerEnd = items[0].end - tok.offset;
+                result.appSeqSourceFeatures = appSeqSourceFeatures(items[0]);
+              }
+            } else if (result instanceof CborFloat) {
               if (result.ednSource === undefined) result.ednSource = rawSource;
             } else if (seqExt.preserveAppSeqSource) {
               return new CborAppSeqResult(result, rawSource);
@@ -619,7 +956,13 @@ class CDNParser {
           this.t.consume();
           items.push(this.parseValue());
         }
-        return new CborEllipsis(items);
+        // Every item here came from an explicit `+` (this generic chain has
+        // no notion of an elided-hex literal's internal `...`), so every
+        // boundary is real.
+        return new CborEllipsis(
+          items,
+          items.map(() => true)
+        );
       }
       case 'BYTES_HEX_ELIDED': {
         this.t.consume();
@@ -631,15 +974,26 @@ class CDNParser {
   }
 
   private parseIntegerOrTag(): CborItem {
+    const commentStartIndex = this.t.comments.length;
     const tok = this.t.consume(); // INTEGER
     const { numStr, rawSuffix } = parseIntegerRaw(tok.value);
+    let tagIndicatorStart =
+      rawSuffix !== undefined ? tok.endOffset - 2 : tok.endOffset;
+    let tagIndicatorEnd = tok.endOffset;
     // Hex/octal/binary literals return before the suffix check in the tokenizer,
     // so their encoding indicator arrives as a separate ENCODING_INDICATOR token.
     let encodingWidth =
       rawSuffix !== undefined
         ? this._resolveEncodingWidth(rawSuffix, tok)
-        : this.consumeEncodingIndicator();
+        : this.consumeEncodingIndicator(undefined, (eiTok) => {
+            tagIndicatorStart = eiTok.offset;
+            tagIndicatorEnd = eiTok.endOffset;
+          });
     const n = parseBigInt(numStr);
+    // tok.raw keeps a leading '+' that tok.value drops (e.g. "+42" → value
+    // "42", raw "+42"); mirror the same suffix stripping applied to numStr
+    // so the preserved spelling matches what the user actually wrote.
+    const ednSource = rawSuffix !== undefined ? tok.raw.slice(0, -2) : tok.raw;
 
     // Out-of-range integers become bignum tags per RFC 8949 §3.4.3.
     // Tag numbers must fit in uint64, so a value > UINT64_MAX before '(' is an error.
@@ -665,14 +1019,8 @@ class CDNParser {
 
     const intNode =
       n >= 0n
-        ? new CborUint(
-            n,
-            encodingWidth !== undefined ? { encodingWidth } : undefined
-          )
-        : new CborNint(
-            n,
-            encodingWidth !== undefined ? { encodingWidth } : undefined
-          );
+        ? new CborUint(n, { encodingWidth, ednSource })
+        : new CborNint(n, { encodingWidth, ednSource });
 
     // integer followed by '(' → tagged data item
     if (this.t.peek().type === 'LPAREN') {
@@ -688,12 +1036,51 @@ class CDNParser {
       if (ext?.parseTag) {
         const result = ext.parseTag(tagNum, content);
         if (result !== undefined) {
-          if (
-            result instanceof CborTag &&
-            encodingWidth !== undefined &&
-            result.encodingWidth === undefined
-          )
-            result.encodingWidth = encodingWidth;
+          if (result instanceof CborTag) {
+            if (
+              encodingWidth !== undefined &&
+              result.encodingWidth === undefined
+            )
+              result.encodingWidth = encodingWidth;
+            if (result.ednSource === undefined) result.ednSource = ednSource;
+            if (
+              ext.preserveAppSeqSource === 'optional' &&
+              result.appSeqSource === undefined
+            ) {
+              // Raw tag notation (e.g. 1(1749772800)) is itself a spelling
+              // that preserveAppSequence should be able to keep instead of
+              // upgrading it to regenerated DT'...' notation.
+              result.appSeqSource = this.t.source.slice(
+                tok.offset,
+                this.t.lastEndOffset
+              );
+              result.appSeqComments = relativeComments(
+                this.t.comments,
+                commentStartIndex,
+                tok.offset,
+                this.t.lastEndOffset
+              );
+              const tagWidth =
+                result.encodingWidth ?? canonicalEncodingWidth(result.tag);
+              const contentEdits = collectContentEncodingEdits(
+                this.t.source,
+                tok.offset,
+                result.content
+              );
+              result.appSeqEncodingEdits = [
+                {
+                  start: tagIndicatorStart - tok.offset,
+                  end: tagIndicatorEnd - tok.offset,
+                  always: `_${tagWidth}`,
+                  never: '',
+                },
+                ...(contentEdits ?? []),
+              ];
+              if (contentEdits === undefined)
+                result.appSeqEncodingEditsComplete = false;
+              result.appSeqSourceFeatures = appSeqSourceFeatures(content);
+            }
+          }
           if (setupWarnings.length > 0) {
             result.warnings ??= [];
             result.warnings.push(...setupWarnings);
@@ -701,11 +1088,10 @@ class CDNParser {
           return result;
         }
       }
-      const tagResult = new CborTag(
-        tagNum,
-        content,
-        encodingWidth !== undefined ? { encodingWidth } : undefined
-      );
+      const tagResult = new CborTag(tagNum, content, {
+        encodingWidth,
+        ednSource,
+      });
       if (setupWarnings.length > 0) {
         tagResult.warnings ??= [];
         tagResult.warnings.push(...setupWarnings);
@@ -731,10 +1117,9 @@ class CDNParser {
           `${value} cannot be exactly represented as ${precision === 'half' ? 'f16 (_1)' : 'f32 (_2)'}; use _3 or remove the indicator`
         );
     }
-    return new CborFloat(
-      value,
-      precision !== undefined ? { precision } : undefined
-    );
+    // tok.raw keeps a leading '+' that tok.value drops (e.g. "+1.5" → value
+    // "1.5", raw "+1.5"; likewise "+Infinity" → value "Infinity").
+    return new CborFloat(value, { precision, literalSource: tok.raw });
   }
 
   private parseString(): CborItem {
@@ -750,20 +1135,22 @@ class CDNParser {
           ednSource: tok.raw,
           ...(ew !== undefined ? { encodingWidth: ew } : {}),
         });
-      return new CborTextString(
-        tok.value,
-        ew !== undefined ? { encodingWidth: ew } : undefined
-      );
+      return new CborTextString(tok.value, {
+        quotedEdnSource: tok.raw,
+        ...(ew !== undefined ? { encodingWidth: ew } : {}),
+      });
     }
 
     // Concatenation chain — may include ellipsis, producing CborEllipsis
     let hasEllipsis = false;
-    const parts: Array<{ text: string; source?: string } | { ellipsis: true }> =
-      [
-        tok.type === 'RAWSTRING'
-          ? { text: tok.value, source: tok.raw }
-          : { text: tok.value },
-      ];
+    const parts: Array<
+      | { text: string; source?: string; isByteString?: boolean }
+      | { ellipsis: true }
+    > = [
+      tok.type === 'RAWSTRING'
+        ? { text: tok.value, source: tok.raw }
+        : { text: tok.value },
+    ];
 
     while (this.t.peek().type === 'PLUS') {
       this.t.consume(); // +
@@ -783,6 +1170,11 @@ class CDNParser {
         this.t.consume();
         parts.push({
           text: this._decodeUtf8(this._decodeBytesToken(next), next),
+          // §5.1: this part is a byte-string literal decoded to text, not a
+          // double-quoted literal — appSeqSourceFeatures must attribute it
+          // to `byteString`, not the unpreservable `textString`, since both
+          // leave `source` undefined here.
+          isByteString: true,
         });
       } else {
         this._fail(
@@ -797,6 +1189,9 @@ class CDNParser {
       // keeping the part boundaries for `preserveConcatenation`.
       const texts = parts.map((p) => ('text' in p ? p.text : ''));
       const sources = parts.map((p) => ('text' in p ? p.source : undefined));
+      const isByteStringFlags = parts.map((p) =>
+        'text' in p ? (p.isByteString ?? false) : false
+      );
       const joined = texts.join('');
       const ew = this.consumeEncodingIndicator(() =>
         BigInt(textEncoder.encode(joined).length)
@@ -806,6 +1201,9 @@ class CDNParser {
         ...(sources.some((s) => s !== undefined)
           ? { ednPartSources: sources }
           : {}),
+        ...(isByteStringFlags.some((b) => b)
+          ? { ednPartIsByteString: isByteStringFlags }
+          : {}),
         ...(ew !== undefined ? { encodingWidth: ew } : {}),
       });
     }
@@ -813,17 +1211,27 @@ class CDNParser {
     // Build 888([...]) with consolidated adjacent text fragments, retaining
     // the original boundaries and raw source spellings within each fragment.
     const items: CborItem[] = [];
-    const currentParts: Array<{ text: string; source?: string }> = [];
+    const currentParts: Array<{
+      text: string;
+      source?: string;
+      isByteString?: boolean;
+    }> = [];
     const flushCurrentParts = () => {
       const texts = currentParts.map((part) => part.text);
       const currentText = texts.join('');
       if (currentText !== '') {
         const sources = currentParts.map((part) => part.source);
+        const isByteStringFlags = currentParts.map(
+          (part) => part.isByteString ?? false
+        );
         items.push(
           new CborTextString(currentText, {
             ednParts: texts,
             ...(sources.some((source) => source !== undefined)
               ? { ednPartSources: sources }
+              : {}),
+            ...(isByteStringFlags.some((b) => b)
+              ? { ednPartIsByteString: isByteStringFlags }
               : {}),
           })
         );
@@ -900,6 +1308,22 @@ class CDNParser {
     return type === 'BYTES_B64' ? 'base64' : 'hex';
   }
 
+  /**
+   * Comment syntax (if any) for a *core* byte-string token type (never an
+   * app-string extension's — those are resolved by extension identity, not
+   * token type, since `_isBytesToken` excludes `APP_STRING` and extension
+   * prefixes can never take part in `+`/ellipsis concatenation). `BYTES_HEX`
+   * (and its elided form) uses the full syntax; `BYTES_B64` only `#`; `SQSTR`
+   * none at all.
+   */
+  private _tokenTypeToCommentSyntax(
+    type: string
+  ): ByteCommentSyntax | undefined {
+    if (type === 'BYTES_HEX') return 'full';
+    if (type === 'BYTES_B64') return 'hash-only';
+    return undefined;
+  }
+
   private _parseBytesConcat(
     first: Uint8Array,
     firstType: string,
@@ -911,37 +1335,75 @@ class CDNParser {
       return new CborByteString(first, {
         ednEncoding,
         ednSource: firstSource,
+        ednCommentSyntax: this._tokenTypeToCommentSyntax(firstType),
         ...(ew !== undefined ? { encodingWidth: ew } : {}),
       });
     }
+    const initial: ByteEllipsisAtom[] = [
+      {
+        bytes: first,
+        source: firstSource,
+        commentSyntax: this._tokenTypeToCommentSyntax(firstType),
+        real: false,
+      },
+    ];
+    const atoms = this._consumeByteEllipsisChain(initial);
+    return this._buildFromByteAtoms(
+      atoms,
+      this._tokenTypeToCdnEncoding(firstType)
+    );
+  }
 
-    // Concatenation chain — may include ellipsis
-    let hasEllipsis = false;
-    const parts: Array<
-      { bytes: Uint8Array; source?: string } | { ellipsis: true }
-    > = [{ bytes: first, source: firstSource }];
+  /**
+   * Parse a BYTES_HEX_ELIDED token (h'xx...yy') and any trailing + concatenation
+   * into a CborEllipsis([h'xx', 888(null), h'yy', ...]).
+   */
+  private _parseHexElidedConcat(firstTok: Token): CborEllipsis {
+    const atoms = this._consumeByteEllipsisChain(
+      this._elidedHexAtoms(firstTok.value, firstTok)
+    );
+    // Always has at least one ellipsis atom — it came from an elided token.
+    return this._buildFromByteAtoms(atoms, 'hex') as CborEllipsis;
+  }
 
+  /**
+   * Consume a `+`-chain of byte-string / `...` / `h'xx...yy'` tokens
+   * following an already-parsed first fragment, returning the flattened,
+   * source-ordered atom list (`initial` plus everything the chain adds).
+   *
+   * Each atom carries `real`: whether a genuine `+` from the source
+   * precedes it — as opposed to an ellipsis or byte segment that sits
+   * *inside* a single `h'xx...yy'` literal's own notation. Two literal
+   * tokens can only end up adjacent with no ellipsis between them by
+   * sitting across a `+` (a single elided-hex token's internal segments are
+   * always ellipsis-separated from each other), so every atom appended here
+   * — the first one from each new token, and every atom of a plain
+   * (non-elided) byte token — is real; only an elided token's *internal*
+   * segments (beyond its first) are not.
+   */
+  private _consumeByteEllipsisChain(
+    initial: ByteEllipsisAtom[]
+  ): ByteEllipsisAtom[] {
+    const atoms = initial;
     while (this.t.peek().type === 'PLUS') {
       this.t.consume(); // +
       const next = this.t.peek();
       if (next.type === 'ELLIPSIS') {
         this.t.consume();
-        parts.push({ ellipsis: true });
-        hasEllipsis = true;
+        atoms.push({ ellipsis: true, real: true, fromByteLiteral: false });
       } else if (next.type === 'BYTES_HEX_ELIDED') {
         this.t.consume();
-        const subItems = this._buildBytesElidedItems(next.value, next);
-        for (const item of subItems) {
-          if (item instanceof CborEllipsis) {
-            parts.push({ ellipsis: true });
-            hasEllipsis = true;
-          } else if (item instanceof CborByteString) {
-            parts.push({ bytes: item.value });
-          }
-        }
+        const sub = this._elidedHexAtoms(next.value, next);
+        if (sub.length > 0) sub[0]!.real = true;
+        atoms.push(...sub);
       } else if (this._isBytesToken(next.type)) {
         this.t.consume();
-        parts.push({ bytes: this._decodeBytesToken(next), source: next.raw });
+        atoms.push({
+          bytes: this._decodeBytesToken(next),
+          source: next.raw,
+          commentSyntax: this._tokenTypeToCommentSyntax(next.type),
+          real: true,
+        });
       } else if (next.type === 'TSTR' || next.type === 'RAWSTRING') {
         // §5.1: when a byte string leads, the right-hand side must also be a
         // byte string.  Text strings are only allowed on the right of a
@@ -952,7 +1414,7 @@ class CDNParser {
           'text string in a byte-string concatenation is not allowed; ' +
           "use a byte string literal (h'...', b64'...', or '...') instead";
         this._warnOrFail(mixMsg, next);
-        parts.push({ bytes: textEncoder.encode(next.value) });
+        atoms.push({ bytes: textEncoder.encode(next.value), real: true });
       } else {
         this._fail(
           `expected byte string after +, got ${JSON.stringify(next.value)}`,
@@ -960,111 +1422,116 @@ class CDNParser {
         );
       }
     }
+    return atoms;
+  }
 
+  /** Flatten a single BYTES_HEX_ELIDED token's own `h'xx...yy...zz'` content
+   *  into atoms, all marked non-`real`: none of its internal segments sit
+   *  across an actual `+`. Every ellipsis atom is `fromByteLiteral: true` —
+   *  it came from this literal's own notation, regardless of where within
+   *  it (leading, trailing, or in the middle). The caller fixes up the very
+   *  first atom's `real` flag if this token itself followed a `+`. */
+  private _elidedHexAtoms(
+    hexWithEllipsis: string,
+    tok: Token
+  ): ByteEllipsisAtom[] {
+    const segments = hexWithEllipsis.split('...');
+    const atoms: ByteEllipsisAtom[] = [];
+    for (let i = 0; i < segments.length; i++) {
+      if (i > 0)
+        atoms.push({
+          ellipsis: true,
+          real: false,
+          fromByteLiteral: true,
+          literalSource: tok.raw,
+        });
+      if (segments[i].length > 0) {
+        atoms.push({
+          bytes: this._hexToBytes(segments[i], tok),
+          commentSyntax: 'full',
+          real: false,
+        });
+      }
+    }
+    return atoms;
+  }
+
+  /**
+   * Build the final `CborByteString` (no ellipsis anywhere) or `CborEllipsis`
+   * from a flattened atom list, consolidating adjacent byte atoms with no
+   * ellipsis between them into one `CborByteString` — retaining `ednParts`
+   * for a fragment that merged multiple `real` (`+`-joined) atoms — and
+   * building a `realBoundary` array parallel to the resulting `CborEllipsis`
+   * items, so `preserveConcatenation` can tell real `+` boundaries apart
+   * from a `h'xx...yy'` literal's own internal notation regardless of where
+   * the `...` falls within it.
+   */
+  private _buildFromByteAtoms(
+    atoms: ByteEllipsisAtom[],
+    ednEncoding: 'hex' | 'base64'
+  ): CborByteString | CborEllipsis {
+    const hasEllipsis = atoms.some((a) => 'ellipsis' in a);
     if (!hasEllipsis) {
-      const byteParts = parts.map((p) =>
-        'bytes' in p ? p : { bytes: new Uint8Array(0) }
-      );
+      const byteParts = atoms as Array<{
+        bytes: Uint8Array;
+        source?: string;
+        commentSyntax?: ByteCommentSyntax;
+      }>;
       const concat = this._concatBytes(byteParts.map((p) => p.bytes));
       const ew = this.consumeEncodingIndicator(() => BigInt(concat.length));
       return new CborByteString(concat, {
-        ednEncoding: this._tokenTypeToCdnEncoding(firstType),
+        ednEncoding,
         ednParts: byteParts,
         ...(ew !== undefined ? { encodingWidth: ew } : {}),
       });
     }
 
-    // Build 888([...]) with consolidated adjacent byte fragments
     const items: CborItem[] = [];
-    const pending: Uint8Array[] = [];
+    const realBoundary: boolean[] = [];
+    const pending: Array<{
+      bytes: Uint8Array;
+      source?: string;
+      commentSyntax?: ByteCommentSyntax;
+      real: boolean;
+    }> = [];
     const flushPending = () => {
       if (pending.length > 0) {
-        items.push(new CborByteString(this._concatBytes([...pending])));
+        items.push(
+          new CborByteString(this._concatBytes(pending.map((p) => p.bytes)), {
+            // A single fragment (no merge across a real `+`) still needs its
+            // own source spelling preserved — e.g. the sole byte atom
+            // adjacent to an ellipsis in `h'41' + ...` — so
+            // `preserveByteString` has something to round-trip.
+            ...(pending.length > 1
+              ? {
+                  ednParts: pending.map(({ bytes, source, commentSyntax }) => ({
+                    bytes,
+                    source,
+                    commentSyntax,
+                  })),
+                }
+              : {
+                  ednSource: pending[0]!.source,
+                  ednCommentSyntax: pending[0]!.commentSyntax,
+                }),
+          })
+        );
+        realBoundary.push(pending[0]!.real);
         pending.length = 0;
       }
     };
-    for (const part of parts) {
-      if ('ellipsis' in part) {
+    for (const atom of atoms) {
+      if ('ellipsis' in atom) {
         flushPending();
-        items.push(new CborEllipsis());
+        items.push(new CborEllipsis(atom.fromByteLiteral, atom.literalSource));
+        realBoundary.push(atom.real);
       } else {
-        pending.push(part.bytes);
+        pending.push(atom);
       }
     }
     flushPending();
 
-    return new CborEllipsis(items);
-  }
-
-  /**
-   * Parse a BYTES_HEX_ELIDED token (h'xx...yy') and any trailing + concatenation
-   * into a CborEllipsis([h'xx', 888(null), h'yy', ...]).
-   */
-  private _parseHexElidedConcat(firstTok: Token): CborEllipsis {
-    const items = this._buildBytesElidedItems(firstTok.value, firstTok);
-
-    while (this.t.peek().type === 'PLUS') {
-      this.t.consume(); // +
-      const next = this.t.peek();
-      if (next.type === 'ELLIPSIS') {
-        this.t.consume();
-        items.push(new CborEllipsis());
-      } else if (next.type === 'BYTES_HEX_ELIDED') {
-        this.t.consume();
-        const subItems = this._buildBytesElidedItems(next.value, next);
-        this._mergeFirstBytesItem(items, subItems);
-      } else if (this._isBytesToken(next.type)) {
-        this.t.consume();
-        const bytes = this._decodeBytesToken(next);
-        // Append to the last item if it's a CborByteString
-        const last = items[items.length - 1];
-        if (last instanceof CborByteString) {
-          items[items.length - 1] = new CborByteString(
-            this._concatBytes([last.value, bytes])
-          );
-        } else {
-          items.push(new CborByteString(bytes));
-        }
-      } else {
-        this._fail(
-          `expected byte string after +, got ${JSON.stringify(next.value)}`,
-          next
-        );
-      }
-    }
-    return new CborEllipsis(items);
-  }
-
-  private _buildBytesElidedItems(
-    hexWithEllipsis: string,
-    tok: Token
-  ): CborItem[] {
-    const segments = hexWithEllipsis.split('...');
-    const items: CborItem[] = [];
-    for (let i = 0; i < segments.length; i++) {
-      if (i > 0) items.push(new CborEllipsis());
-      if (segments[i].length > 0) {
-        items.push(new CborByteString(this._hexToBytes(segments[i], tok)));
-      }
-    }
-    return items;
-  }
-
-  private _mergeFirstBytesItem(target: CborItem[], source: CborItem[]): void {
-    if (source.length === 0) return;
-    const lastTarget = target[target.length - 1];
-    const firstSource = source[0];
-    if (
-      lastTarget instanceof CborByteString &&
-      firstSource instanceof CborByteString
-    ) {
-      target[target.length - 1] = new CborByteString(
-        this._concatBytes([lastTarget.value, firstSource.value])
-      );
-      target.push(...source.slice(1));
-    } else {
-      target.push(...source);
-    }
+    return new CborEllipsis(items, realBoundary);
   }
 
   private _concatBytes(parts: Uint8Array[]): Uint8Array {
@@ -1091,7 +1558,7 @@ class CDNParser {
     const { numStr } = parseIntegerRaw(numTok.value);
     const n = Number(parseBigInt(numStr));
     this.expect('RPAREN');
-    return new CborSimple(n);
+    return new CborSimple(n, { ednSource: numTok.raw });
   }
 
   private parseEmbeddedCBOR(): CborEmbeddedCBOR {
@@ -1143,6 +1610,7 @@ class CDNParser {
     // Rescue setup warnings before inner parseValue() calls drain them into child nodes.
     const setupWarnings = this._pendingWarnings.splice(0);
     const items: CborItem[] = [];
+    let blankLineBoundary = this.t.lastEndOffset;
     while (this.t.peek().type !== 'RBRACKET') {
       if (items.length > 0) {
         if (this.t.peek().type === 'COMMA') {
@@ -1155,7 +1623,11 @@ class CDNParser {
           );
         }
       }
-      items.push(this.parseValue());
+      const item = this.parseValue();
+      if (hasBlankLineBetween(this.t.source, blankLineBoundary, item.start!))
+        item.blankLineBefore = true;
+      blankLineBoundary = item.end!;
+      items.push(item);
     }
     this.expect('RBRACKET');
     if (encodingWidth !== undefined && eiTok !== undefined) {
@@ -1200,6 +1672,7 @@ class CDNParser {
     // Rescue setup warnings before inner parseValue() calls drain them into child nodes.
     const setupWarnings = this._pendingWarnings.splice(0);
     const entries: [CborItem, CborItem][] = [];
+    let blankLineBoundary = this.t.lastEndOffset;
     while (this.t.peek().type !== 'RBRACE') {
       if (entries.length > 0) {
         if (this.t.peek().type === 'COMMA') {
@@ -1213,8 +1686,11 @@ class CDNParser {
         }
       }
       const key = this.parseValue();
+      if (hasBlankLineBetween(this.t.source, blankLineBoundary, key.start!))
+        key.blankLineBefore = true;
       this.expect('COLON');
       const val = this.parseValue();
+      blankLineBoundary = val.end!;
       entries.push([key, val]);
     }
     this.expect('RBRACE');
@@ -1263,6 +1739,7 @@ class CDNParser {
     const setupWarnings = this._pendingWarnings.splice(0);
 
     const chunks: CborItem[] = [];
+    let blankLineBoundary = this.t.lastEndOffset;
     while (this.t.peek().type !== 'RPAREN') {
       if (chunks.length > 0) {
         if (this.t.peek().type === 'COMMA') {
@@ -1275,7 +1752,11 @@ class CDNParser {
           );
         }
       }
-      chunks.push(this.parseValue());
+      const chunk = this.parseValue();
+      if (hasBlankLineBetween(this.t.source, blankLineBoundary, chunk.start!))
+        chunk.blankLineBefore = true;
+      blankLineBoundary = chunk.end!;
+      chunks.push(chunk);
     }
     this.expect('RPAREN');
 
@@ -1323,10 +1804,12 @@ class CDNParser {
    * UTF-8 byte-length computation without paying for it on every string.
    */
   private consumeEncodingIndicator(
-    getStoredValue?: () => bigint
+    getStoredValue?: () => bigint,
+    onToken?: (token: Token) => void
   ): EncodingWidth | undefined {
     if (this.t.peek().type === 'ENCODING_INDICATOR') {
       const tok = this.t.consume();
+      onToken?.(tok);
       let ew = this._resolveEncodingWidth(tok.value, tok);
       if (ew !== undefined && getStoredValue !== undefined) {
         ew = this._validateEncodingFit(getStoredValue(), ew, tok);

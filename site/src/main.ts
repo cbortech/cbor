@@ -244,7 +244,7 @@ editTextarea.addEventListener(
       return;
     }
     try {
-      const { cdn, warnings } = bytesToCdnText(text);
+      const { cdn, warnings } = bytesToCdnText(text, readFormatOptions());
       applyHexResult(cdn, warnings);
     } catch (e) {
       debouncedUpdate.cancel();
@@ -261,7 +261,7 @@ hexviewEl.addEventListener('paste', (e) => {
   if (!text) return;
   e.preventDefault();
   try {
-    const { cdn, warnings } = bytesToCdnText(text);
+    const { cdn, warnings } = bytesToCdnText(text, readFormatOptions());
     applyHexResult(cdn, warnings);
   } catch (err) {
     debouncedUpdate.cancel();
@@ -393,7 +393,9 @@ function importCborFile(file: File): void {
           onWarning: (w) => warnings.push(w.message),
         }),
       ];
-      const cdn = items.map((item) => item.toCDN({ indent: 2 })).join('\n');
+      const cdn = items
+        .map((item) => item.toCDN(readFormatOptions()))
+        .join('\n');
       resetSamples();
       applyHexResult(cdn, warnings);
     })

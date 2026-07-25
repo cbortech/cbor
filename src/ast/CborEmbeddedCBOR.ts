@@ -9,11 +9,9 @@ import {
   type EncodingWidth,
 } from '../cbor/encode';
 import {
-  resolveIndent,
-  indentOf,
-  resolveSeparators,
-  resolveEiSuffix,
-  canonicalEncodingWidth,
+  formatTrailingComments,
+  hasPreservedComments,
+  serializeContainer,
 } from '../cdn/serialize-utils';
 import { bytesToSpacedHexUpper } from '../utils/hex';
 
@@ -57,38 +55,26 @@ export class CborEmbeddedCBOR extends CborItem {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
-      canonicalEncodingWidth(BigInt(this._content(options).length))
-    );
-    if (this.items.length === 0) return `<<>>${eiSuffix}`;
-
-    const indentStr = resolveIndent(options);
-    const { inlineSep, multilineSep, trailSep } = resolveSeparators(
+    return serializeContainer({
+      node: this,
       options,
-      indentStr === null
-    );
-
-    if (indentStr === null) {
-      // single-line
-      const inner = this.items
-        .map((item) => item._toCDN(options, depth + 1))
-        .join(inlineSep);
-      return `<<${inner}>>${eiSuffix}`;
-    }
-
-    // multi-line
-    const childIndent = indentOf(indentStr, depth + 1);
-    const closeIndent = indentOf(indentStr, depth);
-    const lines = this.items.map(
-      (item) => `${childIndent}${item._toCDN(options, depth + 1)}`
-    );
-    const lastIdx = lines.length - 1;
-    const body = lines
-      .map((line, i) =>
-        i < lastIdx ? `${line}${multilineSep}` : `${line}${trailSep}`
-      )
-      .join('\n');
-    return `<<\n${body}\n${closeIndent}>>${eiSuffix}`;
+      depth,
+      openChar: '<<',
+      closeChar: '>>',
+      count: this.items.length,
+      indefiniteLength: false,
+      encodingWidth: this.encodingWidth,
+      eiPosition: 'close',
+      canonicalCount: () => BigInt(this._content(options).length),
+      hasEntryComments: () => this.items.some(hasPreservedComments),
+      renderEntry: (i) => this.items[i]._toCDN(options, depth + 1),
+      // entryIsLeaf is intentionally omitted (defaults to "always a leaf"):
+      // unlike CborArray/CborMap, an item that is itself an array/map still
+      // inlines here as long as its own rendering fits on one line — <<...>>
+      // is a flat sequence of encoded items, not a nested-structure display.
+      entryLeadingNode: (i) => this.items[i],
+      entryTrailing: (i, style) => formatTrailingComments(this.items[i], style),
+    });
   }
 
   override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {

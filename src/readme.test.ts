@@ -105,6 +105,15 @@ describe('README examples', () => {
     );
   });
 
+  test('inlineLeafContainers: <<...>> is the one exception, inlining a container entry that fits on one line', () => {
+    const text = CBOR.format('<<{1: -7}>>', {
+      indent: 2,
+      inlineLeafContainers: true,
+    });
+
+    expect(text).toBe('<<{1: -7}>>');
+  });
+
   test('splitNewline splits text strings at newlines', () => {
     const text = CBOR.format('{"text": "line1\\nline2\\nline3"}', {
       indent: 2,
@@ -154,6 +163,52 @@ describe('README examples', () => {
         preserveByteString: true,
       })
     ).toBe("h'68' +\n  b64'aQ'");
+  });
+
+  test('preserveTextString keeps double-quoted escape spelling', () => {
+    expect(CBOR.format('"caf\\u00e9"')).toBe('"café"');
+    expect(CBOR.format('"caf\\u00e9"', { preserveTextString: true })).toBe(
+      '"caf\\u00e9"'
+    );
+  });
+
+  test('preserveNumberFormat keeps original number literal spelling', () => {
+    expect(CBOR.format('{"a": 0xff, "b": 1.50}')).toBe('{"a":255,"b":1.5}');
+    expect(
+      CBOR.format('{"a": 0xff, "b": 1.50}', { preserveNumberFormat: true })
+    ).toBe('{"a":0xff,"b":1.50}');
+  });
+
+  test('preserveAppSequence keeps 1(...), DT<<...>>, and DT`...` notation', () => {
+    expect(CBOR.format('1(1749772800)')).toBe("DT'2025-06-13T00:00:00Z'");
+    expect(CBOR.format('1(1749772800)', { preserveAppSequence: true })).toBe(
+      '1(1749772800)'
+    );
+    expect(CBOR.format("DT<<'1969-07-21T02:56:16Z'>>")).toBe(
+      "DT'1969-07-21T02:56:16Z'"
+    );
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", {
+        preserveAppSequence: true,
+      })
+    ).toBe("DT<<'1969-07-21T02:56:16Z'>>");
+    expect(
+      CBOR.format('DT`1969-07-21T02:56:16Z`', { preserveAppSequence: true })
+    ).toBe('DT`1969-07-21T02:56:16Z`');
+  });
+
+  test('format with minimal changes (preserveAll)', () => {
+    expect(
+      CBOR.format('{"a":0xff,"b":1.5_1,"c":b64\'aGk=\'}', {
+        indent: 2,
+        preserveAll: true,
+      })
+    ).toBe('{\n  "a": 0xff,\n  "b": 1.5_1,\n  "c": b64\'aGk=\'\n}');
+  });
+
+  test('preserveAll needs FromCDNOptions too when calling fromCDN()/toCDN() separately', () => {
+    const item = CBOR.fromCDN('1 # hi', { preserveAll: true });
+    expect(item.toCDN({ preserveAll: true, indent: 2 })).toBe('1 # hi');
   });
 
   test('AST item methods', () => {

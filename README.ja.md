@@ -330,6 +330,46 @@ CBOR.format('`\\d+`', { preserveRawString: true });
 // '`\\d+`'
 ```
 
+### ダブルクォート文字列の表記を保持する
+
+デフォルトでは、`CBOR.format()` はダブルクォートのテキスト文字列をデコード後の
+値から再エスケープします。そのため `\uXXXX` エスケープはリテラル文字に変換され
+ます。`preserveTextString` を指定すると、連結されていない `"..."` リテラルを
+元のソース表記のまま再出力します。(バッククォートの raw 文字列(`` `...` ``)
+はこのオプションではなく `preserveRawString` の対象です。`+` 連結を経由した
+文字列は、このオプションを指定していても通常どおり正規化されます。)
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+CBOR.format('"caf\\u00e9"');
+// '"café"'
+
+CBOR.format('"caf\\u00e9"', { preserveTextString: true });
+// '"caf\\u00e9"'
+```
+
+### 数値リテラルの表記を保持する
+
+デフォルトでは、`CBOR.format()` は整数・浮動小数点数リテラルを正規化します。
+16進数・8進数・2進数の整数(`0xff`、`0o377`、`0b101`)は10進数に変換され、
+末尾のゼロや冗長なエンコーディング指標のサフィックス(`1.50`、`1.5_1`)は
+省略されます。`preserveNumberFormat` を指定すると、これらのリテラルを元の
+CDN ソース表記のまま再出力します。`intFormat` / `floatFormat` より優先され
+ます。CDN テキストからパースされたリテラルにのみ効果があり、`CBOR.from()`
+で構築した値や CBOR バイト列からデコードした値には効果がありません(通常
+どおりの整形になります)。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+CBOR.format('{"a": 0xff, "b": 1.50}');
+// '{"a":255,"b":1.5}'
+
+CBOR.format('{"a": 0xff, "b": 1.50}', { preserveNumberFormat: true });
+// '{"a":0xff,"b":1.50}'
+```
+
 ### `+` による文字列連結を保持する
 
 注意: `+` による文字列連結構文は draft-26 で削除されました。この節は legacy
@@ -362,6 +402,110 @@ CBOR.format("h'68' + b64'aQ'", {
 });
 // h'68' +
 //   b64'aQ'
+```
+
+### application-string / -sequence 記法を保持する
+
+一部の組み込み拡張(`dt`/`DT`、`ip`/`IP`)は同じ値に対して `prefix'...'`
+(application string)、`` prefix`...` ``(backtick application string)、
+`prefix<<...>>`(application sequence)、生のタグリテラル(`N(...)`)の
+いずれの記法もサポートしていますが、デフォルトでは `CBOR.format()` を呼ぶ
+たびに解決済みの値から `prefix'...'` を再生成します。そのため
+`` DT`1969-07-21T02:56:16Z` `` も `DT<<'1969-07-21T02:56:16Z'>>` も、生の
+タグ記法 `1(1749772800)` さえも、すべて `DT'...'` 記法に正規化され、さら
+に非正規な `DT'...'` の表記(例えば `Z` の代わりに `+00:00` を使った場合
+など)も書き換えられます。`preserveAppSequence` を指定すると、実際に使わ
+れていた表記のまま保持します。`appStrings: false` を同時に指定した場合は
+効果がありません(どちらにせよ元の表記に関わらず生のタグ記法になるため)。
+これらの記法からパースされていない値にも効果はありません。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+CBOR.format('1(1749772800)');
+// "DT'2025-06-13T00:00:00Z'"
+
+CBOR.format('1(1749772800)', { preserveAppSequence: true });
+// "1(1749772800)"
+
+CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", { preserveAppSequence: true });
+// "DT<<'1969-07-21T02:56:16Z'>>"
+
+CBOR.format('DT`1969-07-21T02:56:16Z`', { preserveAppSequence: true });
+// "DT`1969-07-21T02:56:16Z`"
+```
+
+### 空行を保持する
+
+デフォルトでは、`CBOR.format()` は配列・マップの要素間(および `(_ ...)`
+のチャンク間)の空行を再シリアライズ時に取り除きます。`preserveBlankLines`
+を指定すると、元のソースでその要素の前のどこかに空行があった場合、要素の
+直前に空行を 1 行だけ再出力します。要素をパラグラフのようにまとめる元の
+見た目を、フォーマット後も保てます。元の空行が何行連続していても、出力
+されるのは常に 1 行だけです。判定は要素の位置だけに基づいており、
+`preserveComments` は不要で、コメントを出力するかどうかにも影響されません。
+`indent` を指定して整形出力する場合のみ効果があり、空行を保持する
+コンテナは `inlineLeafContainers` が有効でも常に 1 要素 1 行で出力されます。
+`preserveAll` にも含まれます。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const src = `[
+  1,
+  2,
+
+  3
+]`;
+
+CBOR.format(src, { indent: 2 });
+// [
+//   1,
+//   2,
+//   3
+// ]
+
+CBOR.format(src, { indent: 2, preserveBlankLines: true });
+// [
+//   1,
+//   2,
+//
+//   3
+// ]
+```
+
+### 変更を最小限にとどめてフォーマットする
+
+`preserveAll` を指定すると、すべての `preserve*` 系オプションが一括で
+有効になります。たとえばエディタの保存時フォーマットのように、空白・
+インデントだけを変更し、ほとんどのリテラルの元の表記には手を加えずに
+CDN テキストを整形できます(bignum だけは例外です。上記の
+`preserveNumberFormat` の説明を参照してください)。個別のオプションを
+明示的に指定した場合(`false` も含む)は、そちらが `preserveAll` より
+優先されます。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+CBOR.format('{"a":0xff,"b":1.5_1,"c":b64\'aGk=\'}', {
+  indent: 2,
+  preserveAll: true,
+});
+// {
+//   "a": 0xff,
+//   "b": 1.5_1,
+//   "c": b64'aGk='
+// }
+```
+
+`CBOR.format()` は内部で `fromCDN()` と `toCDN()` の両方に同じオプション
+を渡すため、このオプション一つで済みます。両者を別々に呼び出す場合は、
+コメントはパース時に取り込んでおく必要があるため、`fromCDN()` 側にも
+`preserveAll`(または `preserveComments`)を指定してください。
+
+```ts
+const item = CBOR.fromCDN(text, { preserveAll: true });
+item.toCDN({ preserveAll: true, indent: 2 });
 ```
 
 ### CBOR / CDN / hex dump のバリデーション

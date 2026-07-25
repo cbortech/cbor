@@ -9,6 +9,7 @@ import { CborArray } from './ast/CborArray';
 import { CborMap } from './ast/CborMap';
 import { CborFloat } from './ast/CborFloat';
 import { CborSimple } from './ast/CborSimple';
+import type { CborExtension } from './types';
 
 /** Convert a hex string to Uint8Array. */
 function hex(s: string): Uint8Array {
@@ -585,14 +586,62 @@ describe('CBOR.format()', () => {
     );
   });
 
+  test('preserves blank lines between array/map entries when requested', () => {
+    const src = '[\n  1,\n  2,\n\n  3,\n  4\n]';
+    expect(CBOR.format(src, { indent: 2 })).toBe('[\n  1,\n  2,\n  3,\n  4\n]');
+    expect(CBOR.format(src, { indent: 2, preserveBlankLines: true })).toBe(src);
+
+    const mapSrc = '{\n  "a": 1,\n\n  "b": 2\n}';
+    expect(CBOR.format(mapSrc, { indent: 2, preserveBlankLines: true })).toBe(
+      mapSrc
+    );
+  });
+
+  test('preserveBlankLines collapses multiple blank lines to one, including before the first entry', () => {
+    expect(
+      CBOR.format('[\n\n1,\n\n\n2\n]', { indent: 2, preserveBlankLines: true })
+    ).toBe('[\n\n  1,\n\n  2\n]');
+    expect(
+      CBOR.format('[1,\n2]', { indent: 2, preserveBlankLines: true })
+    ).toBe('[\n  1,\n  2\n]');
+  });
+
+  test('preserveBlankLines has no effect on single-line output or without the option', () => {
+    const src = '[\n1,\n\n2\n]';
+    expect(CBOR.format(src, { preserveBlankLines: true })).toBe('[1,2]');
+    expect(CBOR.format(src, { indent: 2 })).toBe('[\n  1,\n  2\n]');
+  });
+
+  test('preserveAll includes preserveBlankLines', () => {
+    const src = '[\n  1,\n\n  2\n]';
+    expect(CBOR.format(src, { indent: 2, preserveAll: true })).toBe(src);
+    expect(
+      CBOR.format(src, {
+        indent: 2,
+        preserveAll: true,
+        preserveBlankLines: false,
+      })
+    ).toBe('[\n  1,\n  2\n]');
+  });
+
   test('preserves non-concatenated byte string literals when requested', () => {
     expect(CBOR.format("h'6869'", { preserveByteString: true })).toBe(
       "h'6869'"
     );
+    // preserveByteString alone strips a comment inside the literal (the
+    // remaining interior line break survives, since it's a real line break,
+    // not part of the comment) — combine with preserveComments to keep it.
     expect(
       CBOR.format("h'01 # first\n 02'", {
         indent: 2,
         preserveByteString: true,
+      })
+    ).toBe("h'01 \n 02'");
+    expect(
+      CBOR.format("h'01 # first\n 02'", {
+        indent: 2,
+        preserveByteString: true,
+        preserveComments: true,
       })
     ).toBe("h'01 # first\n 02'");
     expect(
@@ -600,21 +649,21 @@ describe('CBOR.format()', () => {
         indent: 2,
         preserveByteString: true,
       })
-    ).toBe("b64' aGk # greeting\n '");
+    ).toBe("b64' aGk \n '");
     expect(
       CBOR.format("b32' NBUQ # b32\n '", {
         indent: 2,
         preserveByteString: true,
         extensions: [b32],
       })
-    ).toBe("b32' NBUQ # b32\n '");
+    ).toBe("b32' NBUQ \n '");
     expect(
       CBOR.format("h32' D1KG # h32\n '", {
         indent: 2,
         preserveByteString: true,
         extensions: [h32],
       })
-    ).toBe("h32' D1KG # h32\n '");
+    ).toBe("h32' D1KG \n '");
     expect(CBOR.format("'hi'", { preserveByteString: true })).toBe("'hi'");
   });
 
@@ -622,10 +671,18 @@ describe('CBOR.format()', () => {
     expect(
       CBOR.format("h'01 # first\n 02'", { preserveByteString: true })
     ).toBe("h'0102'");
-    // Single-line spellings (including interior block comments) are kept.
+    // A single-line spelling still has its interior comment stripped, same
+    // as the multi-line case — preserveByteString alone never keeps
+    // comments, regardless of indent/single-line-ness.
     expect(CBOR.format("h'01 / mid / 02'", { preserveByteString: true })).toBe(
-      "h'01 / mid / 02'"
+      "h'01  02'"
     );
+    expect(
+      CBOR.format("h'01 / mid / 02'", {
+        preserveByteString: true,
+        preserveComments: true,
+      })
+    ).toBe("h'01 / mid / 02'");
   });
 
   test('preserves raw byte string literals when requested', () => {
@@ -634,7 +691,77 @@ describe('CBOR.format()', () => {
         indent: 2,
         preserveByteString: true,
       })
+    ).toBe('h`01 \n 02`');
+    expect(
+      CBOR.format('h`01 # first\n 02`', {
+        indent: 2,
+        preserveByteString: true,
+        preserveComments: true,
+      })
     ).toBe('h`01 # first\n 02`');
+  });
+
+  test("comment stripping respects each literal family's own comment syntax", () => {
+    // Standard base64 (b64'...') only recognizes `#` as a comment — `/` is
+    // valid base64 data (e.g. "//8=" decodes to 0xFFFF), never a comment
+    // marker. Stripping must not corrupt it by treating `/`/`//` as comments.
+    expect(CBOR.format("b64'//8='", { preserveByteString: true })).toBe(
+      "b64'//8='"
+    );
+    expect(CBOR.fromCDN("b64'//8='").toCBOR()).toEqual(
+      new Uint8Array([0x42, 0xff, 0xff])
+    );
+    // A real `#` comment in b64 is still stripped.
+    expect(
+      CBOR.format("b64' aGk # greeting\n '", {
+        indent: 2,
+        preserveByteString: true,
+      })
+    ).toBe("b64' aGk \n '");
+
+    // A bare single-quoted byte string ('...', sqstr) has no comment syntax
+    // at all — its content is the literal UTF-8-encoded payload, so `#` and
+    // `/` inside it are data, not comments.
+    expect(CBOR.format("'a#b'", { preserveByteString: true })).toBe("'a#b'");
+    expect(CBOR.format("'a/b'", { preserveByteString: true })).toBe("'a/b'");
+  });
+
+  test('comment stripping never touches an unrecognized app-string prefix', () => {
+    // The parser propagates ednSource to *any* extension whose
+    // parseAppString returns a plain CborByteString (see parser.ts),
+    // regardless of what that extension's own content syntax is. A `#`/`/`
+    // there could be the extension's own ordinary data — stripping must not
+    // guess at comment syntax for a prefix it doesn't specifically know.
+    const textEncoder = new TextEncoder();
+    const xExtension: CborExtension = {
+      appStringPrefixes: ['x'],
+      parseAppString: (_prefix, content) =>
+        new CborByteString(textEncoder.encode(content)),
+    };
+    const opts = { extensions: [xExtension], preserveByteString: true };
+    expect(CBOR.format("x'a#b'", opts)).toBe("x'a#b'");
+    expect(
+      CBOR.fromCDN("x'a#b'", { extensions: [xExtension] }).toCBOR()
+    ).toEqual(new Uint8Array([0x43, 0x61, 0x23, 0x62]));
+    expect(CBOR.format("x'a/b'", opts)).toBe("x'a/b'");
+  });
+
+  test('comment stripping is not fooled by a user extension overriding a built-in prefix', () => {
+    // A user extension registered under the same prefix as a built-in
+    // (`b32`) overrides it (see parser.ts's extension registration) — the
+    // resolved extension is this custom one, not the real b32, so its
+    // content must not be treated as hex/b32 comment syntax.
+    const textEncoder = new TextEncoder();
+    const customB32: CborExtension = {
+      appStringPrefixes: ['b32'],
+      parseAppString: (_prefix, content) =>
+        new CborByteString(textEncoder.encode(content)),
+    };
+    const opts = { extensions: [customB32], preserveByteString: true };
+    expect(CBOR.format("b32'a#b'", opts)).toBe("b32'a#b'");
+    expect(
+      CBOR.fromCDN("b32'a#b'", { extensions: [customB32] }).toCBOR()
+    ).toEqual(new Uint8Array([0x43, 0x61, 0x23, 0x62]));
   });
 
   test('does not preserve byte string literals across concatenation', () => {
@@ -643,6 +770,147 @@ describe('CBOR.format()', () => {
         preserveByteString: true,
       })
     ).toBe("'hi'");
+  });
+
+  test('preserves integer literal base and spelling when requested', () => {
+    expect(CBOR.format('0xff', { preserveNumberFormat: true })).toBe('0xff');
+    expect(CBOR.format('0XFF', { preserveNumberFormat: true })).toBe('0XFF');
+    expect(CBOR.format('0o377', { preserveNumberFormat: true })).toBe('0o377');
+    expect(CBOR.format('0b101', { preserveNumberFormat: true })).toBe('0b101');
+    expect(CBOR.format('-0x1f', { preserveNumberFormat: true })).toBe('-0x1f');
+    // Default output normalises to decimal.
+    expect(CBOR.format('0xff')).toBe('255');
+    expect(CBOR.format('0o377')).toBe('255');
+  });
+
+  test('preserves integer encoding-indicator suffix when requested', () => {
+    expect(CBOR.format('5_i', { preserveNumberFormat: true })).toBe('5_i');
+    expect(CBOR.format('0x2a_1', { preserveNumberFormat: true })).toBe(
+      '0x2a_1'
+    );
+    // encodingIndicators: 'never' still strips the suffix.
+    expect(
+      CBOR.format('5_i', {
+        preserveNumberFormat: true,
+        encodingIndicators: 'never',
+      })
+    ).toBe('5');
+  });
+
+  test('preserves float literal spelling and indicator when requested', () => {
+    expect(CBOR.format('1.50', { preserveNumberFormat: true })).toBe('1.50');
+    expect(CBOR.format('1.5_1', { preserveNumberFormat: true })).toBe('1.5_1');
+    expect(CBOR.format('0x1.8p+0_1', { preserveNumberFormat: true })).toBe(
+      '0x1.8p+0_1'
+    );
+    // Default output drops the redundant indicator and trailing zero.
+    expect(CBOR.format('1.5_1')).toBe('1.5');
+    expect(CBOR.format('1.50')).toBe('1.5');
+    // encodingIndicators: 'never' still strips the suffix.
+    expect(
+      CBOR.format('1.5_1', {
+        preserveNumberFormat: true,
+        encodingIndicators: 'never',
+      })
+    ).toBe('1.5');
+  });
+
+  test('preserveNumberFormat has no effect on values without CDN source', () => {
+    expect(CBOR.stringify(255, { preserveNumberFormat: true })).toBe('255');
+    expect(CBOR.stringify(1.5, { preserveNumberFormat: true })).toBe('1.5');
+  });
+
+  test('preserves numbers nested in containers under indent', () => {
+    expect(
+      CBOR.format('{"a": 0xff, "b": [1.50, 0o17]}', {
+        indent: 2,
+        preserveNumberFormat: true,
+      })
+    ).toBe('{\n  "a": 0xff,\n  "b": [\n    1.50,\n    0o17\n  ]\n}');
+  });
+
+  test('preserves a leading + sign on numbers when requested', () => {
+    expect(CBOR.format('+42', { preserveNumberFormat: true })).toBe('+42');
+    expect(CBOR.format('+0xff', { preserveNumberFormat: true })).toBe('+0xff');
+    expect(CBOR.format('+1.50', { preserveNumberFormat: true })).toBe('+1.50');
+    expect(CBOR.format('+Infinity', { preserveNumberFormat: true })).toBe(
+      '+Infinity'
+    );
+    // Default output drops the redundant explicit sign.
+    expect(CBOR.format('+42')).toBe('42');
+    expect(CBOR.format('+1.50')).toBe('1.5');
+    expect(CBOR.format('+Infinity')).toBe('Infinity');
+  });
+
+  test('encodingIndicators: always forces a suffix onto a plain float literal', () => {
+    expect(
+      CBOR.format('1.5', {
+        preserveNumberFormat: true,
+        encodingIndicators: 'always',
+      })
+    ).toBe('1.5_1');
+    // A literal that already carries a suffix is left untouched.
+    expect(
+      CBOR.format('1.5_1', {
+        preserveNumberFormat: true,
+        encodingIndicators: 'always',
+      })
+    ).toBe('1.5_1');
+  });
+
+  test('encodingIndicators: never strips an invalid suffix parsed leniently', () => {
+    let warned = false;
+    expect(
+      CBOR.format('1.5_7', {
+        preserveNumberFormat: true,
+        encodingIndicators: 'never',
+        strict: false,
+        onWarning: () => {
+          warned = true;
+        },
+      })
+    ).toBe('1.5');
+    expect(warned).toBe(true);
+  });
+
+  test('preserves tag number base when requested', () => {
+    expect(CBOR.format('0x3e7(2)', { preserveNumberFormat: true })).toBe(
+      '0x3e7(2)'
+    );
+    // Default output normalises the tag number to decimal.
+    expect(CBOR.format('0x3e7(2)')).toBe('999(2)');
+  });
+
+  test('preserves simple() argument base when requested', () => {
+    expect(CBOR.format('simple(0x10)', { preserveNumberFormat: true })).toBe(
+      'simple(0x10)'
+    );
+    // Default output normalises the argument to decimal.
+    expect(CBOR.format('simple(0x10)')).toBe('simple(16)');
+  });
+
+  test('preserves simple(20..23) notation instead of collapsing to keywords', () => {
+    // simple(0x14) and simple(+20) both denote the same value as `false`
+    // (simple value 20), but preserveNumberFormat must keep the simple(...)
+    // spelling the user actually wrote rather than the false/true/null/
+    // undefined keyword shortcuts, which only apply to values that were
+    // never written via simple(...) in the first place.
+    expect(CBOR.format('simple(0x14)', { preserveNumberFormat: true })).toBe(
+      'simple(0x14)'
+    );
+    expect(CBOR.format('simple(+20)', { preserveNumberFormat: true })).toBe(
+      'simple(+20)'
+    );
+    // Default output still collapses to the keyword.
+    expect(CBOR.format('simple(0x14)')).toBe('false');
+    // A literal `false` keyword (no simple(...) source) is unaffected.
+    expect(CBOR.format('false', { preserveNumberFormat: true })).toBe('false');
+  });
+
+  test('bignum literals are unaffected by preserveNumberFormat', () => {
+    expect(
+      CBOR.format('0x10000000000000000', { preserveNumberFormat: true })
+    ).toBe('18446744073709551616');
   });
 
   test('preserves raw text string literals when requested', () => {
@@ -663,6 +931,37 @@ describe('CBOR.format()', () => {
         preserveRawString: true,
       })
     ).toBe('{\n  "k": `line1\nline2`\n}');
+  });
+
+  test('preserves double-quoted string escape spelling when requested', () => {
+    expect(CBOR.format('"caf\\u00e9"', { preserveTextString: true })).toBe(
+      '"caf\\u00e9"'
+    );
+    expect(
+      CBOR.format('"caf\\u00e9"', { preserveTextString: true, indent: 2 })
+    ).toBe('"caf\\u00e9"');
+    // Default output decodes the escape into the literal character.
+    expect(CBOR.format('"caf\\u00e9"')).toBe('"café"');
+  });
+
+  test('preserveTextString does not affect raw backtick literals', () => {
+    // preserveRawString (not preserveTextString) governs backtick spelling;
+    // without it, a backtick literal still normalises to double-quoted form.
+    expect(CBOR.format('`\\d+`', { preserveTextString: true })).toBe(
+      '"\\\\d+"'
+    );
+  });
+
+  test('preserveTextString has no effect on concatenated string parts', () => {
+    // Documented limitation: only non-concatenated double-quoted literals
+    // are covered; a `+` chain still normalises each part's escapes.
+    expect(
+      CBOR.format('"caf\\u00e9" + "x"', {
+        preserveTextString: true,
+        preserveConcatenation: true,
+        indent: 2,
+      })
+    ).toBe('"café" +\n  "x"');
   });
 
   test('preserveRawString takes precedence over split options', () => {
@@ -727,22 +1026,34 @@ describe('CBOR.format()', () => {
     ).toBe('`[1,2]` +\n  ""');
   });
 
-  test('preserves raw string parts around ellipsis', () => {
+  test('preserves raw string parts around ellipsis, always single-line', () => {
+    // Every `+`-joined fragment stays on its original boundary — including
+    // "b" and "c", which aren't raw strings and so have no source spelling
+    // of their own, but still sit on the correct side of the ellipsis and
+    // don't get merged into their raw-string neighbor. Unlike a real (non-
+    // elision) `+` concatenation, this is indent-independent: `indent` only
+    // changes whether the *value* is pretty-printed at all, not whether
+    // these boundaries are shown.
+    const expected = '`a` + "b" + ... + "c" + ``d`e``';
     expect(
       CBOR.format('`a` + "b" + ... + "c" + ``d`e``', {
         indent: 2,
         preserveConcatenation: true,
         preserveRawString: true,
       })
-    ).toBe('`a` +\n  "b" +\n  ... +\n  "c" +\n  ``d`e``');
-    // Single-line output joins each fragment, but the ellipsis itself
-    // (not a layout feature) is still ` + `-joined between fragments.
+    ).toBe(expected);
     expect(
       CBOR.format('`a` + "b" + ... + "c" + ``d`e``', {
         preserveConcatenation: true,
         preserveRawString: true,
       })
-    ).toBe('"ab" + ... + "cd`e"');
+    ).toBe(expected);
+  });
+
+  test('without preserveConcatenation, adjacent fragments around an ellipsis still merge', () => {
+    expect(CBOR.format('`a` + "b" + ... + "c" + ``d`e``')).toBe(
+      '"ab" + ... + "cd`e"'
+    );
   });
 
   test('joins text string concatenation by default', () => {
@@ -934,6 +1245,22 @@ describe('CBOR.format()', () => {
     ).toBe('# start\n42 # end');
   });
 
+  test('root leading comment on the same source line as the value stays inline', () => {
+    // Same source line as the root value: stays inline instead of forcing a
+    // line break above it.
+    expect(
+      CBOR.format('/ note / 1', { indent: 2, preserveComments: true })
+    ).toBe('/ note / 1');
+    // Own source line: still gets its own line above the value.
+    expect(
+      CBOR.format('/ note /\n1', { indent: 2, preserveComments: true })
+    ).toBe('/ note /\n1');
+    // Own-line comment followed by a same-line one: only the latter inlines.
+    expect(
+      CBOR.format('// a\n/ note / 1', { indent: 2, preserveComments: true })
+    ).toBe('// a\n/ note / 1');
+  });
+
   test('single-line output ignores preserveComments', () => {
     expect(CBOR.format('42 # end', { preserveComments: true })).toBe('42');
     expect(CBOR.format('# before\n[1, 2]', { preserveComments: true })).toBe(
@@ -1065,6 +1392,64 @@ describe('CBOR.format()', () => {
   test('round-trips: format of already-formatted text is idempotent', () => {
     const input = '[1,2,3]';
     expect(CBOR.format(CBOR.format(input))).toBe(CBOR.format(input));
+  });
+
+  test('preserveAll turns on every preserve* option at once', () => {
+    const text =
+      '{"a":0xff,"b":1.5_1,"c":b64\'aGk=\',"d":"caf\\u00e9","e":`raw`,"f":"x"+"y"}';
+    expect(CBOR.format(text, { preserveAll: true, indent: 2 })).toBe(
+      '{\n' +
+        '  "a": 0xff,\n' +
+        '  "b": 1.5_1,\n' +
+        '  "c": b64\'aGk=\',\n' +
+        '  "d": "caf\\u00e9",\n' +
+        '  "e": `raw`,\n' +
+        '  "f": "x" +\n' +
+        '    "y"\n' +
+        '}'
+    );
+    // Default output normalises everything.
+    expect(CBOR.format(text, { indent: 2 })).toBe(
+      '{\n' +
+        '  "a": 255,\n' +
+        '  "b": 1.5,\n' +
+        '  "c": \'hi\',\n' +
+        '  "d": "café",\n' +
+        '  "e": "raw",\n' +
+        '  "f": "xy"\n' +
+        '}'
+    );
+  });
+
+  test('preserveAll leaves an explicitly-set individual option alone', () => {
+    expect(
+      CBOR.format('0xff', { preserveAll: true, preserveNumberFormat: false })
+    ).toBe('255');
+  });
+
+  test('preserveAll + explicit preserveNumberFormat: false also applies inside a preserved raw tag', () => {
+    // preserveAll turns preserveAppSequence on too, but a raw-tag source's
+    // verbatim text is itself number-literal spelling — the explicit
+    // preserveNumberFormat: false must still win there, not just for
+    // top-level literals.
+    expect(
+      CBOR.format('0x1(0xff)', {
+        preserveAll: true,
+        preserveNumberFormat: false,
+      })
+    ).toBe('1(255)');
+  });
+
+  test('preserveAll on toCDN() alone does not capture comments — needs FromCDNOptions too', () => {
+    // CBOR.format() passes the same options object to both fromCDN() and
+    // toCDN(), so preserveAll covers both there; a manual fromCDN()/toCDN()
+    // split needs preserveAll (or preserveComments) on the fromCDN() call
+    // too, since comments must be captured while parsing.
+    const withoutCapture = CBOR.fromCDN('1 # hi');
+    expect(withoutCapture.toCDN({ preserveAll: true, indent: 2 })).toBe('1');
+
+    const withCapture = CBOR.fromCDN('1 # hi', { preserveAll: true });
+    expect(withCapture.toCDN({ preserveAll: true, indent: 2 })).toBe('1 # hi');
   });
 });
 

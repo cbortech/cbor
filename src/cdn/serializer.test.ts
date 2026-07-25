@@ -10,6 +10,7 @@ import { CborIndefiniteTextString } from '../ast/CborIndefiniteTextString';
 import { CborArray } from '../ast/CborArray';
 import { CborMap } from '../ast/CborMap';
 import { CborTag } from '../ast/CborTag';
+import { CborEmbeddedCBOR } from '../ast/CborEmbeddedCBOR';
 import { CborFloat } from '../ast/CborFloat';
 import { CborSimple } from '../ast/CborSimple';
 
@@ -364,16 +365,78 @@ describe('toCDN() — inlineLeafContainers', () => {
     );
   });
 
-  test('preserved comments force multi-line', () => {
+  test('entry comments force multi-line', () => {
+    const node = parseCDN('[1, 2 # trailing\n]', { preserveComments: true });
+    expect(toCDN(node, { ...opts, preserveComments: true })).toBe(
+      '[\n  1,\n  2 # trailing\n]'
+    );
+  });
+
+  test('dangling comments force multi-line', () => {
+    const node = parseCDN('[1, 2\n# dangling\n]', { preserveComments: true });
+    expect(toCDN(node, { ...opts, preserveComments: true })).toBe(
+      '[\n  1,\n  2\n  # dangling\n]'
+    );
+  });
+
+  test('container-level trailing comment does not force multi-line', () => {
     const node = parseCDN('[1, 2] # trailing', { preserveComments: true });
     expect(toCDN(node, { ...opts, preserveComments: true })).toBe(
-      '[\n  1,\n  2\n] # trailing'
+      '[1, 2] # trailing'
+    );
+
+    const mapNode = parseCDN('{ "a": 1, "b": 2 } // comment', {
+      preserveComments: true,
+    });
+    expect(toCDN(mapNode, { ...opts, preserveComments: 'cdn-style' })).toBe(
+      '{"a": 1, "b": 2} # comment'
     );
   });
 
   test('no effect without indent (compact single-line as usual)', () => {
     const node = new CborArray([new CborUint(1n), new CborUint(2n)]);
     expect(toCDN(node, { inlineLeafContainers: true })).toBe('[1,2]');
+  });
+});
+
+describe('CborEmbeddedCBOR.toCDN() — inlineLeafContainers (loose rule)', () => {
+  const opts = { indent: 2, inlineLeafContainers: true };
+
+  test('a map entry still inlines, unlike CborArray/CborMap', () => {
+    // <<...>> is a flat sequence of encoded items, not a nested-structure
+    // display, so entryIsLeaf is intentionally not consulted for it: an
+    // entry that is itself an array/map still inlines as long as its own
+    // rendering fits on one line.
+    const node = new CborEmbeddedCBOR([
+      new CborMap([[new CborUint(1n), new CborNint(-7n)]]),
+    ]);
+    expect(toCDN(node, opts)).toBe('<<{1: -7}>>');
+  });
+
+  test('array entries inline too', () => {
+    const node = new CborEmbeddedCBOR([
+      new CborArray([new CborUint(1n), new CborUint(2n)]),
+      new CborArray([new CborUint(3n), new CborUint(4n)]),
+    ]);
+    expect(toCDN(node, opts)).toBe('<<[1, 2], [3, 4]>>');
+  });
+
+  test('a nested <<...>> entry still forces its own parent array multi-line', () => {
+    // The loose rule is local to CborEmbeddedCBOR's own entries; a CborArray
+    // containing a <<...>> entry still applies the strict entryIsLeaf rule.
+    const node = new CborArray([
+      new CborEmbeddedCBOR([
+        new CborMap([[new CborUint(1n), new CborNint(-7n)]]),
+      ]),
+    ]);
+    expect(toCDN(node, opts)).toBe('[\n  <<{1: -7}>>\n]');
+  });
+
+  test('entry rendering with a line break still forces multi-line', () => {
+    const node = new CborEmbeddedCBOR([new CborTextString('a\nb')]);
+    expect(toCDN(node, { ...opts, splitNewline: true })).toBe(
+      '<<\n  "a\\n" +\n    "b"\n>>'
+    );
   });
 });
 
@@ -488,6 +551,69 @@ describe('CborTag.toCDN()', () => {
       new CborByteString(new Uint8Array([1, 2, 3, 4]))
     );
     expect(toCDN(node)).toBe("23(h'01020304')");
+  });
+});
+
+describe('CborTag.toCDN() with preserveComments', () => {
+  test('leading comment on the content forces multi-line', () => {
+    const node = parseCDN('99(/note/ 42)', { preserveComments: true });
+    // /note/ and 42 were on the same source line, so they stay together on
+    // the content's own line rather than the comment getting a line above it.
+    expect(toCDN(node, { indent: 2, preserveComments: true })).toBe(
+      '99(\n  /note/ 42\n)'
+    );
+  });
+
+  test('leading comment on its own source line stays on its own line', () => {
+    const node = parseCDN('99(/note/\n42)', { preserveComments: true });
+    expect(toCDN(node, { indent: 2, preserveComments: true })).toBe(
+      '99(\n  /note/\n  42\n)'
+    );
+  });
+
+  test('c-style / cdn-style normalise the marker', () => {
+    const node = parseCDN('99(/note/ 42)', { preserveComments: true });
+    expect(toCDN(node, { indent: 2, preserveComments: 'c-style' })).toBe(
+      '99(\n  /*note*/ 42\n)'
+    );
+    const node2 = parseCDN('99(# note\n 42)', { preserveComments: true });
+    expect(toCDN(node2, { indent: 2, preserveComments: 'cdn-style' })).toBe(
+      '99(\n  # note\n  42\n)'
+    );
+  });
+
+  test('trailing comment on the content stays on its line', () => {
+    const node = parseCDN('99(42 /trailing/)', { preserveComments: true });
+    expect(toCDN(node, { indent: 2, preserveComments: true })).toBe(
+      '99(\n  42 /trailing/\n)'
+    );
+  });
+
+  test('dangling comment (own line, nothing after it) is emitted before the close paren', () => {
+    const node = parseCDN('99(\n  42\n  # dangling\n)', {
+      preserveComments: true,
+    });
+    expect(toCDN(node, { indent: 2, preserveComments: true })).toBe(
+      '99(\n  42\n  # dangling\n)'
+    );
+  });
+
+  test('preserveComments: false drops the comment (no multi-line forced)', () => {
+    const node = parseCDN('99(/note/ 42)', { preserveComments: true });
+    expect(toCDN(node, { indent: 2, preserveComments: false })).toBe('99(42)');
+    expect(toCDN(node, { indent: 2 })).toBe('99(42)');
+  });
+
+  test('no comments at all: unaffected, including nested multi-line content', () => {
+    const node = parseCDN('12345({"a":1,"b":[1,2,3]})');
+    expect(toCDN(node, { indent: 2 })).toBe(
+      '12345({\n  "a": 1,\n  "b": [\n    1,\n    2,\n    3\n  ]\n})'
+    );
+  });
+
+  test('no effect without indent (compact single-line, comments stripped as usual)', () => {
+    const node = parseCDN('99(/note/ 42)', { preserveComments: true });
+    expect(toCDN(node, { preserveComments: true })).toBe('99(42)');
   });
 });
 
@@ -799,4 +925,34 @@ describe('preserveComments — map comments', () => {
     expect(
       fmt('{\n  /* key-leading */\n  "a": 1 // val-trailing\n}', 'cdn-style')
     ).toBe('{\n  / key-leading /\n  "a": 1 # val-trailing\n}'));
+});
+
+describe('preserveComments — same-line leading comments', () => {
+  // RFC 9052-style annotated arrays, e.g. COSE_Sign1: a leading comment on
+  // the same source line as the entry (a "label") stays inline instead of
+  // getting pushed onto its own line above.
+  test('array entries: same-line comment stays inline', () => {
+    const src = '[\n  / protected / 1,\n  / unprotected / 2\n]';
+    expect(fmt(src)).toBe(src);
+  });
+
+  test('array entry: own-line comment still gets its own line', () => {
+    const src = '[\n  // note\n  1\n]';
+    expect(fmt(src)).toBe(src);
+  });
+
+  test('array entry: own-line comment followed by a same-line comment — only the latter is inlined', () => {
+    const src = '[\n  // note\n  / protected / 1\n]';
+    expect(fmt(src)).toBe(src);
+  });
+
+  test('map key: same-line comment stays inline', () => {
+    const src = '{\n  / a / "x": 1,\n  / b / "y": 2\n}';
+    expect(fmt(src)).toBe(src);
+  });
+
+  test('tag content: same-line comment stays inline', () => {
+    const src = '99(\n  / note / 42\n)';
+    expect(fmt(src)).toBe(src);
+  });
 });
