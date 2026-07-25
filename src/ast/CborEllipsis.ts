@@ -21,22 +21,56 @@ import {
   escapeString,
   resolveIndent,
   serializeBytes,
+  stripByteLiteralComments,
+  type ByteCommentSyntax,
 } from '../cdn/serialize-utils';
 
 export const CPA888_TAG = 888n;
 
 /**
- * A preserved source spelling is only safe to re-emit verbatim when `indent`
- * enables multi-line output, or it doesn't actually contain a newline itself
- * (interior whitespace, or a `#`/`//` line comment) — otherwise it would
- * break `ToCDNOptions.indent`'s single-line guarantee. Mirrors
+ * Resolve a preserved source spelling: strip any embedded comment unless
+ * `preserveComments` is set — a preserved spelling should still drop
+ * comments by default, the same as an unpreserved literal re-derived from
+ * its decoded value would — then, only when the (possibly stripped) result
+ * is safe to re-emit verbatim, return it. It's safe when `indent` enables
+ * multi-line output, or it doesn't actually contain a newline itself
+ * (interior whitespace, or a surviving `#`/`//` line comment) — otherwise it
+ * would break `ToCDNOptions.indent`'s single-line guarantee. Mirrors
  * `CborByteString`/`CborTextString`'s own preserved-source fallback check.
+ * Returns `undefined` when `source` is `undefined`, or isn't usable.
  */
-function usableSource(
+function preservedSource(
+  source: string | undefined,
+  options: ToCDNOptions | undefined,
+  indentStr: string | null,
+  commentSyntax: ByteCommentSyntax | undefined
+): string | undefined {
+  if (source === undefined) return undefined;
+  const stripped =
+    options?.preserveComments || commentSyntax === undefined
+      ? source
+      : stripByteLiteralComments(source, commentSyntax);
+  return isSafeForCurrentMode(stripped, indentStr) ? stripped : undefined;
+}
+
+/**
+ * Like `preservedSource`, but for a text source (`CborTextString`'s
+ * `ednPartSources`) — text literals have no embedded-comment notation to
+ * strip (a `#`/`//` there is just literal text content), so this only
+ * applies the single-line safety check.
+ */
+function usableTextSource(
   source: string | undefined,
   indentStr: string | null
 ): source is string {
-  return source !== undefined && (indentStr !== null || !/[\r\n]/.test(source));
+  return source !== undefined && isSafeForCurrentMode(source, indentStr);
+}
+
+function isSafeForCurrentMode(
+  source: string,
+  indentStr: string | null
+): boolean {
+  return indentStr !== null || !/[\r\n]/.test(source);
 }
 
 export class CborEllipsis extends CborTag {
@@ -198,11 +232,19 @@ export class CborEllipsis extends CborTag {
           ? 'hex'
           : (options?.bstrEncoding ?? item.ednEncoding);
       return item.ednParts
-        .map((part) =>
-          options?.preserveByteString && usableSource(part.source, indentStr)
-            ? part.source
-            : serializeBytes(part.bytes, encoding, options?.sqstr)
-        )
+        .map((part) => {
+          const source = options?.preserveByteString
+            ? preservedSource(
+                part.source,
+                options,
+                indentStr,
+                part.commentSyntax
+              )
+            : undefined;
+          return source !== undefined
+            ? source
+            : serializeBytes(part.bytes, encoding, options?.sqstr);
+        })
         .join(' + ');
     }
     if (
@@ -216,7 +258,9 @@ export class CborEllipsis extends CborTag {
       return item.ednParts
         .map((text, i) => {
           const source = partSources?.[i];
-          return usableSource(source, indentStr) ? source : escapeString(text);
+          return usableTextSource(source, indentStr)
+            ? source
+            : escapeString(text);
         })
         .join(' + ');
     }
@@ -280,7 +324,11 @@ export class CborEllipsis extends CborTag {
     const items = (this.content as CborArray).items;
 
     type Segment =
-      | { bytes: Uint8Array; source?: string }
+      | {
+          bytes: Uint8Array;
+          source?: string;
+          commentSyntax?: ByteCommentSyntax;
+        }
       | { ellipsis: true; fromByteLiteral: boolean; literalSource?: string };
     const groups: Segment[][] = [];
     let current: Segment[] = [];
@@ -303,13 +351,25 @@ export class CborEllipsis extends CborTag {
       } else if (item instanceof CborByteString) {
         if (item.ednParts !== undefined && item.ednParts.length > 1) {
           const [firstPart, ...restParts] = item.ednParts;
-          current.push({ bytes: firstPart.bytes, source: firstPart.source });
+          current.push({
+            bytes: firstPart.bytes,
+            source: firstPart.source,
+            commentSyntax: firstPart.commentSyntax,
+          });
           for (const part of restParts) {
             flush();
-            current.push({ bytes: part.bytes, source: part.source });
+            current.push({
+              bytes: part.bytes,
+              source: part.source,
+              commentSyntax: part.commentSyntax,
+            });
           }
         } else {
-          current.push({ bytes: item.value, source: item.ednSource });
+          current.push({
+            bytes: item.value,
+            source: item.ednSource,
+            commentSyntax: item.ednCommentSyntax,
+          });
         }
       } else {
         return undefined;
@@ -322,9 +382,9 @@ export class CborEllipsis extends CborTag {
       options?.appStrings === false ? 'hex' : (options?.bstrEncoding ?? 'hex');
     // Elision is always single-line (see the class doc), but a preserved
     // source spelling can itself contain embedded newlines (interior
-    // whitespace, or a `#`/`//` line comment) — those are only safe to
-    // re-emit verbatim when `indent` enables multi-line output; see
-    // `usableSource`. Otherwise fall back to freshly re-serializing the
+    // whitespace, or a surviving `#`/`//` line comment) — those are only
+    // safe to re-emit verbatim when `indent` enables multi-line output; see
+    // `preservedSource`. Otherwise fall back to freshly re-serializing the
     // bytes.
     const indentStr = resolveIndent(options);
     return groups
@@ -335,14 +395,27 @@ export class CborEllipsis extends CborTag {
         // together) — so any ellipsis segment's `literalSource` is that
         // whole group's original spelling.
         if (options?.preserveByteString) {
-          const literalSource = group.find(
-            (s): s is Extract<Segment, { ellipsis: true }> =>
-              'ellipsis' in s && usableSource(s.literalSource, indentStr)
-          )?.literalSource;
-          if (literalSource !== undefined) return literalSource;
+          for (const s of group) {
+            if (!('ellipsis' in s)) continue;
+            // Always came from a BYTES_HEX_ELIDED token (see `_elidedHexAtoms`),
+            // so its comment syntax is unconditionally hex's full syntax.
+            const literalSource = preservedSource(
+              s.literalSource,
+              options,
+              indentStr,
+              'full'
+            );
+            if (literalSource !== undefined) return literalSource;
+          }
         }
         const byteSegments = group.filter(
-          (s): s is { bytes: Uint8Array; source?: string } => !('ellipsis' in s)
+          (
+            s
+          ): s is {
+            bytes: Uint8Array;
+            source?: string;
+            commentSyntax?: ByteCommentSyntax;
+          } => !('ellipsis' in s)
         );
         if (byteSegments.length === 0) {
           // Isolated ellipsis-only group with no preserved source: bare
@@ -356,9 +429,16 @@ export class CborEllipsis extends CborTag {
         }
         if (group.length === 1) {
           const segment = byteSegments[0];
-          return options?.preserveByteString &&
-            usableSource(segment.source, indentStr)
-            ? segment.source
+          const source = options?.preserveByteString
+            ? preservedSource(
+                segment.source,
+                options,
+                indentStr,
+                segment.commentSyntax
+              )
+            : undefined;
+          return source !== undefined
+            ? source
             : serializeBytes(segment.bytes, encoding, options?.sqstr);
         }
         const hex = group

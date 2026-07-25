@@ -513,6 +513,112 @@ export function serializeBytes(
   }
 }
 
+/**
+ * Which comment syntax a byte-string literal's raw source recognizes —
+ * `undefined` when it has none at all (its content is data, not a comment
+ * host). Set once, at parse time, by whoever actually knows the literal's
+ * real origin (the tokenizer for `h'...'`/`b64'...'`/bare sqstr, or the
+ * parser comparing the resolved extension against the specific built-in
+ * `b32`/`h32` objects by reference — never guessed later from the prefix
+ * string, since a user extension can register under any prefix, including
+ * one a built-in also uses; see `CborByteString.ednCommentSyntax`).
+ *   - `'full'`: `#`, `//`, `/* *\/`, and `/ /` (§5.2.1/§5.3.3) — `h'...'`
+ *     and its backtick form, and the built-in `b32'...'`/`h32'...'`
+ *     extensions, which share hex's comment syntax (`utils/strip-comments.ts`).
+ *   - `'hash-only'`: only `#` line comments — standard base64 (`b64'...'`),
+ *     where `/` is valid data (e.g. `//8=` decodes to 0xFFFF), never a
+ *     comment marker (see Tokenizer._readByteContent, §5.2.2).
+ */
+export type ByteCommentSyntax = 'full' | 'hash-only';
+
+/**
+ * Strip comments from inside a preserved byte-string literal's raw source,
+ * keeping everything else — case, whitespace, `...` — untouched. Used when
+ * `preserveByteString` is set but `preserveComments` is not: the preserved
+ * spelling should still drop comments, the same as an unpreserved literal
+ * re-derived from its decoded value would. `syntax` selects the comment
+ * rules to apply (see `ByteCommentSyntax`); the caller is responsible for
+ * knowing which one is correct — this function does not guess from `raw`.
+ *
+ * Only scans the quote-delimited content (not the prefix or a trailing
+ * encoding-indicator suffix), and mirrors the tokenizer's own
+ * comment-recognition closely enough for realistic input; a comment
+ * containing a literal copy of the delimiter quote character is not
+ * specially handled (the input is already known-valid, so at worst this
+ * shifts where the content/comment boundary is drawn, never produces
+ * unparseable output).
+ */
+export function stripByteLiteralComments(
+  raw: string,
+  syntax: ByteCommentSyntax
+): string {
+  let open = 0;
+  while (open < raw.length && raw[open] !== "'" && raw[open] !== '`') open++;
+  if (open >= raw.length) return raw;
+  const quote = raw[open];
+  const close = raw.lastIndexOf(quote);
+  if (close <= open) return raw;
+  const content = raw.slice(open + 1, close);
+  const stripped =
+    syntax === 'hash-only'
+      ? _stripHashOnlyComments(content)
+      : _stripFullByteCommentSyntax(content);
+  return raw.slice(0, open + 1) + stripped + raw.slice(close);
+}
+
+/** `#` line comments only — used by standard base64 (`b64'...'`). */
+function _stripHashOnlyComments(content: string): string {
+  let out = '';
+  let i = 0;
+  while (i < content.length) {
+    if (content[i] === '#') {
+      while (i < content.length && content[i] !== '\n') {
+        i += content[i] === '\\' && i + 1 < content.length ? 2 : 1;
+      }
+      continue;
+    }
+    out += content[i];
+    i++;
+  }
+  return out;
+}
+
+/**
+ * `#`, `//`, `/* *\/`, and `/ /` comments — used by `h'...'`/backtick raw hex
+ * and extension-defined byte literals sharing that syntax (b32, h32, ...).
+ */
+function _stripFullByteCommentSyntax(content: string): string {
+  let out = '';
+  let i = 0;
+  while (i < content.length) {
+    const ch = content[i];
+    const next = content[i + 1];
+    if (ch === '#' || (ch === '/' && next === '/')) {
+      i += ch === '#' ? 1 : 2;
+      while (i < content.length && content[i] !== '\n') {
+        i += content[i] === '\\' && i + 1 < content.length ? 2 : 1;
+      }
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = content.indexOf('*/', i + 2);
+      i = end === -1 ? content.length : end + 2;
+      continue;
+    }
+    if (ch === '/') {
+      let j = i + 1;
+      while (j < content.length && content[j] !== '/') {
+        j += content[j] === '\\' && j + 1 < content.length ? 2 : 1;
+      }
+      i = j < content.length ? j + 1 : content.length;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
 const _utf8Strict = new TextDecoder('utf-8', { fatal: true });
 
 /** Decode bytes as UTF-8; returns null if the bytes are not valid UTF-8. */

@@ -12,13 +12,38 @@ import {
   resolveIndent,
   joinConcatParts,
   canonicalEncodingWidth,
+  stripByteLiteralComments,
+  type ByteCommentSyntax,
 } from '../cdn/serialize-utils';
+
+/**
+ * A preserved literal source, with any embedded comment stripped unless
+ * `preserveComments` is set — the preserved spelling should still drop
+ * comments by default, the same as an unpreserved literal re-derived from
+ * its decoded value would. `commentSyntax` is `undefined` for a literal
+ * family with no comment syntax at all (bare sqstr `'...'`) or one whose
+ * comment syntax isn't known (an app-string extension other than the
+ * specific built-in `b32`/`h32` objects — see `ednCommentSyntax`); in
+ * either case the source is returned verbatim, since there's nothing safe
+ * to strip.
+ */
+function preservedSource(
+  source: string | undefined,
+  options: ToCDNOptions | undefined,
+  commentSyntax: ByteCommentSyntax | undefined
+): string | undefined {
+  if (source === undefined) return undefined;
+  if (options?.preserveComments || commentSyntax === undefined) return source;
+  return stripByteLiteralComments(source, commentSyntax);
+}
 
 /** One part of a byte string parsed from a CDN `+` concatenation chain. */
 export interface CborByteStringPart {
   bytes: Uint8Array;
   /** Original literal source text, when the part came from a byte string token. */
   source?: string;
+  /** Which comment syntax `source` recognizes, if any — see `ednCommentSyntax`. */
+  commentSyntax?: ByteCommentSyntax;
 }
 
 /** CBOR Major Type 2 — definite-length byte string. */
@@ -29,6 +54,16 @@ export class CborByteString extends CborItem {
   readonly ednEncoding: 'hex' | 'base64' | 'base64url' | 'base32' | 'base32hex';
   encodingWidth: EncodingWidth | undefined;
   readonly ednSource: string | undefined;
+  /**
+   * Which comment syntax `ednSource` recognizes, if any — set once at parse
+   * time by whoever actually knows the literal's real origin (see
+   * `ByteCommentSyntax`), never re-derived later from its prefix string:
+   * a user extension can register under any prefix, including one a
+   * built-in (`b32`/`h32`) also uses, so the prefix string alone can't say
+   * which comment rules (if any) actually apply. `undefined` when
+   * `ednSource` has no comment syntax, or its extension's isn't known.
+   */
+  readonly ednCommentSyntax: ByteCommentSyntax | undefined;
   /** Part boundaries of the original `+` concatenation chain, if any. */
   readonly ednParts: readonly CborByteStringPart[] | undefined;
 
@@ -38,6 +73,7 @@ export class CborByteString extends CborItem {
       ednEncoding?: 'hex' | 'base64' | 'base64url' | 'base32' | 'base32hex';
       encodingWidth?: EncodingWidth;
       ednSource?: string;
+      ednCommentSyntax?: ByteCommentSyntax;
       ednParts?: readonly CborByteStringPart[];
     }
   ) {
@@ -46,6 +82,7 @@ export class CborByteString extends CborItem {
     this.ednEncoding = options?.ednEncoding ?? 'hex';
     this.encodingWidth = options?.encodingWidth;
     this.ednSource = options?.ednSource;
+    this.ednCommentSyntax = options?.ednCommentSyntax;
     this.ednParts = options?.ednParts;
   }
 
@@ -69,32 +106,38 @@ export class CborByteString extends CborItem {
       );
       let encoding = options?.bstrEncoding ?? this.ednEncoding;
       if (options?.appStrings === false && encoding !== 'hex') encoding = 'hex';
-      const literals = this.ednParts.map((part) =>
-        options?.preserveByteString && part.source !== undefined
-          ? part.source
-          : serializeBytes(part.bytes, encoding, options?.sqstr)
-      );
+      const literals = this.ednParts.map((part) => {
+        const source = options?.preserveByteString
+          ? preservedSource(part.source, options, part.commentSyntax)
+          : undefined;
+        return source !== undefined
+          ? source
+          : serializeBytes(part.bytes, encoding, options?.sqstr);
+      });
       literals[literals.length - 1] += suffix;
       return joinConcatParts(literals, indentStr, _depth);
     }
+    const preservedWhole = options?.preserveByteString
+      ? preservedSource(this.ednSource, options, this.ednCommentSyntax)
+      : undefined;
     if (
-      options?.preserveByteString &&
-      this.ednSource !== undefined &&
-      // In single-line mode an original spelling that spans multiple lines
-      // (e.g. a byte string with interior line comments) cannot be re-emitted.
-      (indentStr !== null || !/[\r\n]/.test(this.ednSource))
+      preservedWhole !== undefined &&
+      // In single-line mode a spelling that spans multiple lines (e.g. a
+      // byte string with an interior line comment that survived stripping,
+      // or a genuine interior line break) cannot be re-emitted.
+      (indentStr !== null || !/[\r\n]/.test(preservedWhole))
     ) {
       // App-string byte strings (e.g. b32'...'_1) embed the EI inside ednSource.
       // Regular byte strings (h'...', b64'...') store EI separately in encodingWidth.
-      if (/_[0-3i]$/.test(this.ednSource)) {
+      if (/_[0-3i]$/.test(preservedWhole)) {
         const mode = options?.encodingIndicators ?? 'auto';
-        if (mode === 'never') return this.ednSource.replace(/_[0-3i]$/, '');
-        return this.ednSource; // 'auto' or 'always': EI already present
+        if (mode === 'never') return preservedWhole.replace(/_[0-3i]$/, '');
+        return preservedWhole; // 'auto' or 'always': EI already present
       }
       const suffix = resolveEiSuffix(options, this.encodingWidth, () =>
         canonicalEncodingWidth(BigInt(this.value.length))
       );
-      return this.ednSource + suffix;
+      return preservedWhole + suffix;
     }
     const suffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(BigInt(this.value.length))

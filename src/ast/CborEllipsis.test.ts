@@ -436,11 +436,10 @@ describe('CborEllipsis — toCDN', () => {
 
     test('a block comment inside the literal', () => {
       const src = "h'AB /x/ ... CD' + ...";
+      // preserveByteString alone strips it — combine with preserveComments
+      // to keep it, the same as for a non-elided h'...' literal.
+      expect(CBOR.format(src, opts)).toBe("h'AB  ... CD' + ...");
       expect(CBOR.format(src, { ...opts, preserveComments: true })).toBe(src);
-      // preserveByteString alone (no preserveComments) still keeps it: the
-      // comment is part of the literal's own preserved spelling, the same
-      // as for a non-elided h'...' literal.
-      expect(CBOR.format(src, opts)).toBe(src);
     });
 
     test('leading-ellipsis and trailing-ellipsis literals on either side of +', () => {
@@ -478,9 +477,18 @@ describe('CborEllipsis — toCDN', () => {
         );
       });
 
-      test('a line comment is preserved verbatim with indent', () => {
+      test('a line comment is stripped by preserveByteString alone, even with indent', () => {
         const src = "h'ab # note\n  ...cd' + ...";
-        expect(CBOR.format(src, { ...opts, indent: 2 })).toBe(src);
+        expect(CBOR.format(src, { ...opts, indent: 2 })).toBe(
+          "h'ab \n  ...cd' + ..."
+        );
+      });
+
+      test('a line comment is preserved verbatim with indent + preserveComments', () => {
+        const src = "h'ab # note\n  ...cd' + ...";
+        expect(
+          CBOR.format(src, { ...opts, indent: 2, preserveComments: true })
+        ).toBe(src);
       });
     });
   });
@@ -501,7 +509,10 @@ describe('CborEllipsis — toCDN', () => {
 
     test('a block comment inside the literal, no + at all', () => {
       const src = "h'AB /x/ ... CD'";
-      expect(CBOR.format(src, opts)).toBe(src);
+      // preserveByteString alone strips it — combine with preserveComments
+      // to keep it.
+      expect(CBOR.format(src, opts)).toBe("h'AB  ... CD'");
+      expect(CBOR.format(src, { ...opts, preserveComments: true })).toBe(src);
     });
 
     test('a fully-elided literal, no + at all', () => {

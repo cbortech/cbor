@@ -663,17 +663,24 @@ export interface ToCDNOptions {
    *
    * This preserves the spelling and interior layout of non-concatenated
    * `h'...'`, `b64'...'`, `b32'...'`, `h32'...'`, raw-backtick byte strings,
-   * and single-quoted byte strings, including comments inside those literals.
-   * Byte strings produced by `+` concatenation are normalised as usual;
-   * combine with `preserveConcatenation` to keep both the part boundaries
-   * and each part's spelling.
+   * and single-quoted byte strings — including a `h'xx...yy'`-family elided
+   * literal (§4.2), whose spelling is kept independently of
+   * `preserveConcatenation` when it has no `+` of its own (see that
+   * option). Byte strings produced by `+` concatenation are normalised as
+   * usual; combine with `preserveConcatenation` to keep both the part
+   * boundaries and each part's spelling.
+   *
+   * A comment inside the literal is stripped unless `preserveComments` is
+   * also set — `preserveByteString` alone preserves everything about the
+   * literal's spelling *except* its comments, the same as an unpreserved
+   * literal (re-derived from the decoded value) never has comments either.
    *
    * When enabled, this takes precedence over `bstrEncoding` and `sqstr` for
    * byte strings that carry original EDN source text.
    *
    * In single-line output (no `indent`), an original spelling that spans
-   * multiple lines (e.g. a byte string literal with interior line comments)
-   * falls back to normal serialization; single-line spellings are kept.
+   * multiple lines — after any comment is stripped — falls back to normal
+   * serialization; single-line spellings are kept.
    *
    * @default false
    */

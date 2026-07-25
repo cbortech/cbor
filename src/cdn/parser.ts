@@ -34,7 +34,11 @@ import {
   maxForEncodingWidth,
   type EncodingWidth,
 } from '../cbor/encode';
-import { canonicalEncodingWidth } from './serialize-utils';
+import {
+  canonicalEncodingWidth,
+  type ByteCommentSyntax,
+} from './serialize-utils';
+import { b32, h32 } from '../extensions/b32';
 import { parseHexFloat } from '../utils/hexfloat';
 import { hexToBytes } from '../utils/hex';
 import { base64ToBytes } from '../utils/base64';
@@ -622,7 +626,12 @@ const MISSING_EXTENSION_HINTS: ReadonlyMap<string, string> = new Map([
  * `CDNParser._consumeByteEllipsisChain`.
  */
 type ByteEllipsisAtom =
-  | { bytes: Uint8Array; source?: string; real: boolean }
+  | {
+      bytes: Uint8Array;
+      source?: string;
+      commentSyntax?: ByteCommentSyntax;
+      real: boolean;
+    }
   | {
       ellipsis: true;
       real: boolean;
@@ -825,6 +834,15 @@ class CDNParser {
                 ednEncoding: result.ednEncoding,
                 encodingWidth: result.encodingWidth,
                 ednSource: tok.raw + appStrEiRaw,
+                // A prefix name alone can't say which comment syntax (if
+                // any) this content actually uses: a user extension may be
+                // registered under the same prefix as a built-in (`ext`
+                // here is whichever one actually resolved — see the
+                // registration order in the constructor). Only strip
+                // comments from preserveByteString's spelling when `ext` is
+                // provably the specific built-in b32/h32 object.
+                ednCommentSyntax:
+                  ext === b32 || ext === h32 ? 'full' : undefined,
               });
             if (result instanceof CborFloat && result.ednSource === undefined)
               result.ednSource = tok.raw + appStrEiRaw;
@@ -1290,6 +1308,22 @@ class CDNParser {
     return type === 'BYTES_B64' ? 'base64' : 'hex';
   }
 
+  /**
+   * Comment syntax (if any) for a *core* byte-string token type (never an
+   * app-string extension's — those are resolved by extension identity, not
+   * token type, since `_isBytesToken` excludes `APP_STRING` and extension
+   * prefixes can never take part in `+`/ellipsis concatenation). `BYTES_HEX`
+   * (and its elided form) uses the full syntax; `BYTES_B64` only `#`; `SQSTR`
+   * none at all.
+   */
+  private _tokenTypeToCommentSyntax(
+    type: string
+  ): ByteCommentSyntax | undefined {
+    if (type === 'BYTES_HEX') return 'full';
+    if (type === 'BYTES_B64') return 'hash-only';
+    return undefined;
+  }
+
   private _parseBytesConcat(
     first: Uint8Array,
     firstType: string,
@@ -1301,11 +1335,17 @@ class CDNParser {
       return new CborByteString(first, {
         ednEncoding,
         ednSource: firstSource,
+        ednCommentSyntax: this._tokenTypeToCommentSyntax(firstType),
         ...(ew !== undefined ? { encodingWidth: ew } : {}),
       });
     }
     const initial: ByteEllipsisAtom[] = [
-      { bytes: first, source: firstSource, real: false },
+      {
+        bytes: first,
+        source: firstSource,
+        commentSyntax: this._tokenTypeToCommentSyntax(firstType),
+        real: false,
+      },
     ];
     const atoms = this._consumeByteEllipsisChain(initial);
     return this._buildFromByteAtoms(
@@ -1361,6 +1401,7 @@ class CDNParser {
         atoms.push({
           bytes: this._decodeBytesToken(next),
           source: next.raw,
+          commentSyntax: this._tokenTypeToCommentSyntax(next.type),
           real: true,
         });
       } else if (next.type === 'TSTR' || next.type === 'RAWSTRING') {
@@ -1405,7 +1446,11 @@ class CDNParser {
           literalSource: tok.raw,
         });
       if (segments[i].length > 0) {
-        atoms.push({ bytes: this._hexToBytes(segments[i], tok), real: false });
+        atoms.push({
+          bytes: this._hexToBytes(segments[i], tok),
+          commentSyntax: 'full',
+          real: false,
+        });
       }
     }
     return atoms;
@@ -1427,7 +1472,11 @@ class CDNParser {
   ): CborByteString | CborEllipsis {
     const hasEllipsis = atoms.some((a) => 'ellipsis' in a);
     if (!hasEllipsis) {
-      const byteParts = atoms as Array<{ bytes: Uint8Array; source?: string }>;
+      const byteParts = atoms as Array<{
+        bytes: Uint8Array;
+        source?: string;
+        commentSyntax?: ByteCommentSyntax;
+      }>;
       const concat = this._concatBytes(byteParts.map((p) => p.bytes));
       const ew = this.consumeEncodingIndicator(() => BigInt(concat.length));
       return new CborByteString(concat, {
@@ -1442,6 +1491,7 @@ class CDNParser {
     const pending: Array<{
       bytes: Uint8Array;
       source?: string;
+      commentSyntax?: ByteCommentSyntax;
       real: boolean;
     }> = [];
     const flushPending = () => {
@@ -1454,12 +1504,16 @@ class CDNParser {
             // `preserveByteString` has something to round-trip.
             ...(pending.length > 1
               ? {
-                  ednParts: pending.map(({ bytes, source }) => ({
+                  ednParts: pending.map(({ bytes, source, commentSyntax }) => ({
                     bytes,
                     source,
+                    commentSyntax,
                   })),
                 }
-              : { ednSource: pending[0]!.source }),
+              : {
+                  ednSource: pending[0]!.source,
+                  ednCommentSyntax: pending[0]!.commentSyntax,
+                }),
           })
         );
         realBoundary.push(pending[0]!.real);
