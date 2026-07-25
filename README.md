@@ -273,17 +273,6 @@ console.log(text);
 // }
 ```
 
-`<<...>>` (CBOR Sequence Literal / embedded CBOR) is the one exception to
-the "no entry contains an array or map" rule: since it's a flat sequence of
-encoded items rather than a nested-structure display, an entry that is
-itself an array/map still inlines there as long as its own rendering fits
-on one line:
-
-```ts
-CBOR.format('<<{1: -7}>>', { indent: 2, inlineLeafContainers: true });
-// "<<{1: -7}>>"
-```
-
 ### Split text strings while formatting
 
 `splitNewline` splits long text strings at newline characters using CDN
