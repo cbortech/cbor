@@ -783,6 +783,11 @@ export interface ToCDNOptions {
    * lines falls back to normal (regenerated) notation; single-line
    * spellings are kept.
    *
+   * An explicit `preserveComments` setting is still applied to comments
+   * inside a preserved application-sequence spelling: marker styles are
+   * normalised without changing the notation family, and `false` removes
+   * the comments while retaining the surrounding source spelling.
+   *
    * @default false
    */
   preserveAppSequence?: boolean;

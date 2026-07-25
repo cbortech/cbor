@@ -614,7 +614,14 @@ export function resolveEiSuffix(
 
 /** How a node should render under `preserveAppSequence`. */
 export type AppSeqRenderDecision =
-  'verbatim' | 'adjusted' | 'structural' | 'normal';
+  'verbatim' | 'adjusted' | 'source' | 'structural' | 'normal';
+
+interface AppSeqSourceFeatures {
+  byteString?: boolean;
+  textString?: boolean;
+  rawString?: boolean;
+  concatenation?: boolean;
+}
 
 /**
  * Decide how an extension result node — from a `prefix'...'` /
@@ -633,6 +640,9 @@ export type AppSeqRenderDecision =
  *   raw-tag source: its encoding-indicator suffixes are nested at two
  *   independent positions (tag number and inner content), so this is only
  *   safe in `'auto'` mode with no relevant sibling option overridden.
+ * - `'source'`: keep a raw-tag source structurally verbatim, applying
+ *   comment and encoding-indicator changes by their captured source spans.
+ *   This avoids changing unrelated literal spelling or layout.
  * - `'adjusted'`: for an app-string/-sequence source, strip whatever
  *   *outer* indicator suffix is already at the end of `appSeqSource` (or,
  *   under `'never'`, also an *inner* one immediately before `<<...>>`'s
@@ -647,54 +657,186 @@ export type AppSeqRenderDecision =
  *   upgrading to `prefix'...'`) but re-derive it structurally — via the
  *   node's own `CborTag` rendering — instead of using `appSeqSource`
  *   verbatim. Needed whenever verbatim text would ignore a sibling option
- *   that must apply per nested node: `encodingIndicators` other than
- *   `'auto'` (each nested indicator needs recomputing under that mode), or
- *   `preserveNumberFormat` / `preserveByteString` / `preserveComments`
- *   explicitly set to `false` (verbatim text is, in a raw-tag source,
- *   inherently number-/byte-string-literal spelling, and may itself embed
- *   a comment written inside the parens).
+ *   that must apply per nested node: an explicit `preserveNumberFormat` /
+ *   `preserveByteString` / `preserveTextString` / `preserveRawString` /
+ *   `preserveConcatenation` override.
+ *   Verbatim raw-tag text inherently contains the nested literal spelling.
  * - `'normal'`: fall through to the class's own notation regeneration
- *   (`prefix'...'`), unaffected by `preserveAppSequence`. Also used for a
- *   non-raw-tag source when `preserveComments` is explicitly `false`: an
- *   app-string/-sequence source has no structural fallback to delegate to
- *   (there is no way to re-derive `<<...>>` notation from the AST), so a
- *   comment embedded in its verbatim text can only be dropped by giving up
- *   the notation family entirely.
+ *   (`prefix'...'`), unaffected by `preserveAppSequence`. For `<<...>>`,
+ *   this is also used when replaying its sole inner item would defeat an
+ *   explicitly disabled, relevant literal-preservation option.
+ *
+ * `editsComplete` (from `CborItem.appSeqEncodingEditsComplete`, raw-tag
+ * sources only) is `false` when the tag's content contains a node type
+ * `collectContentEncodingEdits` doesn't cover (e.g. a `CborMap` nested in an
+ * `ip` array's raw-tag content). `'source'` relies on those edits to apply
+ * `encodingIndicators: 'always'`/`'never'`, so incomplete coverage would
+ * silently leave the uncovered node's own indicator unchanged; `'structural'`
+ * is used instead, since it re-derives every nested indicator recursively.
  */
 export function decideTaggedAppSeqRendering(
   options: ToCDNOptions | undefined,
   appSeqSource: string | undefined,
-  ednSource: string | undefined
+  ednSource: string | undefined,
+  sourceFeatures?: AppSeqSourceFeatures,
+  editsComplete?: boolean
 ): AppSeqRenderDecision {
   if (!options?.preserveAppSequence || appSeqSource === undefined)
     return 'normal';
   if (resolveIndent(options) === null && /[\r\n]/.test(appSeqSource))
     return 'normal';
-  // 'c-style' / 'cdn-style' ask for the comment *marker* to be normalised,
-  // which verbatim/adjusted text can't do any more than `false` (which asks
-  // for it to be dropped) can — both need the fallback path. Only `true`
-  // (or leaving the option unset, matching preserveNumberFormat /
-  // preserveByteString's precedent) is compatible with verbatim reuse.
-  const commentsOverridden =
-    options?.preserveComments !== undefined &&
-    options?.preserveComments !== true;
   const isRawTagSource = ednSource !== undefined;
-  if (!isRawTagSource) return commentsOverridden ? 'normal' : 'adjusted';
+  // App-string/-sequence sources carry relative comment spans, so their
+  // spelling can stay intact while adjustAppSeqIndicator converts or removes
+  // comments. Raw tags instead have a structural CborTag fallback that
+  // applies comment formatting together with all other nested-node options.
+  if (!isRawTagSource) {
+    const innerSourceOverridden =
+      (sourceFeatures?.byteString && options?.preserveByteString === false) ||
+      (sourceFeatures?.textString && options?.preserveTextString === false) ||
+      (sourceFeatures?.rawString && options?.preserveRawString === false) ||
+      (sourceFeatures?.concatenation &&
+        options?.preserveConcatenation === false);
+    return innerSourceOverridden ? 'normal' : 'adjusted';
+  }
+  const commentsNeedEditing =
+    options?.preserveComments === false ||
+    typeof options?.preserveComments === 'string' ||
+    (options?.preserveComments === true && resolveIndent(options) === null);
   const mode = options?.encodingIndicators ?? 'auto';
   const siblingOverridden =
-    commentsOverridden ||
     options?.preserveNumberFormat === false ||
-    options?.preserveByteString === false;
-  return mode === 'auto' && !siblingOverridden ? 'verbatim' : 'structural';
+    (sourceFeatures?.byteString && options?.preserveByteString === false) ||
+    (sourceFeatures?.textString && options?.preserveTextString === false) ||
+    (sourceFeatures?.rawString && options?.preserveRawString === false) ||
+    (sourceFeatures?.concatenation && options?.preserveConcatenation === false);
+  if (siblingOverridden) return 'structural';
+  if (mode !== 'auto' && editsComplete === false) return 'structural';
+  return mode !== 'auto' || commentsNeedEditing ? 'source' : 'verbatim';
 }
 
 /**
- * Strip the encoding-indicator suffix(es) already in an `'adjusted'`
- * app-string/-sequence source, then append `newSuffix` (the outer/wrapper
+ * Replacement text for a comment being stripped entirely (not converted):
+ * empty, unless removing it would fuse two otherwise-separate tokens
+ * together — e.g. "24/x/h'...'" would become "24h'...'", which the parser
+ * rejects as two array items with no separator between them. A single
+ * space keeps the tokens apart in that case, the same concern
+ * `sourceSuffixEdit`'s own separator handles for an inserted indicator.
+ *
+ * The two neighbouring characters are checked generically (any non-space,
+ * non-comma character needs a separator), not just "word" characters —
+ * `24/x/'abc'` needs the same space as `24/x/h'...'` even though `'` isn't
+ * itself part of a token that could lexically fuse with `24`: the parser's
+ * "array items must be separated" check is purely positional (are the two
+ * tokens flush against each other), not about what those tokens are. A
+ * comma on either side never needs a separator of its own, since it's
+ * already a valid separator by itself.
+ *
+ * `text`/`start`/`end` share one coordinate space (the source being edited
+ * and the comment's offsets within it).
+ */
+function stripCommentReplacement(
+  text: string,
+  start: number,
+  end: number
+): string {
+  const before = start > 0 ? text[start - 1]! : '';
+  const after = end < text.length ? text[end]! : '';
+  const needsSeparator = (ch: string) => ch !== '' && !/[\s,]/.test(ch);
+  return needsSeparator(before) && needsSeparator(after) ? ' ' : '';
+}
+
+function rewriteAppSeqComments(
+  appSeqSource: string,
+  options: ToCDNOptions | undefined,
+  comments: readonly CborComment[] | undefined,
+  removedAt?: number
+): string {
+  const preserveComments = options?.preserveComments;
+  if (preserveComments === undefined || !comments?.length) return appSeqSource;
+  const stripComments =
+    preserveComments === false || resolveIndent(options) === null;
+  const style =
+    typeof preserveComments === 'string' ? preserveComments : undefined;
+  let text = appSeqSource;
+  // Apply replacements from right to left so an earlier comment's offsets
+  // are unaffected by a later replacement. Account for characters already
+  // removed before a following comment.
+  const ordered = [...comments].sort((a, b) => b.start - a.start);
+  for (const comment of ordered) {
+    const shift =
+      removedAt !== undefined && comment.start >= removedAt ? -2 : 0;
+    const start = comment.start + shift;
+    const end = comment.end + shift;
+    const replacement = stripComments
+      ? stripCommentReplacement(text, start, end)
+      : convertCommentText(comment, style);
+    text = text.slice(0, start) + replacement + text.slice(end);
+  }
+  return text;
+}
+
+/** Apply comment/EI options directly to a preserved raw-tag source. */
+export function adjustRawAppSeqSource(
+  appSeqSource: string,
+  options: ToCDNOptions | undefined,
+  comments: readonly CborComment[] | undefined,
+  encodingEdits:
+    | readonly {
+        start: number;
+        end: number;
+        always: string;
+        never: string;
+      }[]
+    | undefined
+): string {
+  const replacements: {
+    start: number;
+    end: number;
+    replacement: string;
+  }[] = [];
+  const preserveComments = options?.preserveComments;
+  if (preserveComments !== undefined && comments?.length) {
+    const stripComments =
+      preserveComments === false || resolveIndent(options) === null;
+    const style =
+      typeof preserveComments === 'string' ? preserveComments : undefined;
+    for (const comment of comments)
+      replacements.push({
+        start: comment.start,
+        end: comment.end,
+        replacement: stripComments
+          ? stripCommentReplacement(appSeqSource, comment.start, comment.end)
+          : convertCommentText(comment, style),
+      });
+  }
+  const mode = options?.encodingIndicators ?? 'auto';
+  if (mode !== 'auto' && encodingEdits)
+    for (const edit of encodingEdits)
+      replacements.push({
+        start: edit.start,
+        end: edit.end,
+        replacement: mode === 'always' ? edit.always : edit.never,
+      });
+
+  // Right-to-left edits keep every stored source offset valid. At the same
+  // offset, replace a non-empty span before performing a zero-width insert.
+  replacements.sort((a, b) => b.start - a.start || b.end - a.end);
+  let text = appSeqSource;
+  for (const edit of replacements)
+    text = text.slice(0, edit.start) + edit.replacement + text.slice(edit.end);
+  return text;
+}
+
+/**
+ * Adjust an `'adjusted'` app-string/-sequence source: apply requested comment
+ * conversion/removal by captured source span, strip the existing
+ * encoding-indicator suffix(es), then append `newSuffix` (the outer/wrapper
  * indicator recomputed for the current mode) — see
  * `decideTaggedAppSeqRendering`.
  *
- * Under `'never'`, an inner (item-level) indicator is also stripped, using
+ * Under `encodingIndicators: 'never'`, an inner (item-level) indicator is
+ * also stripped, using
  * `innerItemEnd` (see `CborItem.appSeqInnerEnd`) to find it by its actual
  * parsed position rather than by pattern-matching text near the closing
  * `>>` — whitespace, a trailing comma, and/or a comment can all separate
@@ -704,14 +846,23 @@ export function decideTaggedAppSeqRendering(
 export function adjustAppSeqIndicator(
   appSeqSource: string,
   newSuffix: string,
-  mode: 'auto' | 'always' | 'never' | undefined,
-  innerItemEnd: number | undefined
+  options: ToCDNOptions | undefined,
+  innerItemEnd: number | undefined,
+  comments: readonly CborComment[] | undefined
 ): string {
   let text = appSeqSource;
-  if ((mode ?? 'auto') === 'never' && innerItemEnd !== undefined) {
+  let removedInnerAt: number | undefined;
+  if (
+    (options?.encodingIndicators ?? 'auto') === 'never' &&
+    innerItemEnd !== undefined
+  ) {
     const beforeInner = text.slice(0, innerItemEnd);
-    if (/_[0-3i]$/.test(beforeInner))
+    if (/_[0-3i]$/.test(beforeInner)) {
+      removedInnerAt = innerItemEnd - 2;
       text = beforeInner.slice(0, -2) + text.slice(innerItemEnd);
+    }
   }
+
+  text = rewriteAppSeqComments(text, options, comments, removedInnerAt);
   return text.replace(/_[0-3i]$/, '') + newSuffix;
 }

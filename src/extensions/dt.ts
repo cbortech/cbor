@@ -25,6 +25,7 @@ import {
   canonicalEncodingWidth,
   floatSuffix,
   decideTaggedAppSeqRendering,
+  adjustRawAppSeqSource,
   adjustAppSeqIndicator,
 } from '../cdn/serialize-utils';
 
@@ -176,14 +177,16 @@ export class CborEpochDtExtUint extends CborUint {
     const decision = decideTaggedAppSeqRendering(
       options,
       this.appSeqSource,
-      undefined
+      undefined,
+      this.appSeqSourceFeatures
     );
     if (decision === 'adjusted')
       return adjustAppSeqIndicator(
         this.appSeqSource!,
         eiSuffix,
-        options?.encodingIndicators,
-        this.appSeqInnerEnd
+        options,
+        this.appSeqInnerEnd,
+        this.appSeqComments
       );
     return `${PREFIX_DT}'${epochToRfc3339(Number(this.value))}'${eiSuffix}`;
   }
@@ -209,14 +212,16 @@ export class CborEpochDtExtNint extends CborNint {
     const decision = decideTaggedAppSeqRendering(
       options,
       this.appSeqSource,
-      undefined
+      undefined,
+      this.appSeqSourceFeatures
     );
     if (decision === 'adjusted')
       return adjustAppSeqIndicator(
         this.appSeqSource!,
         eiSuffix,
-        options?.encodingIndicators,
-        this.appSeqInnerEnd
+        options,
+        this.appSeqInnerEnd,
+        this.appSeqComments
       );
     return `${PREFIX_DT}'${epochToRfc3339(Number(this.value))}'${eiSuffix}`;
   }
@@ -249,14 +254,16 @@ export class CborEpochDtExtFloat extends CborFloat {
     const decision = decideTaggedAppSeqRendering(
       options,
       this.appSeqSource,
-      undefined
+      undefined,
+      this.appSeqSourceFeatures
     );
     if (decision === 'adjusted')
       return adjustAppSeqIndicator(
         this.appSeqSource!,
         eiSuffix,
-        options?.encodingIndicators,
-        this.appSeqInnerEnd
+        options,
+        this.appSeqInnerEnd,
+        this.appSeqComments
       );
     return `${PREFIX_DT}'${epochToRfc3339(this.value)}'${eiSuffix}`;
   }
@@ -286,9 +293,18 @@ export class CborTaggedEpochDtExt extends CborTag {
     const decision = decideTaggedAppSeqRendering(
       options,
       this.appSeqSource,
-      this.ednSource
+      this.ednSource,
+      this.appSeqSourceFeatures,
+      this.appSeqEncodingEditsComplete
     );
     if (decision === 'verbatim') return this.appSeqSource!;
+    if (decision === 'source')
+      return adjustRawAppSeqSource(
+        this.appSeqSource!,
+        options,
+        this.appSeqComments,
+        this.appSeqEncodingEdits
+      );
     if (decision === 'structural')
       return super._toCDN({ ...options, appStrings: false }, depth);
     const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
@@ -298,8 +314,9 @@ export class CborTaggedEpochDtExt extends CborTag {
       return adjustAppSeqIndicator(
         this.appSeqSource!,
         eiSuffix,
-        options?.encodingIndicators,
-        this.appSeqInnerEnd
+        options,
+        this.appSeqInnerEnd,
+        this.appSeqComments
       );
     // Per §2.3.1, DT'...'_N encodes only the tag number's width.
     // If the inner content has non-canonical encoding, fall back to generic tag

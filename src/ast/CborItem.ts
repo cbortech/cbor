@@ -4,6 +4,7 @@ import type {
   ToJSOptions,
   ToHexDumpOptions,
   ToCBOROptions,
+  CborComment,
   CborComments,
   DecodeWarning,
   ParseWarning,
@@ -18,6 +19,29 @@ export interface AnnotatedLine {
   depth: number;
   hex: string;
   comment: string;
+}
+
+export interface AppSeqEncodingEdit {
+  /** Start/end offsets within appSeqSource of an existing indicator. */
+  start: number;
+  end: number;
+  /** Replacement used by encodingIndicators: 'always'. */
+  always: string;
+  /** Replacement used by encodingIndicators: 'never'. */
+  never: string;
+}
+
+/**
+ * Original literal features used by the sole item inside a preserved
+ * `prefix<<item>>` source. They let serialization honour an explicitly
+ * disabled sibling `preserve*` option instead of replaying that literal
+ * verbatim through `preserveAppSequence`.
+ */
+export interface AppSeqSourceFeatures {
+  byteString?: boolean;
+  textString?: boolean;
+  rawString?: boolean;
+  concatenation?: boolean;
 }
 
 /**
@@ -79,6 +103,36 @@ export abstract class CborItem {
   appSeqSource?: string;
 
   /**
+   * Comments contained within `appSeqSource`, with `start`/`end` offsets
+   * relative to that string. These spans allow comment markers to be
+   * converted (or comments to be removed) without regenerating and thereby
+   * losing the original application-string/-sequence notation.
+   */
+  appSeqComments?: CborComment[];
+
+  /**
+   * Source edits for encoding indicators contained in a raw-tag
+   * `appSeqSource`. Includes zero-width edits where an indicator was absent
+   * so `encodingIndicators: 'always'` can insert one without regenerating
+   * the surrounding source.
+   */
+  appSeqEncodingEdits?: AppSeqEncodingEdit[];
+
+  /**
+   * `false` when `appSeqEncodingEdits` does not cover every encoding
+   * indicator nested inside a raw-tag `appSeqSource` — i.e. its content
+   * contains a node type `collectContentEncodingEdits` doesn't know how to
+   * edit (e.g. a `CborMap`, `CborTag`, or indefinite-length string inside an
+   * `ip` array). Left `undefined` (treated as complete) when coverage is
+   * exhaustive, which holds for every tag content type `dt` accepts and for
+   * most content `ip` accepts. When `false`, `decideTaggedAppSeqRendering`
+   * must not choose the `'source'` decision under `encodingIndicators !==
+   * 'auto'`, since surgical span edits would silently leave the uncovered
+   * node's indicator unchanged; it falls back to `'structural'` instead.
+   */
+  appSeqEncodingEditsComplete?: boolean;
+
+  /**
    * For an `appSeqSource` parsed from `prefix<<item>>` notation: the offset
    * within `appSeqSource`, relative to its own start, where the sole inner
    * item's own consumption ends — i.e. right after its own encoding
@@ -89,6 +143,13 @@ export abstract class CborItem {
    * isn't `<<...>>` notation, or wasn't captured with a single inner item.
    */
   appSeqInnerEnd?: number;
+
+  /**
+   * Literal-preservation features present in the sole item of a captured
+   * `prefix<<item>>` source. Used to resolve explicitly disabled
+   * `preserve*` options without treating unrelated options as conflicts.
+   */
+  appSeqSourceFeatures?: AppSeqSourceFeatures;
 
   /**
    * Validity violations detected while decoding or parsing this node.

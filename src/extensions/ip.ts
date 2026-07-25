@@ -33,6 +33,7 @@ import {
   resolveEiSuffix,
   canonicalEncodingWidth,
   decideTaggedAppSeqRendering,
+  adjustRawAppSeqSource,
   adjustAppSeqIndicator,
 } from '../cdn/serialize-utils';
 
@@ -105,14 +106,16 @@ export class CborIpExt extends CborByteString {
     const decision = decideTaggedAppSeqRendering(
       options,
       this.appSeqSource,
-      undefined
+      undefined,
+      this.appSeqSourceFeatures
     );
     if (decision === 'adjusted')
       return adjustAppSeqIndicator(
         this.appSeqSource!,
         eiSuffix,
-        options?.encodingIndicators,
-        this.appSeqInnerEnd
+        options,
+        this.appSeqInnerEnd,
+        this.appSeqComments
       );
     return `${PREFIX_IP}'${formatAddress(this.value)}'${eiSuffix}`;
   }
@@ -135,7 +138,8 @@ export class CborIpPrefixExt extends CborArray {
     const decision = decideTaggedAppSeqRendering(
       options,
       this.appSeqSource,
-      undefined
+      undefined,
+      this.appSeqSourceFeatures
     );
     // This form never emits an encoding indicator of its own (unlike the
     // other ip/dt notations), so 'adjusted' only ever strips one.
@@ -143,8 +147,9 @@ export class CborIpPrefixExt extends CborArray {
       return adjustAppSeqIndicator(
         this.appSeqSource!,
         '',
-        options?.encodingIndicators,
-        this.appSeqInnerEnd
+        options,
+        this.appSeqInnerEnd,
+        this.appSeqComments
       );
     const prefixLen = Number((this.items[0] as CborUint).value);
     const truncated = (this.items[1] as CborByteString).value;
@@ -168,9 +173,18 @@ export class CborTaggedIpExt extends CborTag {
     const decision = decideTaggedAppSeqRendering(
       options,
       this.appSeqSource,
-      this.ednSource
+      this.ednSource,
+      this.appSeqSourceFeatures,
+      this.appSeqEncodingEditsComplete
     );
     if (decision === 'verbatim') return this.appSeqSource!;
+    if (decision === 'source')
+      return adjustRawAppSeqSource(
+        this.appSeqSource!,
+        options,
+        this.appSeqComments,
+        this.appSeqEncodingEdits
+      );
     // Unlike dt's content classes, ip's content (CborByteString / CborArray
     // / CborUint) never self-switches on `appStrings`, so no need to force
     // it false here — doing so would also force hex byte-string encoding
@@ -183,8 +197,9 @@ export class CborTaggedIpExt extends CborTag {
       return adjustAppSeqIndicator(
         this.appSeqSource!,
         eiSuffix,
-        options?.encodingIndicators,
-        this.appSeqInnerEnd
+        options,
+        this.appSeqInnerEnd,
+        this.appSeqComments
       );
     }
     const fullLen = this.tag === TAG_IPV4 ? 4 : 16;

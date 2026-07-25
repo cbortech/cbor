@@ -38,6 +38,17 @@ export class CborTextString extends CborItem {
    * for parts that were not raw backtick literals.
    */
   readonly ednPartSources: readonly (string | undefined)[] | undefined;
+  /**
+   * `true` at index `i`, aligned with `ednParts`, when that part came from a
+   * byte-string literal on the right of a text-leading `+` concatenation
+   * (decoded as UTF-8 and merged in per §5.1) rather than a double-quoted
+   * `"..."` literal. Both cases leave `ednPartSources[i]` `undefined` (byte
+   * strings have no preserved raw source here, same as an unpreserved
+   * double-quoted literal), so this is what lets `appSeqSourceFeatures`
+   * attribute the part to `byteString` instead of the unpreservable
+   * `textString`.
+   */
+  readonly ednPartIsByteString: readonly boolean[] | undefined;
 
   constructor(
     value: string,
@@ -47,6 +58,7 @@ export class CborTextString extends CborItem {
       ednSource?: string;
       quotedEdnSource?: string;
       ednPartSources?: readonly (string | undefined)[];
+      ednPartIsByteString?: readonly boolean[];
     }
   ) {
     super();
@@ -56,6 +68,7 @@ export class CborTextString extends CborItem {
     this.ednSource = options?.ednSource;
     this.quotedEdnSource = options?.quotedEdnSource;
     this.ednPartSources = options?.ednPartSources;
+    this.ednPartIsByteString = options?.ednPartIsByteString;
   }
 
   override _encodeTo(writer: CborWriter, _options?: ToCBOROptions): void {

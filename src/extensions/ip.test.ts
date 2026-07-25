@@ -249,7 +249,7 @@ describe('ip — preserveAppSequence', () => {
     expect(n).toBeInstanceOf(CborTaggedIpExt);
   });
 
-  test('encodingIndicators applies structurally to raw tag notation, not verbatim', () => {
+  test('encodingIndicators applies to both items in raw tag notation', () => {
     expect(
       CBOR.format("52_1(h'c000022a'_2)", {
         preserveAppSequence: true,
@@ -262,6 +262,36 @@ describe('ip — preserveAppSequence', () => {
         encodingIndicators: 'always',
       })
     ).toBe("52_0(h'c000022a'_i)");
+  });
+
+  test('encodingIndicators edits raw-tag source without changing unrelated spelling/layout', () => {
+    expect(
+      CBOR.format("0x34_1( b64'wAACKg=='_1 )", {
+        preserveAppSequence: true,
+        encodingIndicators: 'never',
+      })
+    ).toBe("0x34( b64'wAACKg==' )");
+    expect(
+      CBOR.format("0x34( b64'wAACKg==' )", {
+        preserveAppSequence: true,
+        encodingIndicators: 'always',
+      })
+    ).toBe("0x34_0( b64'wAACKg=='_i )");
+  });
+
+  test('encodingIndicators edits every nested item in raw CIDR tag source', () => {
+    expect(
+      CBOR.format("0x34_1([_1 24_1, h'c00002'_1])", {
+        preserveAppSequence: true,
+        encodingIndicators: 'never',
+      })
+    ).toBe("0x34([ 24, h'c00002'])");
+    expect(
+      CBOR.format("0x34([24,h'c00002'])", {
+        preserveAppSequence: true,
+        encodingIndicators: 'always',
+      })
+    ).toBe("0x34_0([_i 24_0,h'c00002'_i])");
   });
 
   test('encodingIndicators: always adds a missing indicator to <<...>> notation', () => {
@@ -301,6 +331,23 @@ describe('ip — preserveAppSequence', () => {
     ).toBe("IP<<'192.0.2.42' # x\n>>");
   });
 
+  test('comment style options preserve notation and normalise comments', () => {
+    expect(
+      CBOR.format("IP<<'192.0.2.42'>>", {
+        preserveAppSequence: true,
+        preserveComments: 'c-style',
+        indent: 2,
+      })
+    ).toBe("IP<<'192.0.2.42'>>");
+    expect(
+      CBOR.format("IP<</note/ '192.0.2.42'>>", {
+        preserveAppSequence: true,
+        preserveComments: 'c-style',
+        indent: 2,
+      })
+    ).toBe("IP<</*note*/ '192.0.2.42'>>");
+  });
+
   test('untagged ip<<...>> keeps its bracketed notation under always/never too', () => {
     expect(
       CBOR.format("ip<<'192.0.2.42'>>", {
@@ -314,6 +361,40 @@ describe('ip — preserveAppSequence', () => {
         encodingIndicators: 'always',
       })
     ).toBe("ip<<'192.0.2.42'>>_i");
+  });
+
+  test('explicit byte-string/concatenation overrides apply inside <<...>>', () => {
+    expect(
+      CBOR.format("IP<<b64'MTkyLjAuMi40Mg=='>>", {
+        preserveAll: true,
+        preserveByteString: false,
+      })
+    ).toBe("IP'192.0.2.42'");
+    expect(
+      CBOR.format("IP<<h'3139322e' + h'302e322e3432'>>", {
+        preserveAll: true,
+        preserveConcatenation: false,
+        indent: 2,
+      })
+    ).toBe("IP'192.0.2.42'");
+  });
+
+  test('an unrelated explicit text-string override keeps byte-string <<...>> source', () => {
+    expect(
+      CBOR.format("IP<<b64'MTkyLjAuMi40Mg=='>>", {
+        preserveAll: true,
+        preserveTextString: false,
+      })
+    ).toBe("IP<<b64'MTkyLjAuMi40Mg=='>>");
+  });
+
+  test('preserveConcatenation: false overrides verbatim raw tag notation', () => {
+    expect(
+      CBOR.format("52(h'c000' + h'022a')", {
+        preserveAll: true,
+        preserveConcatenation: false,
+      })
+    ).toBe("52(h'c000022a')");
   });
 
   test('preserveByteString: false overrides verbatim raw tag notation', () => {
@@ -335,7 +416,7 @@ describe('ip — preserveAppSequence', () => {
         preserveComments: false,
         indent: 2,
       })
-    ).toBe("52(h'c000022a')");
+    ).toBe("52( h'c000022a')");
     expect(
       CBOR.format("52(/note/ h'c000022a')", { preserveAppSequence: true })
     ).toBe("52(/note/ h'c000022a')");
@@ -348,14 +429,21 @@ describe('ip — preserveAppSequence', () => {
         preserveComments: 'c-style',
         indent: 2,
       })
-    ).toBe("52(\n  /*note*/\n  h'c000022a'\n)");
+    ).toBe("52(/*note*/ h'c000022a')");
     expect(
       CBOR.format("52(/note/ h'c000022a')", {
         preserveAll: true,
         preserveComments: 'cdn-style',
         indent: 2,
       })
-    ).toBe("52(\n  /note/\n  h'c000022a'\n)");
+    ).toBe("52(/note/ h'c000022a')");
+    expect(
+      CBOR.format("0x34(b64'wAACKg==')", {
+        preserveAppSequence: true,
+        preserveComments: 'c-style',
+        indent: 2,
+      })
+    ).toBe("0x34(b64'wAACKg==')");
   });
 
   test('parsed node keeps its dedicated class/identity, unlike CborAppSeqResult wrapping', () => {
@@ -363,6 +451,127 @@ describe('ip — preserveAppSequence', () => {
     expect(n).toBeInstanceOf(CborIpExt);
     const t = CBOR.fromCDN("IP<<'192.0.2.42'>>");
     expect(t).toBeInstanceOf(CborTaggedIpExt);
+  });
+
+  test('preserveComments: false replaces a comment with a space when removing it would fuse adjacent tokens', () => {
+    const formatted = CBOR.format("52([24/x/h'c00002'])", {
+      preserveAll: true,
+      preserveComments: false,
+      indent: 2,
+    });
+    expect(formatted).toBe("52([24 h'c00002'])");
+    expect(() => CBOR.fromCDN(formatted)).not.toThrow();
+  });
+
+  test('preserveComments: false inserts a separator even when the following token is not word-like', () => {
+    // '\'' isn't a "word" character, but 24'abc' is still two array items
+    // flush against each other with nothing separating them — the parser
+    // rejects that regardless of what the adjacent tokens are.
+    const formatted = CBOR.format("52([24/x/'abc'])", {
+      preserveAll: true,
+      preserveComments: false,
+      indent: 2,
+    });
+    expect(formatted).toBe("52([24 'abc'])");
+    expect(() => CBOR.fromCDN(formatted)).not.toThrow();
+  });
+
+  test('a comment removal overlapping an inserted encoding indicator still produces valid CDN', () => {
+    // The comment sits in the exact gap where the array's own missing
+    // encoding indicator gets inserted; both edits land at the same source
+    // position and must not fuse into one identifier.
+    const formatted = CBOR.format("52([/x/24,h'c00002'])", {
+      preserveAll: true,
+      preserveComments: false,
+      encodingIndicators: 'always',
+      indent: 2,
+    });
+    expect(formatted).toBe("52_0([_i 24_0,h'c00002'_i])");
+    expect(() => CBOR.fromCDN(formatted)).not.toThrow();
+  });
+
+  test('preserveTextString: false / preserveRawString: false override verbatim raw tag notation', () => {
+    expect(
+      CBOR.format('52(["\\u0078"])', {
+        preserveAll: true,
+        preserveTextString: false,
+      })
+    ).toBe('52(["x"])');
+    expect(
+      CBOR.format('52([`x`])', {
+        preserveAll: true,
+        preserveRawString: false,
+      })
+    ).toBe('52(["x"])');
+    // Unset, both keep the verbatim source.
+    expect(CBOR.format('52(["\\u0078"])', { preserveAppSequence: true })).toBe(
+      '52(["\\u0078"])'
+    );
+    expect(CBOR.format('52([`x`])', { preserveAppSequence: true })).toBe(
+      '52([`x`])'
+    );
+  });
+
+  test('source features are detected through an indefinite-length byte string nested in raw tag content', () => {
+    expect(
+      CBOR.format("52([(_ b64'YQ==', b64'Yg==')])", {
+        preserveAll: true,
+        preserveByteString: false,
+      })
+    ).toBe("52([(_ 'a','b')])");
+    expect(
+      CBOR.format("52([(_ b64'YQ==', b64'Yg==')])", {
+        preserveAppSequence: true,
+      })
+    ).toBe("52([(_ b64'YQ==', b64'Yg==')])");
+  });
+
+  test("a nested extension's own source features are combined with its structural content", () => {
+    // DT<<b64'...'>> resolves to a plain epoch number, so there is nothing
+    // byte-string-like in its *structural* content — the byte-string
+    // literal only shows up in the DT node's own appSeqSourceFeatures, from
+    // when it was itself parsed as an application sequence.
+    expect(
+      CBOR.format("52([DT<<b64'MTk2OS0wNy0yMVQwMjo1NjoxNlo='>>])", {
+        preserveAll: true,
+        preserveByteString: false,
+      })
+    ).toBe("52([DT'1969-07-21T02:56:16Z'])");
+    expect(
+      CBOR.format("52([DT<<b64'MTk2OS0wNy0yMVQwMjo1NjoxNlo='>>])", {
+        preserveAppSequence: true,
+      })
+    ).toBe("52([DT<<b64'MTk2OS0wNy0yMVQwMjo1NjoxNlo='>>])");
+  });
+
+  test('a nested map inside raw tag content is scanned for source features', () => {
+    // ip accepts an arbitrary CborArray as tag content, so a map nested in
+    // it can itself contain a concatenation that an explicit
+    // preserveConcatenation: false must still veto.
+    expect(
+      CBOR.format("52([{0: h'61' + h'62'}])", {
+        preserveAll: true,
+        preserveConcatenation: false,
+      })
+    ).toBe("52([{0:'ab'}])");
+    expect(
+      CBOR.format("52([{0: h'61' + h'62'}])", { preserveAppSequence: true })
+    ).toBe("52([{0: h'61' + h'62'}])");
+  });
+
+  test('encodingIndicators falls back to structural output for an unsupported node type nested in raw tag content', () => {
+    expect(
+      CBOR.format('52(["x"_1])', {
+        preserveAppSequence: true,
+        encodingIndicators: 'never',
+      })
+    ).toBe('52(["x"])');
+    expect(
+      CBOR.format('52(["x"])', {
+        preserveAppSequence: true,
+        encodingIndicators: 'always',
+      })
+    ).toBe('52_0([_i"x"_i])');
   });
 });
 
