@@ -1144,6 +1144,22 @@ describe('CBOR.format()', () => {
     ).toBe('# start\n42 # end');
   });
 
+  test('root leading comment on the same source line as the value stays inline', () => {
+    // Same source line as the root value: stays inline instead of forcing a
+    // line break above it.
+    expect(
+      CBOR.format('/ note / 1', { indent: 2, preserveComments: true })
+    ).toBe('/ note / 1');
+    // Own source line: still gets its own line above the value.
+    expect(
+      CBOR.format('/ note /\n1', { indent: 2, preserveComments: true })
+    ).toBe('/ note /\n1');
+    // Own-line comment followed by a same-line one: only the latter inlines.
+    expect(
+      CBOR.format('// a\n/ note / 1', { indent: 2, preserveComments: true })
+    ).toBe('// a\n/ note / 1');
+  });
+
   test('single-line output ignores preserveComments', () => {
     expect(CBOR.format('42 # end', { preserveComments: true })).toBe('42');
     expect(CBOR.format('# before\n[1, 2]', { preserveComments: true })).toBe(

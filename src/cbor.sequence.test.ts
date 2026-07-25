@@ -308,8 +308,10 @@ describe('CBOR.fromCDNSeq', () => {
     });
 
     test('block comments round-trip across items', () => {
+      // /* a */ and 1 were on the same source line, so the leading comment
+      // stays inline instead of getting pushed onto its own line above.
       expect(roundtrip('/* a */ 1 /* b */ 2')).toEqual([
-        '/* a */\n1 /* b */',
+        '/* a */ 1 /* b */',
         '2',
       ]);
     });

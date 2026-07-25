@@ -10,7 +10,11 @@ import type {
   ParseWarning,
 } from '../types';
 import { CBOR_OMIT } from '../types';
-import { convertCommentText, resolveIndent } from '../cdn/serialize-utils';
+import {
+  convertCommentText,
+  resolveIndent,
+  splitLeadingComments,
+} from '../cdn/serialize-utils';
 import { CborWriter } from '../cbor/encode';
 import { bytesToSpacedHexUpper } from '../utils/hex';
 
@@ -209,14 +213,13 @@ export abstract class CborItem {
     // that single-line output contains no newlines.
     if (!pv || resolveIndent(merged) === null) return body;
     const style = typeof pv === 'string' ? pv : undefined;
-    const leading =
-      this.comments?.leading?.map((c) => convertCommentText(c, style)) ?? [];
+    const { ownLines, inlinePrefix } = splitLeadingComments(this, '', style);
     const trailing = this.comments?.trailing ?? [];
     const bodyWithTrailing =
       trailing.length === 0
         ? body
         : `${body} ${trailing.map((c) => convertCommentText(c, style).trimEnd()).join(' ')}`;
-    return [...leading, bodyWithTrailing].join('\n');
+    return [...ownLines, `${inlinePrefix}${bodyWithTrailing}`].join('\n');
   }
 
   /**

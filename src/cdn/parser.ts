@@ -493,6 +493,7 @@ function attachComments(
 
     if (!container || (next && next.end <= container.end)) {
       if (next) {
+        comment.sameLine = lineAt(raw.end) === lineAt(next.start);
         addComment(next.node, 'leading', comment);
         continue;
       }

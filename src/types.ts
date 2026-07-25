@@ -947,6 +947,15 @@ export interface CborComment {
   end: number;
   line: number;
   col: number;
+  /**
+   * `true` when this is a `leading` comment that ends on the same source
+   * line as the node it's attached to — e.g. `/ protected / << ... >>` in an
+   * RFC 9052-style annotated array, as opposed to a comment on its own line
+   * above the value. `toCDN()` renders these as an inline prefix on the
+   * value's own line instead of a separate line above it. `undefined` for
+   * `trailing`/`dangling` comments, where it doesn't apply.
+   */
+  sameLine?: boolean;
 }
 
 export interface CborComments {

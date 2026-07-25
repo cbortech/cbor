@@ -103,14 +103,37 @@ export function convertCommentText(
   return text; // already # or /.../
 }
 
-export function formatLeadingComments(
+/**
+ * Split an item's leading comments into ones that get their own line above
+ * it, and a trailing run of comments the parser found on the same source
+ * line as the item itself (`CborComment.sameLine`) — e.g.
+ * `/ protected / << ... >>,` in an RFC 9052-style annotated array. Since
+ * comments and the item they lead up to appear in strictly increasing
+ * source order, `sameLine` comments always form a contiguous run at the end
+ * of the list (nothing can sit between a same-line comment and the item
+ * without itself being on that same line).
+ *
+ * `ownLines` renders like `formatLeadingComments` used to; `inlinePrefix` is
+ * meant to be prepended directly to the item's own rendered line (already
+ * includes a trailing space per comment, or `''` when there is none).
+ */
+export function splitLeadingComments(
   item: Commented,
   indent: string,
   style?: 'c-style' | 'cdn-style' | undefined
-): string[] {
-  return (item.comments?.leading ?? []).map(
-    (comment) => indent + convertCommentText(comment, style)
-  );
+): { ownLines: string[]; inlinePrefix: string } {
+  const leading = item.comments?.leading ?? [];
+  let splitAt = leading.length;
+  while (splitAt > 0 && leading[splitAt - 1]!.sameLine) splitAt--;
+  return {
+    ownLines: leading
+      .slice(0, splitAt)
+      .map((comment) => indent + convertCommentText(comment, style)),
+    inlinePrefix: leading
+      .slice(splitAt)
+      .map((comment) => convertCommentText(comment, style) + ' ')
+      .join(''),
+  };
 }
 
 export function formatTrailingComments(
@@ -308,19 +331,20 @@ export function serializeContainer(p: {
     if (preserveBlankLines && p.entryLeadingNode(i).blankLineBefore) {
       lines.push('');
     }
+    let inlinePrefix = '';
     if (preserveComments) {
-      lines.push(
-        ...formatLeadingComments(
-          p.entryLeadingNode(i),
-          childIndent,
-          commentStyle
-        )
+      const { ownLines, inlinePrefix: prefix } = splitLeadingComments(
+        p.entryLeadingNode(i),
+        childIndent,
+        commentStyle
       );
+      lines.push(...ownLines);
+      inlinePrefix = prefix;
     }
     const sep = i < count - 1 ? multilineSep : trailSep;
     const entry = probed?.[i] ?? p.renderEntry(i, colSep);
     lines.push(
-      `${childIndent}${entry}${sep}${preserveComments ? p.entryTrailing(i, commentStyle) : ''}`
+      `${childIndent}${inlinePrefix}${entry}${sep}${preserveComments ? p.entryTrailing(i, commentStyle) : ''}`
     );
   }
   if (preserveComments)
@@ -369,9 +393,14 @@ export function renderSingleChildWithComments(
     typeof preserveComments === 'string' ? preserveComments : undefined;
   const childIndent = indentOf(indentStr!, depth + 1);
   const closeIndent = indentOf(indentStr!, depth);
+  const { ownLines, inlinePrefix } = splitLeadingComments(
+    child,
+    childIndent,
+    commentStyle
+  );
   const lines = [
-    ...formatLeadingComments(child, childIndent, commentStyle),
-    `${childIndent}${renderChild(depth + 1)}${formatTrailingComments(child, commentStyle)}`,
+    ...ownLines,
+    `${childIndent}${inlinePrefix}${renderChild(depth + 1)}${formatTrailingComments(child, commentStyle)}`,
     ...formatDanglingComments(wrapper, childIndent, commentStyle),
   ];
   return `${openChar}\n${lines.join('\n')}\n${closeIndent}${closeChar}`;
