@@ -4,6 +4,7 @@ import type {
   ToJSOptions,
   ToHexDumpOptions,
   ToCBOROptions,
+  CborComment,
   CborComments,
   DecodeWarning,
   ParseWarning,
@@ -18,6 +19,47 @@ export interface AnnotatedLine {
   depth: number;
   hex: string;
   comment: string;
+}
+
+export interface AppSeqEncodingEdit {
+  /** Start/end offsets within appSeqSource of an existing indicator. */
+  start: number;
+  end: number;
+  /** Replacement used by encodingIndicators: 'always'. */
+  always: string;
+  /** Replacement used by encodingIndicators: 'never'. */
+  never: string;
+}
+
+/**
+ * Original literal features used by the sole item inside a preserved
+ * `prefix<<item>>` source. They let serialization honour an explicitly
+ * disabled sibling `preserve*` option instead of replaying that literal
+ * verbatim through `preserveAppSequence`.
+ */
+export interface AppSeqSourceFeatures {
+  byteString?: boolean;
+  textString?: boolean;
+  rawString?: boolean;
+  concatenation?: boolean;
+}
+
+/**
+ * Fill in every `preserve*` option left `undefined` with `true`, for
+ * `ToCDNOptions.preserveAll`. An option the caller explicitly set
+ * (including to `false`) is left untouched.
+ */
+function expandPreserveAll(options: ToCDNOptions): ToCDNOptions {
+  return {
+    ...options,
+    preserveComments: options.preserveComments ?? true,
+    preserveByteString: options.preserveByteString ?? true,
+    preserveRawString: options.preserveRawString ?? true,
+    preserveTextString: options.preserveTextString ?? true,
+    preserveConcatenation: options.preserveConcatenation ?? true,
+    preserveNumberFormat: options.preserveNumberFormat ?? true,
+    preserveAppSequence: options.preserveAppSequence ?? true,
+  };
 }
 
 /**
@@ -47,6 +89,67 @@ export abstract class CborItem {
    * They do not affect CBOR bytes or JS conversion.
    */
   comments?: CborComments;
+
+  /**
+   * Original application-string/-sequence source text — `prefix'...'`,
+   * `` prefix`...` ``, or `prefix<<...>>` — set by the parser when the
+   * resolving extension declares `preserveAppSeqSource: 'optional'`. A
+   * subclass's own `_toCDN()` override may check this (gated behind
+   * `ToCDNOptions.preserveAppSequence`) to round-trip the exact original
+   * spelling instead of always regenerating `prefix'...'` notation from the
+   * resolved value. Left `undefined` for nodes not parsed from one of these
+   * forms.
+   */
+  appSeqSource?: string;
+
+  /**
+   * Comments contained within `appSeqSource`, with `start`/`end` offsets
+   * relative to that string. These spans allow comment markers to be
+   * converted (or comments to be removed) without regenerating and thereby
+   * losing the original application-string/-sequence notation.
+   */
+  appSeqComments?: CborComment[];
+
+  /**
+   * Source edits for encoding indicators contained in a raw-tag
+   * `appSeqSource`. Includes zero-width edits where an indicator was absent
+   * so `encodingIndicators: 'always'` can insert one without regenerating
+   * the surrounding source.
+   */
+  appSeqEncodingEdits?: AppSeqEncodingEdit[];
+
+  /**
+   * `false` when `appSeqEncodingEdits` does not cover every encoding
+   * indicator nested inside a raw-tag `appSeqSource` — i.e. its content
+   * contains a node type `collectContentEncodingEdits` doesn't know how to
+   * edit (e.g. a `CborMap`, `CborTag`, or indefinite-length string inside an
+   * `ip` array). Left `undefined` (treated as complete) when coverage is
+   * exhaustive, which holds for every tag content type `dt` accepts and for
+   * most content `ip` accepts. When `false`, `decideTaggedAppSeqRendering`
+   * must not choose the `'source'` decision under `encodingIndicators !==
+   * 'auto'`, since surgical span edits would silently leave the uncovered
+   * node's indicator unchanged; it falls back to `'structural'` instead.
+   */
+  appSeqEncodingEditsComplete?: boolean;
+
+  /**
+   * For an `appSeqSource` parsed from `prefix<<item>>` notation: the offset
+   * within `appSeqSource`, relative to its own start, where the sole inner
+   * item's own consumption ends — i.e. right after its own encoding
+   * indicator, if it had one. Lets `adjustAppSeqIndicator` locate and strip
+   * that inner indicator exactly, regardless of what (whitespace, a
+   * trailing comma, a comment) separates it from the closing `>>`, rather
+   * than pattern-matching text near `>>`. `undefined` when `appSeqSource`
+   * isn't `<<...>>` notation, or wasn't captured with a single inner item.
+   */
+  appSeqInnerEnd?: number;
+
+  /**
+   * Literal-preservation features present in the sole item of a captured
+   * `prefix<<item>>` source. Used to resolve explicitly disabled
+   * `preserve*` options without treating unrelated options as conflicts.
+   */
+  appSeqSourceFeatures?: AppSeqSourceFeatures;
 
   /**
    * Validity violations detected while decoding or parsing this node.
@@ -85,7 +188,8 @@ export abstract class CborItem {
 
   /** Serialize this node to a CDN text string. */
   toCDN(options?: ToCDNOptions): string {
-    const merged = this._defaults ? { ...this._defaults, ...options } : options;
+    let merged = this._defaults ? { ...this._defaults, ...options } : options;
+    if (merged?.preserveAll) merged = expandPreserveAll(merged);
     const body = this._toCDN(merged, 0);
     const pv = merged?.preserveComments;
     // Single-line output strips comments: `#`/`//` comments need a newline

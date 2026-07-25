@@ -137,8 +137,10 @@ export function wirePopoverToggle(buttonId: string, popoverId: string): void {
 /**
  * Checkboxes for layout-dependent `ToCDNOptions` that the library ignores in
  * single-line output (Indent: Compact); they are greyed out to make that
- * visible. `opt-raw-string` is deliberately excluded: single-line raw
- * spellings are still kept in compact mode, only multi-line ones fall back.
+ * visible. `opt-raw-string`, `opt-text-string`, `opt-byte-string`, and
+ * `opt-number-format` are deliberately excluded: single-line spellings are
+ * still kept in compact mode (only multi-line raw/byte-string spellings
+ * fall back).
  */
 const LAYOUT_OPTION_IDS = [
   'opt-split-newline',
@@ -148,8 +150,51 @@ const LAYOUT_OPTION_IDS = [
   'opt-concat',
 ] as const;
 
+/**
+ * Checkboxes for the `preserve*` family of `ToCDNOptions`, mirrored by the
+ * "Preserve everything" master checkbox (`opt-preserve-all`).
+ */
+const PRESERVE_OPTION_IDS = [
+  'opt-comments',
+  'opt-concat',
+  'opt-byte-string',
+  'opt-raw-string',
+  'opt-text-string',
+  'opt-number-format',
+  'opt-app-sequence',
+] as const;
+
+/** Reflect the current state of the individual preserve-family checkboxes
+ * onto the "Preserve everything" master checkbox (checked / unchecked /
+ * indeterminate). */
+function syncPreserveAllCheckbox(): void {
+  const master = document.getElementById(
+    'opt-preserve-all'
+  ) as HTMLInputElement;
+  const boxes = PRESERVE_OPTION_IDS.map(
+    (id) => document.getElementById(id) as HTMLInputElement
+  );
+  const checkedCount = boxes.filter((box) => box.checked).length;
+  master.checked = checkedCount === boxes.length;
+  master.indeterminate = checkedCount > 0 && checkedCount < boxes.length;
+}
+
 export function initFormatPopover(): void {
   wirePopoverToggle('format-opts-btn', 'format-popover');
+  wirePopoverToggle('preserve-opts-btn', 'preserve-popover');
+  // Clicking the outer toggle stops propagation before the document-level
+  // "close" listener registered above ever sees it (see wirePopoverToggle),
+  // so the submenu would otherwise stay open behind a hidden format-popover.
+  // Force it closed every time format-popover itself is toggled.
+  document.getElementById('format-opts-btn')!.addEventListener('click', () => {
+    const preservePopover = document.getElementById(
+      'preserve-popover'
+    ) as HTMLElement;
+    preservePopover.hidden = true;
+    document
+      .getElementById('preserve-opts-btn')!
+      .setAttribute('aria-expanded', 'false');
+  });
   const indentSelect = document.getElementById(
     'opt-indent'
   ) as HTMLSelectElement;
@@ -161,6 +206,23 @@ export function initFormatPopover(): void {
   };
   indentSelect.addEventListener('change', syncLayoutOptions);
   syncLayoutOptions();
+
+  const preserveAll = document.getElementById(
+    'opt-preserve-all'
+  ) as HTMLInputElement;
+  preserveAll.addEventListener('change', () => {
+    for (const id of PRESERVE_OPTION_IDS) {
+      (document.getElementById(id) as HTMLInputElement).checked =
+        preserveAll.checked;
+    }
+    preserveAll.indeterminate = false;
+  });
+  for (const id of PRESERVE_OPTION_IDS) {
+    document
+      .getElementById(id)!
+      .addEventListener('change', syncPreserveAllCheckbox);
+  }
+  syncPreserveAllCheckbox();
 }
 
 export function readFormatOptions(): FromCDNOptions & ToCDNOptions {
@@ -189,8 +251,18 @@ export function readFormatOptions(): FromCDNOptions & ToCDNOptions {
     options.preserveComments = true;
   if ((document.getElementById('opt-concat') as HTMLInputElement).checked)
     options.preserveConcatenation = true;
+  if ((document.getElementById('opt-byte-string') as HTMLInputElement).checked)
+    options.preserveByteString = true;
   if ((document.getElementById('opt-raw-string') as HTMLInputElement).checked)
     options.preserveRawString = true;
+  if ((document.getElementById('opt-text-string') as HTMLInputElement).checked)
+    options.preserveTextString = true;
+  if (
+    (document.getElementById('opt-number-format') as HTMLInputElement).checked
+  )
+    options.preserveNumberFormat = true;
+  if ((document.getElementById('opt-app-sequence') as HTMLInputElement).checked)
+    options.preserveAppSequence = true;
   if (!(document.getElementById('opt-app-strings') as HTMLInputElement).checked)
     options.appStrings = false;
   return options;

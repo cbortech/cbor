@@ -76,17 +76,39 @@ export interface CborExtension {
   ): CborItem;
 
   /**
-   * When `true`, the CDN parser wraps the result of `parseAppSequence` in a
-   * `CborAppSeqResult` so that `toCDN()` round-trips the original
-   * `prefix<<...>>` notation when `appStrings !== false`. In single-line
-   * output (no `indent`), a source spelling that spans multiple lines falls
-   * back to serializing the resolved item instead.
+   * Controls how the CDN parser preserves the original application-string
+   * / -sequence / raw-tag source text — `prefix'...'`, `` prefix`...` ``,
+   * `prefix<<...>>`, or a raw tag literal `N(...)` resolved via `parseTag`
+   * — for round-tripping through `toCDN()`.
    *
-   * Extensions whose result is already a subclass that handles source
-   * preservation itself (e.g. `CborFloat` via its `ednSource` property) should
-   * leave this unset.
+   * - `true`: the parser wraps the result of `parseAppSequence` (only —
+   *   `parseAppString` and `parseTag` results are unaffected) in a
+   *   `CborAppSeqResult`, which round-trips the original `<<...>>` notation
+   *   unconditionally whenever `appStrings !== false` (no extra option
+   *   needed). Use this when the result has no dedicated subclass whose
+   *   identity callers rely on (e.g. `instanceof` checks) — the wrapper
+   *   changes the returned node's type.
+   * - `'optional'`: for `parseAppString`, `parseAppSequence`, and `parseTag`
+   *   results alike, the parser instead sets `appSeqSource` directly on the
+   *   *same* result node (preserving its class/identity) and leaves it to
+   *   the node's own `_toCDN()` override to decide whether to use it — by
+   *   convention, only when `ToCDNOptions.preserveAppSequence` is set, so
+   *   the default output keeps regenerating `prefix'...'` form from the
+   *   resolved value. This covers a `` prefix`...` `` (backtick) source, a
+   *   non-canonically-spelled `prefix'...'` source, and a raw tag literal
+   *   (e.g. `1(1749772800)`) that would otherwise be upgraded to
+   *   `prefix'...'` notation — not just `<<...>>`. Use this when the result
+   *   is a dedicated subclass whose default behavior is to regenerate its
+   *   notation from the resolved value on every call.
+   * - `undefined` (default): neither happens. Extensions whose result
+   *   already handles source preservation itself (e.g. `CborFloat` via its
+   *   own `ednSource` property) should leave this unset.
+   *
+   * In single-line output (no `indent`), a source spelling that spans
+   * multiple lines always falls back to serializing the resolved item,
+   * regardless of mode.
    */
-  readonly preserveAppSeqSource?: boolean;
+  readonly preserveAppSeqSource?: boolean | 'optional';
 
   /**
    * Called when a `CborTag` is encountered during CBOR decode (`fromCBOR`)

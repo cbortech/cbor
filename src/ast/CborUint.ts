@@ -15,10 +15,17 @@ import {
 export class CborUint extends CborItem {
   readonly value: bigint;
   encodingWidth: EncodingWidth | undefined;
+  /**
+   * Original CDN digit spelling (base + digits, without the encoding-
+   * indicator suffix), set by the parser when this value came from CDN
+   * text. Used by `_toCDN()` to round-trip the literal's base (`0xff`,
+   * `0o377`, `0b101`, decimal) when `preserveNumberFormat` is set.
+   */
+  readonly ednSource?: string;
 
   constructor(
     value: number | bigint,
-    options?: { encodingWidth?: EncodingWidth }
+    options?: { encodingWidth?: EncodingWidth; ednSource?: string }
   ) {
     super();
     this.value = BigInt(value);
@@ -27,6 +34,7 @@ export class CborUint extends CborItem {
     if (this.value > 0xffff_ffff_ffff_ffffn)
       throw new RangeError('CborUint value exceeds maximum uint64');
     this.encodingWidth = options?.encodingWidth;
+    this.ednSource = options?.ednSource;
   }
 
   override _encodeTo(writer: CborWriter, _options?: ToCBOROptions): void {
@@ -37,6 +45,9 @@ export class CborUint extends CborItem {
     const suffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(this.value)
     );
+    if (options?.preserveNumberFormat && this.ednSource !== undefined) {
+      return this.ednSource + suffix;
+    }
     const v = this.value;
     switch (options?.intFormat) {
       case 'hex':

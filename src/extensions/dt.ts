@@ -24,6 +24,9 @@ import {
   resolveEiSuffix,
   canonicalEncodingWidth,
   floatSuffix,
+  decideTaggedAppSeqRendering,
+  adjustRawAppSeqSource,
+  adjustAppSeqIndicator,
 } from '../cdn/serialize-utils';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -161,7 +164,7 @@ export const TAG_EPOCH = 1n;
 export class CborEpochDtExtUint extends CborUint {
   constructor(
     value: number | bigint,
-    options?: { encodingWidth?: EncodingWidth }
+    options?: { encodingWidth?: EncodingWidth; ednSource?: string }
   ) {
     super(value, options);
   }
@@ -171,6 +174,20 @@ export class CborEpochDtExtUint extends CborUint {
     const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(this.value)
     );
+    const decision = decideTaggedAppSeqRendering(
+      options,
+      this.appSeqSource,
+      undefined,
+      this.appSeqSourceFeatures
+    );
+    if (decision === 'adjusted')
+      return adjustAppSeqIndicator(
+        this.appSeqSource!,
+        eiSuffix,
+        options,
+        this.appSeqInnerEnd,
+        this.appSeqComments
+      );
     return `${PREFIX_DT}'${epochToRfc3339(Number(this.value))}'${eiSuffix}`;
   }
 }
@@ -182,7 +199,7 @@ export class CborEpochDtExtUint extends CborUint {
 export class CborEpochDtExtNint extends CborNint {
   constructor(
     value: number | bigint,
-    options?: { encodingWidth?: EncodingWidth }
+    options?: { encodingWidth?: EncodingWidth; ednSource?: string }
   ) {
     super(value, options);
   }
@@ -192,6 +209,20 @@ export class CborEpochDtExtNint extends CborNint {
     const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(this.argument)
     );
+    const decision = decideTaggedAppSeqRendering(
+      options,
+      this.appSeqSource,
+      undefined,
+      this.appSeqSourceFeatures
+    );
+    if (decision === 'adjusted')
+      return adjustAppSeqIndicator(
+        this.appSeqSource!,
+        eiSuffix,
+        options,
+        this.appSeqInnerEnd,
+        this.appSeqComments
+      );
     return `${PREFIX_DT}'${epochToRfc3339(Number(this.value))}'${eiSuffix}`;
   }
 }
@@ -203,7 +234,10 @@ export class CborEpochDtExtNint extends CborNint {
 export class CborEpochDtExtFloat extends CborFloat {
   constructor(
     value: number,
-    options?: { precision?: 'half' | 'single' | 'double' }
+    options?: {
+      precision?: 'half' | 'single' | 'double';
+      literalSource?: string;
+    }
   ) {
     super(value, options);
   }
@@ -217,6 +251,20 @@ export class CborEpochDtExtFloat extends CborFloat {
       autoSelected,
       options?.encodingIndicators ?? 'auto'
     );
+    const decision = decideTaggedAppSeqRendering(
+      options,
+      this.appSeqSource,
+      undefined,
+      this.appSeqSourceFeatures
+    );
+    if (decision === 'adjusted')
+      return adjustAppSeqIndicator(
+        this.appSeqSource!,
+        eiSuffix,
+        options,
+        this.appSeqInnerEnd,
+        this.appSeqComments
+      );
     return `${PREFIX_DT}'${epochToRfc3339(this.value)}'${eiSuffix}`;
   }
 }
@@ -242,6 +290,34 @@ export class CborTaggedEpochDtExt extends CborTag {
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     if (options?.appStrings === false) return super._toCDN(options, depth);
+    const decision = decideTaggedAppSeqRendering(
+      options,
+      this.appSeqSource,
+      this.ednSource,
+      this.appSeqSourceFeatures,
+      this.appSeqEncodingEditsComplete
+    );
+    if (decision === 'verbatim') return this.appSeqSource!;
+    if (decision === 'source')
+      return adjustRawAppSeqSource(
+        this.appSeqSource!,
+        options,
+        this.appSeqComments,
+        this.appSeqEncodingEdits
+      );
+    if (decision === 'structural')
+      return super._toCDN({ ...options, appStrings: false }, depth);
+    const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
+      canonicalEncodingWidth(TAG_EPOCH)
+    );
+    if (decision === 'adjusted')
+      return adjustAppSeqIndicator(
+        this.appSeqSource!,
+        eiSuffix,
+        options,
+        this.appSeqInnerEnd,
+        this.appSeqComments
+      );
     // Per §2.3.1, DT'...'_N encodes only the tag number's width.
     // If the inner content has non-canonical encoding, fall back to generic tag
     // notation so the inner EI (e.g. dt'...'_3) is not silently discarded.
@@ -255,9 +331,6 @@ export class CborTaggedEpochDtExt extends CborTag {
     if (innerIsNonCanonical)
       return super._toCDN({ ...options, appStrings: false }, depth);
     const epochSec = c instanceof CborFloat ? c.value : Number(c.value);
-    const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
-      canonicalEncodingWidth(TAG_EPOCH)
-    );
     return `${PREFIX_DT_TAGGED}'${epochToRfc3339(epochSec)}'${eiSuffix}`;
   }
 }
@@ -311,6 +384,12 @@ export function createDtExtension(options?: {
   const ext: CborExtension = {
     appStringPrefixes: [PREFIX_DT, PREFIX_DT_TAGGED],
     tagNumbers: [TAG_EPOCH],
+    // dt/DT results always have a dedicated subclass (CborEpochDtExt* /
+    // CborTaggedEpochDtExt) that regenerates its notation by default;
+    // 'optional' preserves the <<...>> spelling only when
+    // ToCDNOptions.preserveAppSequence is set, without changing the
+    // returned node's class/identity (see preservedAppSeqSpelling above).
+    preserveAppSeqSource: 'optional',
 
     parseAppString(
       prefix: string,
@@ -338,16 +417,20 @@ export function createDtExtension(options?: {
       if (value instanceof CborUint) {
         content = new CborEpochDtExtUint(value.value, {
           encodingWidth: value.encodingWidth,
+          ednSource: value.ednSource,
         });
       } else if (value instanceof CborNint) {
         content = new CborEpochDtExtNint(value.value, {
           encodingWidth: value.encodingWidth,
+          ednSource: value.ednSource,
         });
       } else if (value instanceof CborFloat) {
         // Always preserve as float to avoid losing the original CBOR encoding
         // type (e.g. float64(1.0) must not silently become uint(1)).
-        content = new CborEpochDtExtFloat(value.value);
-        if (value.precision !== undefined) content.precision = value.precision;
+        content = new CborEpochDtExtFloat(value.value, {
+          precision: value.precision,
+          literalSource: value.literalSource,
+        });
       } else {
         return undefined;
       }

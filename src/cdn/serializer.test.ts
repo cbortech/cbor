@@ -512,6 +512,60 @@ describe('CborTag.toCDN()', () => {
   });
 });
 
+describe('CborTag.toCDN() with preserveComments', () => {
+  test('leading comment on the content forces multi-line', () => {
+    const node = parseCDN('99(/note/ 42)', { preserveComments: true });
+    expect(toCDN(node, { indent: 2, preserveComments: true })).toBe(
+      '99(\n  /note/\n  42\n)'
+    );
+  });
+
+  test('c-style / cdn-style normalise the marker', () => {
+    const node = parseCDN('99(/note/ 42)', { preserveComments: true });
+    expect(toCDN(node, { indent: 2, preserveComments: 'c-style' })).toBe(
+      '99(\n  /*note*/\n  42\n)'
+    );
+    const node2 = parseCDN('99(# note\n 42)', { preserveComments: true });
+    expect(toCDN(node2, { indent: 2, preserveComments: 'cdn-style' })).toBe(
+      '99(\n  # note\n  42\n)'
+    );
+  });
+
+  test('trailing comment on the content stays on its line', () => {
+    const node = parseCDN('99(42 /trailing/)', { preserveComments: true });
+    expect(toCDN(node, { indent: 2, preserveComments: true })).toBe(
+      '99(\n  42 /trailing/\n)'
+    );
+  });
+
+  test('dangling comment (own line, nothing after it) is emitted before the close paren', () => {
+    const node = parseCDN('99(\n  42\n  # dangling\n)', {
+      preserveComments: true,
+    });
+    expect(toCDN(node, { indent: 2, preserveComments: true })).toBe(
+      '99(\n  42\n  # dangling\n)'
+    );
+  });
+
+  test('preserveComments: false drops the comment (no multi-line forced)', () => {
+    const node = parseCDN('99(/note/ 42)', { preserveComments: true });
+    expect(toCDN(node, { indent: 2, preserveComments: false })).toBe('99(42)');
+    expect(toCDN(node, { indent: 2 })).toBe('99(42)');
+  });
+
+  test('no comments at all: unaffected, including nested multi-line content', () => {
+    const node = parseCDN('12345({"a":1,"b":[1,2,3]})');
+    expect(toCDN(node, { indent: 2 })).toBe(
+      '12345({\n  "a": 1,\n  "b": [\n    1,\n    2,\n    3\n  ]\n})'
+    );
+  });
+
+  test('no effect without indent (compact single-line, comments stripped as usual)', () => {
+    const node = parseCDN('99(/note/ 42)', { preserveComments: true });
+    expect(toCDN(node, { preserveComments: true })).toBe('99(42)');
+  });
+});
+
 // ─── Floats ───────────────────────────────────────────────────────────────────
 
 describe('CborFloat.toCDN()', () => {
