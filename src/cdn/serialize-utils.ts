@@ -44,6 +44,7 @@ export function joinConcatParts(
 
 export interface Commented {
   comments?: CborComments;
+  blankLineBefore?: boolean;
 }
 
 export function hasPreservedComments(item: Commented): boolean {
@@ -179,10 +180,12 @@ export function resolveSeparators(
  * comments — line comments can only be terminated by a newline.
  *
  * Entries are accessed through per-index callbacks (not materialised entry
- * objects) so the common no-comments path allocates nothing per entry.
- * `hasEntryComments`, `entryLeadingNode`, and `entryTrailing` are consulted
- * only when `preserveComments` is set.  `renderEntry` receives the resolved
- * `colSep` (': ' or ':' depending on compact mode) for rendering map pairs.
+ * objects) so the common no-comments/no-blank-line path allocates nothing
+ * per entry. `hasEntryComments` and `entryTrailing` are consulted only when
+ * `preserveComments` is set; `entryLeadingNode` is also consulted when
+ * `preserveBlankLines` is set, independently of `preserveComments`, to read
+ * its `blankLineBefore` flag. `renderEntry` receives the resolved `colSep`
+ * (': ' or ':' depending on compact mode) for rendering map pairs.
  */
 export function serializeContainer(p: {
   node: Commented;
@@ -218,6 +221,17 @@ export function serializeContainer(p: {
     indentStr !== null &&
     preserveComments &&
     (hasContainerLayoutComments(p.node) || p.hasEntryComments());
+  const preserveBlankLines =
+    indentStr !== null && !!options?.preserveBlankLines;
+  let hasBlankLines = false;
+  if (preserveBlankLines) {
+    for (let i = 0; i < count; i++) {
+      if (p.entryLeadingNode(i).blankLineBefore) {
+        hasBlankLines = true;
+        break;
+      }
+    }
+  }
   const { inlineSep, multilineSep, trailSep, colSep } = resolveSeparators(
     options,
     indentStr === null
@@ -257,7 +271,12 @@ export function serializeContainer(p: {
   // Entries rendered while probing are reused below if the probe fails, so a
   // node is never serialized more than once per parent render.
   let probed: string[] | null = null;
-  if (options?.inlineLeafContainers && count > 0 && !hasComments) {
+  if (
+    options?.inlineLeafContainers &&
+    count > 0 &&
+    !hasComments &&
+    !hasBlankLines
+  ) {
     const rendered: string[] = [];
     let flat = true;
     for (let i = 0; i < count; i++) {
@@ -286,6 +305,9 @@ export function serializeContainer(p: {
     : `${openChar}${eiSuffix}`;
   const lines: string[] = [];
   for (let i = 0; i < count; i++) {
+    if (preserveBlankLines && p.entryLeadingNode(i).blankLineBefore) {
+      lines.push('');
+    }
     if (preserveComments) {
       lines.push(
         ...formatLeadingComments(

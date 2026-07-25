@@ -588,7 +588,8 @@ export interface ToCDNOptions {
    * Like `JSON.stringify`, `0` and `''` are equivalent to omitting the
    * option: the output is a single line. Single-line output is guaranteed
    * to contain no newlines; layout-dependent options (`preserveComments`,
-   * `splitCdn`, `splitNewline`, `preserveConcatenation`) are ignored.
+   * `preserveBlankLines`, `splitCdn`, `splitNewline`, `preserveConcatenation`)
+   * are ignored.
    */
   indent?: number | string;
 
@@ -596,9 +597,10 @@ export interface ToCDNOptions {
    * Master switch that turns on every `preserve*` option below at once —
    * `preserveComments`, `preserveByteString`, `preserveRawString`,
    * `preserveTextString`, `preserveConcatenation`, `preserveNumberFormat`,
-   * and `preserveAppSequence` — for reformatting CDN text (e.g. on save in
-   * an editor) with minimal changes: only whitespace/indentation, plus
-   * anything an explicitly-set individual option overrides.
+   * `preserveAppSequence`, and `preserveBlankLines` — for reformatting CDN
+   * text (e.g. on save in an editor) with minimal changes: only
+   * whitespace/indentation, plus anything an explicitly-set individual
+   * option overrides.
    *
    * An option explicitly set to a value (including `false`) is left as-is;
    * `preserveAll` only fills in the ones left `undefined`. So
@@ -635,6 +637,25 @@ export interface ToCDNOptions {
    * @default false
    */
   preserveComments?: boolean | 'c-style' | 'cdn-style';
+
+  /**
+   * Re-emit a blank line above an array/map entry (or indefinite-length
+   * string chunk) that had one before it anywhere in the parsed CDN source,
+   * so paragraph-like groupings of entries survive a reformat. At most one
+   * blank line is ever emitted per gap, regardless of how many blank lines
+   * were originally there.
+   *
+   * Detection is based purely on entry source positions — it does not
+   * require `preserveComments` and is unaffected by whether comments are
+   * emitted.
+   *
+   * Only effective when `indent` enables pretty-printing. A container with
+   * a preserved blank line is always emitted one-entry-per-line, the same
+   * as a container with preserved comments (see `inlineLeafContainers`).
+   *
+   * @default false
+   */
+  preserveBlankLines?: boolean;
 
   /**
    * Re-emit byte string literals parsed from CDN using their original source

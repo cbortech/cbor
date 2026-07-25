@@ -253,6 +253,25 @@ function parseFloatToken(
   return { value: parseFloat(numStr), precision };
 }
 
+// ─── Blank-line tracking ─────────────────────────────────────────────────────
+
+/**
+ * A blank line is a line containing only whitespace between two other lines
+ * — i.e. two newlines with nothing but horizontal whitespace between them.
+ * Applied to the raw gap between one container entry and the next
+ * (comments and all), so a blank line is detected regardless of whether it
+ * sits before, after, or inside a leading comment block.
+ */
+const BLANK_LINE_RE = /\r?\n[ \t]*\r?\n/;
+
+function hasBlankLineBetween(
+  text: string,
+  start: number,
+  end: number
+): boolean {
+  return BLANK_LINE_RE.test(text.slice(start, end));
+}
+
 // ─── Comment attachment ──────────────────────────────────────────────────────
 
 interface NodeInfo {
@@ -1486,6 +1505,7 @@ class CDNParser {
     // Rescue setup warnings before inner parseValue() calls drain them into child nodes.
     const setupWarnings = this._pendingWarnings.splice(0);
     const items: CborItem[] = [];
+    let blankLineBoundary = this.t.lastEndOffset;
     while (this.t.peek().type !== 'RBRACKET') {
       if (items.length > 0) {
         if (this.t.peek().type === 'COMMA') {
@@ -1498,7 +1518,11 @@ class CDNParser {
           );
         }
       }
-      items.push(this.parseValue());
+      const item = this.parseValue();
+      if (hasBlankLineBetween(this.t.source, blankLineBoundary, item.start!))
+        item.blankLineBefore = true;
+      blankLineBoundary = item.end!;
+      items.push(item);
     }
     this.expect('RBRACKET');
     if (encodingWidth !== undefined && eiTok !== undefined) {
@@ -1543,6 +1567,7 @@ class CDNParser {
     // Rescue setup warnings before inner parseValue() calls drain them into child nodes.
     const setupWarnings = this._pendingWarnings.splice(0);
     const entries: [CborItem, CborItem][] = [];
+    let blankLineBoundary = this.t.lastEndOffset;
     while (this.t.peek().type !== 'RBRACE') {
       if (entries.length > 0) {
         if (this.t.peek().type === 'COMMA') {
@@ -1556,8 +1581,11 @@ class CDNParser {
         }
       }
       const key = this.parseValue();
+      if (hasBlankLineBetween(this.t.source, blankLineBoundary, key.start!))
+        key.blankLineBefore = true;
       this.expect('COLON');
       const val = this.parseValue();
+      blankLineBoundary = val.end!;
       entries.push([key, val]);
     }
     this.expect('RBRACE');
@@ -1606,6 +1634,7 @@ class CDNParser {
     const setupWarnings = this._pendingWarnings.splice(0);
 
     const chunks: CborItem[] = [];
+    let blankLineBoundary = this.t.lastEndOffset;
     while (this.t.peek().type !== 'RPAREN') {
       if (chunks.length > 0) {
         if (this.t.peek().type === 'COMMA') {
@@ -1618,7 +1647,11 @@ class CDNParser {
           );
         }
       }
-      chunks.push(this.parseValue());
+      const chunk = this.parseValue();
+      if (hasBlankLineBetween(this.t.source, blankLineBoundary, chunk.start!))
+        chunk.blankLineBefore = true;
+      blankLineBoundary = chunk.end!;
+      chunks.push(chunk);
     }
     this.expect('RPAREN');
 

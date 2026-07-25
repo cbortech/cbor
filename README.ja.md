@@ -435,6 +435,45 @@ CBOR.format('DT`1969-07-21T02:56:16Z`', { preserveAppSequence: true });
 // "DT`1969-07-21T02:56:16Z`"
 ```
 
+### 空行を保持する
+
+デフォルトでは、`CBOR.format()` は配列・マップの要素間(および `(_ ...)`
+のチャンク間)の空行を再シリアライズ時に取り除きます。`preserveBlankLines`
+を指定すると、元のソースでその要素の前のどこかに空行があった場合、要素の
+直前に空行を 1 行だけ再出力します。要素をパラグラフのようにまとめる元の
+見た目を、フォーマット後も保てます。元の空行が何行連続していても、出力
+されるのは常に 1 行だけです。判定は要素の位置だけに基づいており、
+`preserveComments` は不要で、コメントを出力するかどうかにも影響されません。
+`indent` を指定して整形出力する場合のみ効果があり、空行を保持する
+コンテナは `inlineLeafContainers` が有効でも常に 1 要素 1 行で出力されます。
+`preserveAll` にも含まれます。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const src = `[
+  1,
+  2,
+
+  3
+]`;
+
+CBOR.format(src, { indent: 2 });
+// [
+//   1,
+//   2,
+//   3
+// ]
+
+CBOR.format(src, { indent: 2, preserveBlankLines: true });
+// [
+//   1,
+//   2,
+//
+//   3
+// ]
+```
+
 ### 変更を最小限にとどめてフォーマットする
 
 `preserveAll` を指定すると、すべての `preserve*` 系オプションが一括で

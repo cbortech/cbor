@@ -585,6 +585,44 @@ describe('CBOR.format()', () => {
     );
   });
 
+  test('preserves blank lines between array/map entries when requested', () => {
+    const src = '[\n  1,\n  2,\n\n  3,\n  4\n]';
+    expect(CBOR.format(src, { indent: 2 })).toBe('[\n  1,\n  2,\n  3,\n  4\n]');
+    expect(CBOR.format(src, { indent: 2, preserveBlankLines: true })).toBe(src);
+
+    const mapSrc = '{\n  "a": 1,\n\n  "b": 2\n}';
+    expect(CBOR.format(mapSrc, { indent: 2, preserveBlankLines: true })).toBe(
+      mapSrc
+    );
+  });
+
+  test('preserveBlankLines collapses multiple blank lines to one, including before the first entry', () => {
+    expect(
+      CBOR.format('[\n\n1,\n\n\n2\n]', { indent: 2, preserveBlankLines: true })
+    ).toBe('[\n\n  1,\n\n  2\n]');
+    expect(
+      CBOR.format('[1,\n2]', { indent: 2, preserveBlankLines: true })
+    ).toBe('[\n  1,\n  2\n]');
+  });
+
+  test('preserveBlankLines has no effect on single-line output or without the option', () => {
+    const src = '[\n1,\n\n2\n]';
+    expect(CBOR.format(src, { preserveBlankLines: true })).toBe('[1,2]');
+    expect(CBOR.format(src, { indent: 2 })).toBe('[\n  1,\n  2\n]');
+  });
+
+  test('preserveAll includes preserveBlankLines', () => {
+    const src = '[\n  1,\n\n  2\n]';
+    expect(CBOR.format(src, { indent: 2, preserveAll: true })).toBe(src);
+    expect(
+      CBOR.format(src, {
+        indent: 2,
+        preserveAll: true,
+        preserveBlankLines: false,
+      })
+    ).toBe('[\n  1,\n  2\n]');
+  });
+
   test('preserves non-concatenated byte string literals when requested', () => {
     expect(CBOR.format("h'6869'", { preserveByteString: true })).toBe(
       "h'6869'"

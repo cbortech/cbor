@@ -59,6 +59,7 @@ function expandPreserveAll(options: ToCDNOptions): ToCDNOptions {
     preserveConcatenation: options.preserveConcatenation ?? true,
     preserveNumberFormat: options.preserveNumberFormat ?? true,
     preserveAppSequence: options.preserveAppSequence ?? true,
+    preserveBlankLines: options.preserveBlankLines ?? true,
   };
 }
 
@@ -89,6 +90,17 @@ export abstract class CborItem {
    * They do not affect CBOR bytes or JS conversion.
    */
   comments?: CborComments;
+
+  /**
+   * `true` when this node is an array/map entry (or indefinite-length
+   * string chunk) immediately preceded by a blank line in the parsed CDN
+   * source — set unconditionally by the parser, regardless of any
+   * `preserve*` option, mirroring `start`/`end`. Only consulted by
+   * `toCDN()` when `ToCDNOptions.preserveBlankLines` is set; otherwise
+   * ignored. Left `undefined` for nodes not parsed as a container entry, or
+   * with no blank line before them.
+   */
+  blankLineBefore?: boolean;
 
   /**
    * Original application-string/-sequence source text — `prefix'...'`,
