@@ -937,22 +937,34 @@ describe('CBOR.format()', () => {
     ).toBe('`[1,2]` +\n  ""');
   });
 
-  test('preserves raw string parts around ellipsis', () => {
+  test('preserves raw string parts around ellipsis, always single-line', () => {
+    // Every `+`-joined fragment stays on its original boundary — including
+    // "b" and "c", which aren't raw strings and so have no source spelling
+    // of their own, but still sit on the correct side of the ellipsis and
+    // don't get merged into their raw-string neighbor. Unlike a real (non-
+    // elision) `+` concatenation, this is indent-independent: `indent` only
+    // changes whether the *value* is pretty-printed at all, not whether
+    // these boundaries are shown.
+    const expected = '`a` + "b" + ... + "c" + ``d`e``';
     expect(
       CBOR.format('`a` + "b" + ... + "c" + ``d`e``', {
         indent: 2,
         preserveConcatenation: true,
         preserveRawString: true,
       })
-    ).toBe('`a` +\n  "b" +\n  ... +\n  "c" +\n  ``d`e``');
-    // Single-line output joins each fragment, but the ellipsis itself
-    // (not a layout feature) is still ` + `-joined between fragments.
+    ).toBe(expected);
     expect(
       CBOR.format('`a` + "b" + ... + "c" + ``d`e``', {
         preserveConcatenation: true,
         preserveRawString: true,
       })
-    ).toBe('"ab" + ... + "cd`e"');
+    ).toBe(expected);
+  });
+
+  test('without preserveConcatenation, adjacent fragments around an ellipsis still merge', () => {
+    expect(CBOR.format('`a` + "b" + ... + "c" + ``d`e``')).toBe(
+      '"ab" + ... + "cd`e"'
+    );
   });
 
   test('joins text string concatenation by default', () => {

@@ -609,6 +609,27 @@ const MISSING_EXTENSION_HINTS: ReadonlyMap<string, string> = new Map([
   ['float', builtinDisabledHint('float')],
 ]);
 
+/**
+ * One atom of a byte-string `+`/ellipsis chain: either a byte fragment or an
+ * ellipsis marker, tagged with whether a genuine `+` from the source
+ * precedes it (`real`) as opposed to sitting inside a single `h'xx...yy'`
+ * literal's own `...` notation. An ellipsis atom also tracks whether it came
+ * from such a literal at all (`fromByteLiteral`), regardless of its own
+ * position within it (leading, trailing, or in the middle) — as opposed to a
+ * bare standalone `...` token — and, when it did, that literal's own raw
+ * source text (`literalSource`, e.g. `h'AB...CD'` verbatim, case/whitespace/
+ * comments and all) for `preserveByteString` to round-trip. See
+ * `CDNParser._consumeByteEllipsisChain`.
+ */
+type ByteEllipsisAtom =
+  | { bytes: Uint8Array; source?: string; real: boolean }
+  | {
+      ellipsis: true;
+      real: boolean;
+      fromByteLiteral: boolean;
+      literalSource?: string;
+    };
+
 // ─── Parser ───────────────────────────────────────────────────────────────────
 
 class CDNParser {
@@ -917,7 +938,13 @@ class CDNParser {
           this.t.consume();
           items.push(this.parseValue());
         }
-        return new CborEllipsis(items);
+        // Every item here came from an explicit `+` (this generic chain has
+        // no notion of an elided-hex literal's internal `...`), so every
+        // boundary is real.
+        return new CborEllipsis(
+          items,
+          items.map(() => true)
+        );
       }
       case 'BYTES_HEX_ELIDED': {
         this.t.consume();
@@ -1277,34 +1304,65 @@ class CDNParser {
         ...(ew !== undefined ? { encodingWidth: ew } : {}),
       });
     }
+    const initial: ByteEllipsisAtom[] = [
+      { bytes: first, source: firstSource, real: false },
+    ];
+    const atoms = this._consumeByteEllipsisChain(initial);
+    return this._buildFromByteAtoms(
+      atoms,
+      this._tokenTypeToCdnEncoding(firstType)
+    );
+  }
 
-    // Concatenation chain — may include ellipsis
-    let hasEllipsis = false;
-    const parts: Array<
-      { bytes: Uint8Array; source?: string } | { ellipsis: true }
-    > = [{ bytes: first, source: firstSource }];
+  /**
+   * Parse a BYTES_HEX_ELIDED token (h'xx...yy') and any trailing + concatenation
+   * into a CborEllipsis([h'xx', 888(null), h'yy', ...]).
+   */
+  private _parseHexElidedConcat(firstTok: Token): CborEllipsis {
+    const atoms = this._consumeByteEllipsisChain(
+      this._elidedHexAtoms(firstTok.value, firstTok)
+    );
+    // Always has at least one ellipsis atom — it came from an elided token.
+    return this._buildFromByteAtoms(atoms, 'hex') as CborEllipsis;
+  }
 
+  /**
+   * Consume a `+`-chain of byte-string / `...` / `h'xx...yy'` tokens
+   * following an already-parsed first fragment, returning the flattened,
+   * source-ordered atom list (`initial` plus everything the chain adds).
+   *
+   * Each atom carries `real`: whether a genuine `+` from the source
+   * precedes it — as opposed to an ellipsis or byte segment that sits
+   * *inside* a single `h'xx...yy'` literal's own notation. Two literal
+   * tokens can only end up adjacent with no ellipsis between them by
+   * sitting across a `+` (a single elided-hex token's internal segments are
+   * always ellipsis-separated from each other), so every atom appended here
+   * — the first one from each new token, and every atom of a plain
+   * (non-elided) byte token — is real; only an elided token's *internal*
+   * segments (beyond its first) are not.
+   */
+  private _consumeByteEllipsisChain(
+    initial: ByteEllipsisAtom[]
+  ): ByteEllipsisAtom[] {
+    const atoms = initial;
     while (this.t.peek().type === 'PLUS') {
       this.t.consume(); // +
       const next = this.t.peek();
       if (next.type === 'ELLIPSIS') {
         this.t.consume();
-        parts.push({ ellipsis: true });
-        hasEllipsis = true;
+        atoms.push({ ellipsis: true, real: true, fromByteLiteral: false });
       } else if (next.type === 'BYTES_HEX_ELIDED') {
         this.t.consume();
-        const subItems = this._buildBytesElidedItems(next.value, next);
-        for (const item of subItems) {
-          if (item instanceof CborEllipsis) {
-            parts.push({ ellipsis: true });
-            hasEllipsis = true;
-          } else if (item instanceof CborByteString) {
-            parts.push({ bytes: item.value });
-          }
-        }
+        const sub = this._elidedHexAtoms(next.value, next);
+        if (sub.length > 0) sub[0]!.real = true;
+        atoms.push(...sub);
       } else if (this._isBytesToken(next.type)) {
         this.t.consume();
-        parts.push({ bytes: this._decodeBytesToken(next), source: next.raw });
+        atoms.push({
+          bytes: this._decodeBytesToken(next),
+          source: next.raw,
+          real: true,
+        });
       } else if (next.type === 'TSTR' || next.type === 'RAWSTRING') {
         // §5.1: when a byte string leads, the right-hand side must also be a
         // byte string.  Text strings are only allowed on the right of a
@@ -1315,7 +1373,7 @@ class CDNParser {
           'text string in a byte-string concatenation is not allowed; ' +
           "use a byte string literal (h'...', b64'...', or '...') instead";
         this._warnOrFail(mixMsg, next);
-        parts.push({ bytes: textEncoder.encode(next.value) });
+        atoms.push({ bytes: textEncoder.encode(next.value), real: true });
       } else {
         this._fail(
           `expected byte string after +, got ${JSON.stringify(next.value)}`,
@@ -1323,111 +1381,103 @@ class CDNParser {
         );
       }
     }
+    return atoms;
+  }
 
+  /** Flatten a single BYTES_HEX_ELIDED token's own `h'xx...yy...zz'` content
+   *  into atoms, all marked non-`real`: none of its internal segments sit
+   *  across an actual `+`. Every ellipsis atom is `fromByteLiteral: true` —
+   *  it came from this literal's own notation, regardless of where within
+   *  it (leading, trailing, or in the middle). The caller fixes up the very
+   *  first atom's `real` flag if this token itself followed a `+`. */
+  private _elidedHexAtoms(
+    hexWithEllipsis: string,
+    tok: Token
+  ): ByteEllipsisAtom[] {
+    const segments = hexWithEllipsis.split('...');
+    const atoms: ByteEllipsisAtom[] = [];
+    for (let i = 0; i < segments.length; i++) {
+      if (i > 0)
+        atoms.push({
+          ellipsis: true,
+          real: false,
+          fromByteLiteral: true,
+          literalSource: tok.raw,
+        });
+      if (segments[i].length > 0) {
+        atoms.push({ bytes: this._hexToBytes(segments[i], tok), real: false });
+      }
+    }
+    return atoms;
+  }
+
+  /**
+   * Build the final `CborByteString` (no ellipsis anywhere) or `CborEllipsis`
+   * from a flattened atom list, consolidating adjacent byte atoms with no
+   * ellipsis between them into one `CborByteString` — retaining `ednParts`
+   * for a fragment that merged multiple `real` (`+`-joined) atoms — and
+   * building a `realBoundary` array parallel to the resulting `CborEllipsis`
+   * items, so `preserveConcatenation` can tell real `+` boundaries apart
+   * from a `h'xx...yy'` literal's own internal notation regardless of where
+   * the `...` falls within it.
+   */
+  private _buildFromByteAtoms(
+    atoms: ByteEllipsisAtom[],
+    ednEncoding: 'hex' | 'base64'
+  ): CborByteString | CborEllipsis {
+    const hasEllipsis = atoms.some((a) => 'ellipsis' in a);
     if (!hasEllipsis) {
-      const byteParts = parts.map((p) =>
-        'bytes' in p ? p : { bytes: new Uint8Array(0) }
-      );
+      const byteParts = atoms as Array<{ bytes: Uint8Array; source?: string }>;
       const concat = this._concatBytes(byteParts.map((p) => p.bytes));
       const ew = this.consumeEncodingIndicator(() => BigInt(concat.length));
       return new CborByteString(concat, {
-        ednEncoding: this._tokenTypeToCdnEncoding(firstType),
+        ednEncoding,
         ednParts: byteParts,
         ...(ew !== undefined ? { encodingWidth: ew } : {}),
       });
     }
 
-    // Build 888([...]) with consolidated adjacent byte fragments
     const items: CborItem[] = [];
-    const pending: Uint8Array[] = [];
+    const realBoundary: boolean[] = [];
+    const pending: Array<{
+      bytes: Uint8Array;
+      source?: string;
+      real: boolean;
+    }> = [];
     const flushPending = () => {
       if (pending.length > 0) {
-        items.push(new CborByteString(this._concatBytes([...pending])));
+        items.push(
+          new CborByteString(this._concatBytes(pending.map((p) => p.bytes)), {
+            // A single fragment (no merge across a real `+`) still needs its
+            // own source spelling preserved — e.g. the sole byte atom
+            // adjacent to an ellipsis in `h'41' + ...` — so
+            // `preserveByteString` has something to round-trip.
+            ...(pending.length > 1
+              ? {
+                  ednParts: pending.map(({ bytes, source }) => ({
+                    bytes,
+                    source,
+                  })),
+                }
+              : { ednSource: pending[0]!.source }),
+          })
+        );
+        realBoundary.push(pending[0]!.real);
         pending.length = 0;
       }
     };
-    for (const part of parts) {
-      if ('ellipsis' in part) {
+    for (const atom of atoms) {
+      if ('ellipsis' in atom) {
         flushPending();
-        items.push(new CborEllipsis());
+        items.push(new CborEllipsis(atom.fromByteLiteral, atom.literalSource));
+        realBoundary.push(atom.real);
       } else {
-        pending.push(part.bytes);
+        pending.push(atom);
       }
     }
     flushPending();
 
-    return new CborEllipsis(items);
-  }
-
-  /**
-   * Parse a BYTES_HEX_ELIDED token (h'xx...yy') and any trailing + concatenation
-   * into a CborEllipsis([h'xx', 888(null), h'yy', ...]).
-   */
-  private _parseHexElidedConcat(firstTok: Token): CborEllipsis {
-    const items = this._buildBytesElidedItems(firstTok.value, firstTok);
-
-    while (this.t.peek().type === 'PLUS') {
-      this.t.consume(); // +
-      const next = this.t.peek();
-      if (next.type === 'ELLIPSIS') {
-        this.t.consume();
-        items.push(new CborEllipsis());
-      } else if (next.type === 'BYTES_HEX_ELIDED') {
-        this.t.consume();
-        const subItems = this._buildBytesElidedItems(next.value, next);
-        this._mergeFirstBytesItem(items, subItems);
-      } else if (this._isBytesToken(next.type)) {
-        this.t.consume();
-        const bytes = this._decodeBytesToken(next);
-        // Append to the last item if it's a CborByteString
-        const last = items[items.length - 1];
-        if (last instanceof CborByteString) {
-          items[items.length - 1] = new CborByteString(
-            this._concatBytes([last.value, bytes])
-          );
-        } else {
-          items.push(new CborByteString(bytes));
-        }
-      } else {
-        this._fail(
-          `expected byte string after +, got ${JSON.stringify(next.value)}`,
-          next
-        );
-      }
-    }
-    return new CborEllipsis(items);
-  }
-
-  private _buildBytesElidedItems(
-    hexWithEllipsis: string,
-    tok: Token
-  ): CborItem[] {
-    const segments = hexWithEllipsis.split('...');
-    const items: CborItem[] = [];
-    for (let i = 0; i < segments.length; i++) {
-      if (i > 0) items.push(new CborEllipsis());
-      if (segments[i].length > 0) {
-        items.push(new CborByteString(this._hexToBytes(segments[i], tok)));
-      }
-    }
-    return items;
-  }
-
-  private _mergeFirstBytesItem(target: CborItem[], source: CborItem[]): void {
-    if (source.length === 0) return;
-    const lastTarget = target[target.length - 1];
-    const firstSource = source[0];
-    if (
-      lastTarget instanceof CborByteString &&
-      firstSource instanceof CborByteString
-    ) {
-      target[target.length - 1] = new CborByteString(
-        this._concatBytes([lastTarget.value, firstSource.value])
-      );
-      target.push(...source.slice(1));
-    } else {
-      target.push(...source);
-    }
+    return new CborEllipsis(items, realBoundary);
   }
 
   private _concatBytes(parts: Uint8Array[]): Uint8Array {

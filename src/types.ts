@@ -895,6 +895,19 @@ export interface ToCDNOptions {
    * concatenation, and only takes effect when `indent` enables
    * pretty-printing (single-line output joins the parts into one literal).
    *
+   * Also applies within an elision (`...`, §4.2 of
+   * draft-ietf-cbor-edn-literals-25): a `+`-joined fragment on either side of
+   * an ellipsis keeps its own part boundaries too (e.g. `'test' +
+   * h'1234...abcd' + ...` stays exactly as written instead of merging
+   * `'test'` into the byte fragment before it), and byte-string elision
+   * keeps the `h'xx' + ... + h'yy'` spelling instead of the default compact
+   * `h'xx...yy'` literal. Unlike the text/byte-string case above, this
+   * applies regardless of `indent`, and the parts stay on one line even
+   * under `indent` (elision is always single-line): a `+` boundary inside an
+   * ellipsis is never a lossless merge — the elided middle can't be "joined
+   * in" — so there's no indent-dependent fallback to prefer, and no reason
+   * to reflow it.
+   *
    * @default false
    */
   preserveConcatenation?: boolean;

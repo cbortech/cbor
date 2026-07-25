@@ -10,6 +10,7 @@ import { describe, test, expect } from 'vitest';
 import { CBOR } from '../cbor';
 import { CborEllipsis } from '../ast/CborEllipsis';
 import { CborTag } from '../ast/CborTag';
+import { hexToBytes } from '../utils/hex';
 
 describe('ellipsis — fromCBOR reconstruction', () => {
   test('888(null) binary decodes to CborEllipsis', () => {
@@ -42,9 +43,25 @@ describe('ellipsis — compile/decompile round-trip', () => {
     expect(CBOR.decompile(bin)).toBe('"He" + ... + "ob"');
   });
 
-  test('byte string elision', () => {
+  test("byte string elision round-trips to the compact h'xx...yy' literal", () => {
     const bin = CBOR.compile("h'4711' + ... + h'0815'");
-    expect(CBOR.decompile(bin)).toBe("h'4711' + ... + h'0815'");
+    expect(CBOR.decompile(bin)).toBe("h'4711...0815'");
+  });
+
+  test('byte string elision decoded straight from CBOR bytes (no CDN source) stays compact even under preserveConcatenation', () => {
+    // 888([h'1234', 888(null), h'abcd']) — the same bytes CBOR.compile above
+    // would produce, but decoded directly, with no CDN `+`/`...` source text
+    // behind it at all. preserveConcatenation only preserves boundaries that
+    // were actually parsed from CDN source (see its docs); a placeholder
+    // reconstructed from a raw 888(null) tag carries no such boundary, so it
+    // must default to the fusable/compact form regardless of the option.
+    const bin = hexToBytes('d9037883421234d90378f642abcd');
+    const v = CBOR.fromCBOR(bin);
+    expect(v.toCDN()).toBe("h'1234...abcd'");
+    expect(v.toCDN({ preserveConcatenation: true })).toBe("h'1234...abcd'");
+    expect(v.toCDN({ preserveConcatenation: true, indent: 2 })).toBe(
+      "h'1234...abcd'"
+    );
   });
 
   test("fully elided byte string h'...' (single-item 888 array)", () => {
