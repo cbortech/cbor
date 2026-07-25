@@ -214,17 +214,35 @@ export function serializeContainer(p: {
   node: Commented;
   options: ToCDNOptions | undefined;
   depth: number;
-  openChar: '[' | '{' | '(';
-  closeChar: ']' | '}' | ')';
+  openChar: string;
+  closeChar: string;
   count: number;
   indefiniteLength: boolean;
   encodingWidth: EncodingWidth | undefined;
+  /**
+   * Where the resolved encoding-indicator suffix is placed.
+   * - `'open'` (default): right after `openChar`, before the content
+   *   (`[_2 1,2,3]`) — the head this indicator describes encodes entry count.
+   * - `'close'`: right after `closeChar`, with no separating space
+   *   (`<<1,2>>_1`) — for `CborEmbeddedCBOR`, whose byte-string head encodes
+   *   content byte length, not entry count.
+   */
+  eiPosition?: 'open' | 'close';
+  /**
+   * Basis for canonical-encoding-width detection (`encodingIndicators:
+   * 'auto'`/`'always'` with no explicit `encodingWidth`). Defaults to
+   * `count`, matching the CBOR array/map head. `CborEmbeddedCBOR` overrides
+   * this to its encoded content's byte length instead.
+   */
+  canonicalCount?: () => bigint;
   hasEntryComments: () => boolean;
   /** Render entry `i` at child depth (`item` or `key: value`). */
   renderEntry: (i: number, colSep: string) => string;
   /**
    * Whether entry `i` contains no nested array/map, so it may stay on the
-   * container's line under `inlineLeafContainers`. Omitted = always a leaf.
+   * container's line under `inlineLeafContainers`. Omitted = always a leaf
+   * (used by `CborEmbeddedCBOR`, where an entry that is itself a container
+   * still inlines as long as its own rendering fits on one line).
    */
   entryIsLeaf?: (i: number) => boolean;
   /** Node whose leading comments are emitted above entry `i` (item / map key). */
@@ -259,12 +277,16 @@ export function serializeContainer(p: {
     options,
     indentStr === null
   );
+  const eiPosition = p.eiPosition ?? 'open';
   const eiRaw = p.indefiniteLength
     ? ''
     : resolveEiSuffix(options, p.encodingWidth, () =>
-        canonicalEncodingWidth(BigInt(count))
+        canonicalEncodingWidth(
+          p.canonicalCount ? p.canonicalCount() : BigInt(count)
+        )
       );
-  const eiSuffix = eiRaw ? eiRaw + ' ' : '';
+  const eiSuffix = eiPosition === 'open' && eiRaw ? eiRaw + ' ' : '';
+  const closeSuffix = eiPosition === 'close' ? eiRaw : '';
   const showIndef =
     p.indefiniteLength && (options?.encodingIndicators ?? 'auto') !== 'never';
 
@@ -276,7 +298,7 @@ export function serializeContainer(p: {
           : `${openChar}_ ${inner}${closeChar}`
         : `${openChar}${inner}${closeChar}`;
     }
-    return `${openChar}${eiSuffix}${inner}${closeChar}`;
+    return `${openChar}${eiSuffix}${inner}${closeChar}${closeSuffix}`;
   };
 
   if (indentStr === null || (count === 0 && !hasComments)) {
@@ -350,7 +372,7 @@ export function serializeContainer(p: {
   if (preserveComments)
     lines.push(...formatDanglingComments(p.node, childIndent, commentStyle));
   const body = lines.join('\n');
-  return `${open}\n${body}\n${closeIndent}${closeChar}`;
+  return `${open}\n${body}\n${closeIndent}${closeChar}${closeSuffix}`;
 }
 
 /**

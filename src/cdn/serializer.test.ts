@@ -10,6 +10,7 @@ import { CborIndefiniteTextString } from '../ast/CborIndefiniteTextString';
 import { CborArray } from '../ast/CborArray';
 import { CborMap } from '../ast/CborMap';
 import { CborTag } from '../ast/CborTag';
+import { CborEmbeddedCBOR } from '../ast/CborEmbeddedCBOR';
 import { CborFloat } from '../ast/CborFloat';
 import { CborSimple } from '../ast/CborSimple';
 
@@ -395,6 +396,47 @@ describe('toCDN() — inlineLeafContainers', () => {
   test('no effect without indent (compact single-line as usual)', () => {
     const node = new CborArray([new CborUint(1n), new CborUint(2n)]);
     expect(toCDN(node, { inlineLeafContainers: true })).toBe('[1,2]');
+  });
+});
+
+describe('CborEmbeddedCBOR.toCDN() — inlineLeafContainers (loose rule)', () => {
+  const opts = { indent: 2, inlineLeafContainers: true };
+
+  test('a map entry still inlines, unlike CborArray/CborMap', () => {
+    // <<...>> is a flat sequence of encoded items, not a nested-structure
+    // display, so entryIsLeaf is intentionally not consulted for it: an
+    // entry that is itself an array/map still inlines as long as its own
+    // rendering fits on one line.
+    const node = new CborEmbeddedCBOR([
+      new CborMap([[new CborUint(1n), new CborNint(-7n)]]),
+    ]);
+    expect(toCDN(node, opts)).toBe('<<{1: -7}>>');
+  });
+
+  test('array entries inline too', () => {
+    const node = new CborEmbeddedCBOR([
+      new CborArray([new CborUint(1n), new CborUint(2n)]),
+      new CborArray([new CborUint(3n), new CborUint(4n)]),
+    ]);
+    expect(toCDN(node, opts)).toBe('<<[1, 2], [3, 4]>>');
+  });
+
+  test('a nested <<...>> entry still forces its own parent array multi-line', () => {
+    // The loose rule is local to CborEmbeddedCBOR's own entries; a CborArray
+    // containing a <<...>> entry still applies the strict entryIsLeaf rule.
+    const node = new CborArray([
+      new CborEmbeddedCBOR([
+        new CborMap([[new CborUint(1n), new CborNint(-7n)]]),
+      ]),
+    ]);
+    expect(toCDN(node, opts)).toBe('[\n  <<{1: -7}>>\n]');
+  });
+
+  test('entry rendering with a line break still forces multi-line', () => {
+    const node = new CborEmbeddedCBOR([new CborTextString('a\nb')]);
+    expect(toCDN(node, { ...opts, splitNewline: true })).toBe(
+      '<<\n  "a\\n" +\n    "b"\n>>'
+    );
   });
 });
 

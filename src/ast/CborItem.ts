@@ -184,9 +184,12 @@ export abstract class CborItem {
   /**
    * @internal
    * True when this node is, or contains through wrapper nodes (tags,
-   * embedded CBOR, app-sequence results), an array or map.
-   * `inlineLeafContainers` never inlines a container whose entries contain
-   * another container, even one that renders on a single line.
+   * app-sequence results), an array or map. `inlineLeafContainers` never
+   * inlines a container whose entries contain another container, even one
+   * that renders on a single line. `CborEmbeddedCBOR` (`<<...>>`) is the one
+   * exception: it inlines its own entries based purely on whether they
+   * render without a line break, regardless of this flag — see its
+   * `_toCDN()`, which omits `entryIsLeaf` for that reason.
    */
   get _containsCdnContainer(): boolean {
     return false;

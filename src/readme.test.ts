@@ -105,6 +105,15 @@ describe('README examples', () => {
     );
   });
 
+  test('inlineLeafContainers: <<...>> is the one exception, inlining a container entry that fits on one line', () => {
+    const text = CBOR.format('<<{1: -7}>>', {
+      indent: 2,
+      inlineLeafContainers: true,
+    });
+
+    expect(text).toBe('<<{1: -7}>>');
+  });
+
   test('splitNewline splits text strings at newlines', () => {
     const text = CBOR.format('{"text": "line1\\nline2\\nline3"}', {
       indent: 2,

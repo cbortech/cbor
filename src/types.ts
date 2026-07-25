@@ -906,6 +906,12 @@ export interface ToCDNOptions {
    * `{"a": 1}`, `(_ "a", "b")`). Nested leaf containers still collapse
    * individually: `[[1, 2], [3, 4]]` renders with one inner array per line.
    *
+   * `<<...>>` (CBOR Sequence Literal / embedded CBOR) is the one exception:
+   * since it's a flat sequence of encoded items rather than a
+   * nested-structure display, an entry that is itself an array/map still
+   * inlines there as long as its own rendering fits on one line — e.g.
+   * `<<{1: -7}>>` stays on one line, even though `[{1: -7}]` would not.
+   *
    * Containers with preserved comments are always emitted in multi-line
    * form. Has no effect when `indent` is omitted.
    *
