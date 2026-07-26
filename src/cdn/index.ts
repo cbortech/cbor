@@ -1,8 +1,17 @@
 /**
- * Public lower-level CDN tokenization API (`@cbortech/cbor/cdn`).
+ * Public lower-level CDN tokenization and serialization API
+ * (`@cbortech/cbor/cdn`).
  *
  * Exposes the same lexer the parser uses, so tooling such as syntax
- * highlighters stays in exact agreement with parsing behavior.
+ * highlighters stays in exact agreement with parsing behavior. Also exposes
+ * the `preserveAppSequence` source-preservation primitives that the built-in
+ * `dt`/`ip`/`cri` extensions use, so a third-party `CborExtension` whose
+ * result has its own dedicated notation (regenerated from a resolved value,
+ * the way `dt'...'`/`ip'...'`/`cri'...'` do) can support `preserveAppSequence`
+ * too, instead of always discarding the original `` prefix`...` ``,
+ * non-canonical `prefix'...'`, or raw-tag `N(...)` source spelling. See the
+ * `dt`/`ip`/`cri` extension sources for the pattern these are meant to be
+ * used in.
  */
 
 import { Tokenizer, type Token, type EdnComment } from './tokenizer';
@@ -10,6 +19,15 @@ import { CdnSyntaxError } from './errors';
 
 export type { Token, TokenType, EdnComment } from './tokenizer';
 export { CdnSyntaxError } from './errors';
+
+export {
+  resolveEiSuffix,
+  canonicalEncodingWidth,
+  decideTaggedAppSeqRendering,
+  adjustRawAppSeqSource,
+  adjustAppSeqIndicator,
+} from './serialize-utils';
+export type { AppSeqRenderDecision } from './serialize-utils';
 
 export interface TokenizeResult {
   /** Scanned tokens in source order, excluding the final EOF token. */

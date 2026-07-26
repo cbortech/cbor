@@ -336,25 +336,6 @@ CBOR.format('`\\d+`', { preserveRawString: true });
 // '`\\d+`'
 ```
 
-### Preserve double-quoted string spelling
-
-By default, `CBOR.format()` re-escapes double-quoted text strings from their
-decoded value, so e.g. a `\uXXXX` escape becomes the literal character.
-`preserveTextString` re-emits a non-concatenated `"..."` literal using its
-original source spelling instead. (Raw backtick literals such as `` `...` ``
-are covered by `preserveRawString`, not this option; a string reached via
-`+` concatenation is normalised as usual regardless of this option.)
-
-```ts
-import { CBOR } from '@cbortech/cbor';
-
-CBOR.format('"caf\\u00e9"');
-// '"café"'
-
-CBOR.format('"caf\\u00e9"', { preserveTextString: true });
-// '"caf\\u00e9"'
-```
-
 ### Preserve number literal spelling
 
 By default, `CBOR.format()` normalizes integer and floating-point literals:

@@ -1078,6 +1078,54 @@ describe('CBOR.format()', () => {
     );
   });
 
+  test('preserves a comment between concatenated text string parts', () => {
+    expect(
+      CBOR.format('"a" + /* c */ "b"', {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveComments: true,
+      })
+    ).toBe('"a" +\n  /* c */\n  "b"');
+  });
+
+  test('preserves a # comment between text parts without swallowing the next literal', () => {
+    expect(
+      CBOR.format('"a" + # note\n  "b"', {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveComments: true,
+      })
+    ).toBe('"a" +\n  # note\n  "b"');
+  });
+
+  test('preserves comments in each gap of a 3-part text string chain', () => {
+    expect(
+      CBOR.format('"a" + /* one */ "b" + /* two */ "c"', {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveComments: true,
+      })
+    ).toBe('"a" +\n  /* one */\n  "b" +\n  /* two */\n  "c"');
+  });
+
+  test('single-line mode still strips a mid-chain text string comment', () => {
+    expect(
+      CBOR.format('"a" + /* c */ "b"', {
+        preserveConcatenation: true,
+        preserveComments: true,
+      })
+    ).toBe('"ab"');
+  });
+
+  test('without preserveComments a mid-chain text comment is dropped, not crashing', () => {
+    expect(
+      CBOR.format('"a" + /* c */ "b"', {
+        indent: 2,
+        preserveConcatenation: true,
+      })
+    ).toBe('"a" +\n  "b"');
+  });
+
   test('splits preserved concatenation across lines with indent', () => {
     expect(
       CBOR.format('{"k": "a" + "b"}', {
@@ -1112,6 +1160,45 @@ describe('CBOR.format()', () => {
         preserveByteString: true,
       })
     ).toBe("h'68' +\n  b64'aQ'");
+  });
+
+  test('preserves a comment between concatenated byte string parts', () => {
+    expect(
+      CBOR.format("h'aa' + /* test */ h'aa'", {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveComments: true,
+      })
+    ).toBe("h'aa' +\n  /* test */\n  h'aa'");
+  });
+
+  test('preserves a # comment between parts without swallowing the next literal', () => {
+    expect(
+      CBOR.format("h'aa' + # note\n  h'bb'", {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveComments: true,
+      })
+    ).toBe("h'aa' +\n  # note\n  h'bb'");
+  });
+
+  test('preserves comments in each gap of a 3-part byte string chain', () => {
+    expect(
+      CBOR.format("h'aa' + /* one */ h'bb' + /* two */ h'cc'", {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveComments: true,
+      })
+    ).toBe("h'aa' +\n  /* one */\n  h'bb' +\n  /* two */\n  h'cc'");
+  });
+
+  test('single-line mode still strips a mid-chain byte string comment', () => {
+    expect(
+      CBOR.format("h'aa' + /* test */ h'aa'", {
+        preserveConcatenation: true,
+        preserveComments: true,
+      })
+    ).toBe("h'aaaa'");
   });
 
   test('normalizes byte string parts in preserved text concatenation', () => {
@@ -1394,10 +1481,28 @@ describe('CBOR.format()', () => {
     expect(CBOR.format(CBOR.format(input))).toBe(CBOR.format(input));
   });
 
-  test('preserveAll turns on every preserve* option at once', () => {
+  test('preserveAll turns on every preserve* option at once, except the deprecated preserveTextString', () => {
     const text =
       '{"a":0xff,"b":1.5_1,"c":b64\'aGk=\',"d":"caf\\u00e9","e":`raw`,"f":"x"+"y"}';
     expect(CBOR.format(text, { preserveAll: true, indent: 2 })).toBe(
+      '{\n' +
+        '  "a": 0xff,\n' +
+        '  "b": 1.5_1,\n' +
+        '  "c": b64\'aGk=\',\n' +
+        '  "d": "café",\n' +
+        '  "e": `raw`,\n' +
+        '  "f": "x" +\n' +
+        '    "y"\n' +
+        '}'
+    );
+    // Explicitly opting into the deprecated option still works.
+    expect(
+      CBOR.format(text, {
+        preserveAll: true,
+        preserveTextString: true,
+        indent: 2,
+      })
+    ).toBe(
       '{\n' +
         '  "a": 0xff,\n' +
         '  "b": 1.5_1,\n' +
@@ -1419,6 +1524,32 @@ describe('CBOR.format()', () => {
         '  "f": "xy"\n' +
         '}'
     );
+  });
+
+  test('preserveAll no longer blocks splitNewline for a non-concatenated string', () => {
+    // Regression guard: before preserveTextString was dropped from
+    // preserveAll, this string's verbatim spelling would win over
+    // splitNewline and it would stay on one line.
+    expect(
+      CBOR.format('"line1\\nline2"', {
+        preserveAll: true,
+        splitNewline: true,
+        indent: 2,
+      })
+    ).toBe('"line1\\n" +\n  "line2"');
+  });
+
+  test('preserveAll no longer blocks splitCdn for a non-concatenated string', () => {
+    // Regression guard: before preserveTextString was dropped from
+    // preserveAll, this string's verbatim spelling would win over
+    // splitCdn and it would stay on one line.
+    expect(
+      CBOR.format('"[1, 2, 3]"', {
+        preserveAll: true,
+        splitCdn: true,
+        indent: 2,
+      })
+    ).toBe('"[" +\n    "1, " +\n    "2, " +\n    "3" +\n  "]"');
   });
 
   test('preserveAll leaves an explicitly-set individual option alone', () => {

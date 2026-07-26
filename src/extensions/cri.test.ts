@@ -303,6 +303,109 @@ describe("cri — CRI'…' (uppercase, tag 99)", () => {
   });
 });
 
+// ─── preserveAppSequence ───────────────────────────────────────────────────────
+
+describe('cri — preserveAppSequence', () => {
+  // By design, cri/CRI regenerate their notation from the resolved URI on
+  // every format() call — so <<...>> normally collapses to '...' even
+  // though both spell the same URI. preserveAppSequence keeps the original
+  // bracketed spelling instead, without changing the parsed node's class
+  // (CborCriExt / CborTaggedCriExt).
+
+  test("cri<<'...'>> keeps its bracketed notation when requested", () => {
+    expect(
+      CBOR.format("cri<<'https://example.com/'>>", {
+        preserveAppSequence: true,
+      })
+    ).toBe("cri<<'https://example.com/'>>");
+    // Default output normalises to the cri'...' form.
+    expect(CBOR.format("cri<<'https://example.com/'>>")).toBe(
+      "cri'https://example.com/'"
+    );
+  });
+
+  test("CRI<<'...'>> (tagged) keeps its bracketed notation when requested", () => {
+    expect(
+      CBOR.format("CRI<<'https://example.com/'>>", {
+        preserveAppSequence: true,
+      })
+    ).toBe("CRI<<'https://example.com/'>>");
+  });
+
+  test('appStrings:false still wins over preserveAppSequence', () => {
+    expect(
+      CBOR.format("CRI<<'https://example.com/'>>", {
+        preserveAppSequence: true,
+        appStrings: false,
+      })
+    ).toMatch(/^99\(/);
+  });
+
+  test('keeps a non-canonical cri/CRI app-string spelling too, not just <<...>>', () => {
+    // Percent-encoded and literal spellings of the same path segment are
+    // both valid, but criItemsToUri() would normally regenerate the
+    // percent-decoded canonical form.
+    expect(
+      CBOR.format("cri'https://example.com/foo%2Fbar'", {
+        preserveAppSequence: true,
+      })
+    ).toBe("cri'https://example.com/foo%2Fbar'");
+    expect(CBOR.format("cri'https://example.com/foo%2Fbar'")).toBe(
+      "cri'https://example.com/foo%2Fbar'"
+    );
+  });
+
+  test('keeps prefix`...` (backtick app-string) notation when requested', () => {
+    expect(
+      CBOR.format('cri`https://example.com/`', { preserveAppSequence: true })
+    ).toBe('cri`https://example.com/`');
+    expect(
+      CBOR.format('CRI`https://example.com/`', { preserveAppSequence: true })
+    ).toBe('CRI`https://example.com/`');
+    // Default output normalises to the single-quoted form.
+    expect(CBOR.format('cri`https://example.com/`')).toBe(
+      "cri'https://example.com/'"
+    );
+  });
+
+  test('backtick node keeps its dedicated class/identity', () => {
+    const n = CBOR.fromCDN('cri`https://example.com/`');
+    expect(n).toBeInstanceOf(CborCriExt);
+  });
+
+  test('keeps raw tag notation (99(...)) instead of upgrading to CRI notation', () => {
+    const rawTag = '99([-4,["example","com"],[""]])';
+    expect(CBOR.format(rawTag, { preserveAppSequence: true })).toBe(rawTag);
+    // Default output normalises to the regenerated CRI'...' form.
+    expect(CBOR.format(rawTag)).toBe("CRI'https://example.com/'");
+  });
+
+  test('appStrings:false still wins over preserveAppSequence for raw tag notation', () => {
+    const rawTag = '99([-4,["example","com"],[""]])';
+    expect(
+      CBOR.format(rawTag, { preserveAppSequence: true, appStrings: false })
+    ).toBe(rawTag);
+  });
+
+  test('raw tag notation node keeps its dedicated class/identity', () => {
+    const n = CBOR.fromCDN('99([-4,["example","com"],[""]])');
+    expect(n).toBeInstanceOf(CborTaggedCriExt);
+  });
+
+  test('preserveNumberFormat: false overrides verbatim raw tag notation', () => {
+    // preserveAll turns preserveAppSequence on but leaves an explicit
+    // preserveNumberFormat: false alone; the 'structural' fallback must
+    // force appStrings: false when re-deriving, otherwise CborCriExt's own
+    // _toCDN() would switch straight back to cri'...' notation.
+    expect(
+      CBOR.format('0x63([-0x4,["example","com"],[""]])', {
+        preserveAll: true,
+        preserveNumberFormat: false,
+      })
+    ).toBe('99([-4,["example","com"],[""]])');
+  });
+});
+
 // ─── CBOR round-trip ──────────────────────────────────────────────────────────
 
 describe('cri — CBOR round-trip', () => {

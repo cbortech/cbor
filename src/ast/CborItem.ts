@@ -50,8 +50,9 @@ export interface AppSeqSourceFeatures {
 
 /**
  * Fill in every `preserve*` option left `undefined` with `true`, for
- * `ToCDNOptions.preserveAll`. An option the caller explicitly set
- * (including to `false`) is left untouched.
+ * `ToCDNOptions.preserveAll` — except the deprecated `preserveTextString`,
+ * which no longer participates in `preserveAll`. An option the caller
+ * explicitly set (including to `false`) is left untouched.
  */
 function expandPreserveAll(options: ToCDNOptions): ToCDNOptions {
   return {
@@ -59,7 +60,6 @@ function expandPreserveAll(options: ToCDNOptions): ToCDNOptions {
     preserveComments: options.preserveComments ?? true,
     preserveByteString: options.preserveByteString ?? true,
     preserveRawString: options.preserveRawString ?? true,
-    preserveTextString: options.preserveTextString ?? true,
     preserveConcatenation: options.preserveConcatenation ?? true,
     preserveNumberFormat: options.preserveNumberFormat ?? true,
     preserveAppSequence: options.preserveAppSequence ?? true,

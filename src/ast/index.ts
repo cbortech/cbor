@@ -1,4 +1,5 @@
 export { CborItem } from './CborItem';
+export type { AppSeqEncodingEdit, AppSeqSourceFeatures } from './CborItem';
 export { CborUint } from './CborUint';
 export { CborBigUint, CborBigNint } from './CborBignum';
 export { CborNint } from './CborNint';

@@ -5,6 +5,7 @@
 
 import type { CborComment, CborComments, ToCDNOptions } from '../types';
 import type { EncodingWidth } from '../cbor/encode';
+import type { AppSeqEncodingEdit, AppSeqSourceFeatures } from '../ast/CborItem';
 import { bytesToHex as toHex } from '../utils/hex';
 
 // ─── Indent helpers ───────────────────────────────────────────────────────────
@@ -30,14 +31,31 @@ export function indentOf(indentStr: string, depth: number): string {
  *
  * Single-line (` + `) when indent is disabled; otherwise each continuation
  * part starts on its own line, indented one level deeper than the owner.
+ *
+ * `midComments`, when given, holds already-converted comment lines for each
+ * gap between two consecutive parts (`midComments[i]` sits between
+ * `literals[i]` and `literals[i + 1]`) — e.g. a comment between two
+ * `+`-joined byte-string literals, which has nowhere else to attach since
+ * there is no per-part AST node. Ignored in single-line mode, matching every
+ * other comment kind.
  */
 export function joinConcatParts(
   literals: readonly string[],
   indentStr: string | null,
-  depth: number
+  depth: number,
+  midComments?: readonly (readonly string[])[]
 ): string {
   if (indentStr === null) return literals.join(' + ');
-  return literals.join(` +\n${indentOf(indentStr, depth + 1)}`);
+  const indent = indentOf(indentStr, depth + 1);
+  let out = literals[0]!;
+  for (let i = 1; i < literals.length; i++) {
+    out += ' +\n';
+    for (const comment of midComments?.[i - 1] ?? []) {
+      out += `${indent}${comment}\n`;
+    }
+    out += indent + literals[i];
+  }
+  return out;
 }
 
 // ─── Comment helpers ─────────────────────────────────────────────────────────
@@ -101,6 +119,55 @@ export function convertCommentText(
     return '/' + safeInner + '/';
   }
   return text; // already # or /.../
+}
+
+/**
+ * Bucket a flat, source-ordered list of comments (typically a node's own
+ * `comments.dangling`) by which gap between two consecutive `parts` each
+ * one's offset falls into — `result[i]` sits between `parts[i]` and
+ * `parts[i + 1]`, already converted to the requested marker style.
+ *
+ * Used for a comment that sits between two `+`-joined fragments merged into
+ * a single value with no per-fragment AST node of its own to attach to (a
+ * concatenated `CborByteString`'s own `ednParts`, or — inside a bytes
+ * elision — a `CborEllipsis` item's `ednParts`): `attachComments` can only
+ * land such a comment on the merged node as a whole, as `dangling`, so this
+ * re-derives which specific gap it belongs in from each part's own
+ * `start`/`end` span. A comment is dropped (as it already was before this
+ * function existed) when either neighbouring part lacks a known span — a
+ * part merged from a single elided literal's own internal segments, which
+ * cannot have a comment between them anyway (see `_elidedHexAtoms`).
+ *
+ * Returns `undefined` (rather than an all-empty array) when nothing landed
+ * in any gap, so callers can cheaply skip the mid-comment rendering path
+ * entirely in the common case.
+ */
+export function danglingCommentsByGap(
+  dangling: readonly CborComment[] | undefined,
+  parts: readonly { start?: number; end?: number }[] | undefined,
+  style: 'c-style' | 'cdn-style' | undefined
+): string[][] | undefined {
+  if (!dangling || dangling.length === 0 || !parts || parts.length < 2)
+    return undefined;
+  const gaps: string[][] = parts.slice(1).map(() => []);
+  let anyFound = false;
+  for (const comment of dangling) {
+    for (let i = 0; i < parts.length - 1; i++) {
+      const prevEnd = parts[i]!.end;
+      const nextStart = parts[i + 1]!.start;
+      if (
+        prevEnd !== undefined &&
+        nextStart !== undefined &&
+        comment.start >= prevEnd &&
+        comment.end <= nextStart
+      ) {
+        gaps[i]!.push(convertCommentText(comment, style));
+        anyFound = true;
+        break;
+      }
+    }
+  }
+  return anyFound ? gaps : undefined;
 }
 
 /**
@@ -795,13 +862,6 @@ export function resolveEiSuffix(
 export type AppSeqRenderDecision =
   'verbatim' | 'adjusted' | 'source' | 'structural' | 'normal';
 
-interface AppSeqSourceFeatures {
-  byteString?: boolean;
-  textString?: boolean;
-  rawString?: boolean;
-  concatenation?: boolean;
-}
-
 /**
  * Decide how an extension result node — from a `prefix'...'` /
  * `` prefix`...` `` / `prefix<<...>>` source, or (for a tag-wrapper node
@@ -960,14 +1020,7 @@ export function adjustRawAppSeqSource(
   appSeqSource: string,
   options: ToCDNOptions | undefined,
   comments: readonly CborComment[] | undefined,
-  encodingEdits:
-    | readonly {
-        start: number;
-        end: number;
-        always: string;
-        never: string;
-      }[]
-    | undefined
+  encodingEdits: readonly AppSeqEncodingEdit[] | undefined
 ): string {
   const replacements: {
     start: number;
