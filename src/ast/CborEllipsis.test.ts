@@ -5,8 +5,10 @@ import { CborEllipsis, CPA888_TAG } from './CborEllipsis';
 import { CborByteString } from './CborByteString';
 import { CborTextString } from './CborTextString';
 import { CborArray } from './CborArray';
+import { CborMap } from './CborMap';
 import { CborTag } from './CborTag';
 import { CborSimple } from './CborSimple';
+import { CborUint } from './CborUint';
 
 // ─── Subtree elision: standalone ... ─────────────────────────────────────────
 
@@ -322,6 +324,283 @@ describe('CborEllipsis — toCDN', () => {
         preserveConcatenation: true,
       })
     ).toBe("'test' + h'12' + h'34...56'");
+  });
+
+  describe('preserveConcatenation + preserveComments keeps a comment next to a real `...` boundary', () => {
+    // Regression coverage: a comment sitting between two `+`-joined
+    // fragments in a chain that also contains a `...` used to be silently
+    // dropped — the whole value becomes a `CborEllipsis` (tag 888) rather
+    // than a plain `CborByteString`, so the comment ends up either
+    // `dangling` on a fused multi-part `CborByteString` fragment (no
+    // ellipsis directly between the two literals — they merge into one
+    // `ednParts` item during parsing) or as ordinary `leading`/`trailing` on
+    // one of the `CborEllipsis`'s own array items (an ellipsis genuinely
+    // sits between the two literals), and neither was ever consulted by
+    // `_renderPreservedBytesElision`.
+    //
+    // Elision is compact/single-line by default and stays that way unless a
+    // comment actually needs the extra room — see `joinElisionParts` — so
+    // every case below needs `indent` to actually show anything; without it
+    // every comment is dropped, same as any other comment kind in
+    // single-line output (covered at the end of this block).
+    test('comment between two literals that merge into one ednParts fragment (no ellipsis between them)', () => {
+      expect(
+        CBOR.format("h'aa' + /* c */ h'bb' + ...", {
+          indent: 2,
+          preserveConcatenation: true,
+          preserveComments: true,
+        })
+      ).toBe("h'aa' +\n  /* c */\n  h'bb' +\n  ...");
+    });
+
+    test('comment between an ellipsis and the literal that follows it (ordinary array items)', () => {
+      expect(
+        CBOR.format("h'aa' + ... + /* c */ h'bb'", {
+          indent: 2,
+          preserveConcatenation: true,
+          preserveComments: true,
+        })
+      ).toBe("h'aa' +\n  ... +\n  /* c */\n  h'bb'");
+    });
+
+    test('comment between the literal that precedes an ellipsis and the ellipsis itself', () => {
+      expect(
+        CBOR.format("h'aa' + /* c */ ... + h'bb'", {
+          indent: 2,
+          preserveConcatenation: true,
+          preserveComments: true,
+        })
+      ).toBe("h'aa' +\n  /* c */\n  ... +\n  h'bb'");
+    });
+
+    test('a # line comment in either position is preserved when indent lets the chain reflow', () => {
+      expect(
+        CBOR.format("h'aa' + # note\n  h'bb' + ...", {
+          indent: 2,
+          preserveConcatenation: true,
+          preserveComments: true,
+        })
+      ).toBe("h'aa' +\n  # note\n  h'bb' +\n  ...");
+      expect(
+        CBOR.format("h'aa' + ... + # note\n  h'bb'", {
+          indent: 2,
+          preserveConcatenation: true,
+          preserveComments: true,
+        })
+      ).toBe("h'aa' +\n  ... +\n  # note\n  h'bb'");
+    });
+
+    test('a trailing comment after the very last fragment is preserved, not lost', () => {
+      // The comment ties, in source position, with this CborEllipsis's own
+      // end (there's no closing delimiter after the last fragment to give
+      // it a later end of its own), so `attachComments` resolves the tie in
+      // favour of the last fragment itself. `promoteEllipsisTailComments`
+      // (in the parser) moves it up onto the `CborEllipsis`'s own
+      // `comments.trailing` right after parsing, so the ordinary
+      // `entryTrailing`/root-`toCDN()` machinery renders it — on the same
+      // line as the rest of the chain, since nothing else follows it there
+      // (no reflow needed just for this).
+      expect(
+        CBOR.format("h'aa' + ... /* end */", {
+          indent: 2,
+          preserveConcatenation: true,
+          preserveComments: true,
+        })
+      ).toBe("h'aa' + ... /* end */");
+      expect(
+        CBOR.format("h'aa' + h'bb' + ... # end\n", {
+          indent: 2,
+          preserveConcatenation: true,
+          preserveComments: true,
+        })
+      ).toBe("h'aa' + h'bb' + ... # end");
+    });
+
+    test('the same trailing comment is preserved when nested inside an array', () => {
+      // A `#` comment here is only safe because it's promoted onto the
+      // CborEllipsis's own trailing — the array's `,` separator is emitted
+      // by `entryTrailing`'s caller *before* the comment, not swallowed by
+      // it (see the `# key`/`: value` map regression test below).
+      expect(
+        CBOR.format("[h'aa' + ... /* end */]", {
+          indent: 2,
+          preserveConcatenation: true,
+          preserveComments: true,
+        })
+      ).toBe("[\n  h'aa' + ... /* end */\n]");
+    });
+
+    test('a trailing # comment does not swallow the parent separator (regression)', () => {
+      // Before the last-fragment trailing comment was promoted onto the
+      // CborEllipsis itself, it was folded directly into the chain's own
+      // rendered body — so the parent's `:`/`,` separator, appended right
+      // after, ended up as literal text *inside* the `#` comment, silently
+      // corrupting the map/array on re-parse.
+      const mapOut = CBOR.format("{h'aa' + ... # key\n: 1}", {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveComments: true,
+      });
+      expect(mapOut).toBe("{\n  h'aa' + ...: 1 # key\n}");
+      const reparsedMap = CBOR.fromCDN(mapOut, {
+        preserveAll: true,
+      }) as CborMap;
+      expect(reparsedMap).toBeInstanceOf(CborMap);
+      expect(reparsedMap.entries).toHaveLength(1);
+      expect(reparsedMap.entries[0]![0]).toBeInstanceOf(CborEllipsis);
+      expect(reparsedMap.entries[0]![1]).toBeInstanceOf(CborUint);
+      expect((reparsedMap.entries[0]![1] as CborUint).value).toBe(1n);
+
+      const arrSrc = "[h'aa' + ..., # next\n 1]";
+      const arrOnce = CBOR.format(arrSrc, {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveComments: true,
+      });
+      const arrTwice = CBOR.format(arrOnce, {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveComments: true,
+      });
+      expect(arrTwice).toBe(arrOnce);
+    });
+
+    test('without indent, every comment is dropped, matching single-line output elsewhere', () => {
+      expect(
+        CBOR.format("h'aa' + /* c */ h'bb' + ...", {
+          preserveConcatenation: true,
+          preserveComments: true,
+        })
+      ).toBe("h'aa' + h'bb' + ...");
+      expect(
+        CBOR.format("h'aa' + ... /* end */", {
+          preserveConcatenation: true,
+          preserveComments: true,
+        })
+      ).toBe("h'aa' + ...");
+    });
+
+    test('is stable under a second round trip', () => {
+      const opts = {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveComments: true,
+      };
+      for (const src of [
+        "h'aa' + /* c */ h'bb' + ...",
+        "h'aa' + ... + /* c */ h'bb'",
+        "h'aa' + /* c */ ... + h'bb'",
+        "h'aa' + # note\n  h'bb' + ...",
+        "h'aa' + ... /* end */",
+      ]) {
+        const once = CBOR.format(src, opts);
+        expect(CBOR.format(once, opts)).toBe(once);
+      }
+    });
+
+    test('without preserveComments the comment is dropped as before, with no crash', () => {
+      expect(
+        CBOR.format("h'aa' + /* c */ h'bb' + ...", {
+          indent: 2,
+          preserveConcatenation: true,
+        })
+      ).toBe("h'aa' + h'bb' + ...");
+    });
+  });
+
+  describe('preserveConcatenation + preserveComments keeps a comment next to a real `...` boundary (text elision)', () => {
+    // Same regression as the byte-string describe block above, for text
+    // elision: "a" + "b" merge into one `CborTextString` (`ednPartSpans
+    // .length > 1`) when no ellipsis sits between them, so a comment there
+    // lands as `dangling` on that fused node; otherwise it lands as ordinary
+    // `leading`/`trailing` on one of the `CborEllipsis`'s own array items.
+    // `_renderFragment`/`_toCDN`'s `frag + ... + frag` path used to consult
+    // neither.
+    test('comment between two literals that merge into one ednPartSpans fragment (no ellipsis between them)', () => {
+      expect(
+        CBOR.format('"a" + /* c */ "b" + ...', {
+          indent: 2,
+          preserveConcatenation: true,
+          preserveComments: true,
+        })
+      ).toBe('"a" +\n  /* c */\n  "b" + ...');
+    });
+
+    test('comment between an ellipsis and the literal that follows it (ordinary array items)', () => {
+      expect(
+        CBOR.format('"a" + ... + /* c */ "b"', {
+          indent: 2,
+          preserveConcatenation: true,
+          preserveComments: true,
+        })
+      ).toBe('"a" +\n  ... +\n  /* c */\n  "b"');
+    });
+
+    test('comment between the literal that precedes an ellipsis and the ellipsis itself', () => {
+      expect(
+        CBOR.format('"a" + /* c */ ... + "b"', {
+          indent: 2,
+          preserveConcatenation: true,
+          preserveComments: true,
+        })
+      ).toBe('"a" +\n  /* c */\n  ... +\n  "b"');
+    });
+
+    test('a # line comment in either position is preserved when indent lets the chain reflow', () => {
+      expect(
+        CBOR.format('"a" + # note\n  "b" + ...', {
+          indent: 2,
+          preserveConcatenation: true,
+          preserveComments: true,
+        })
+      ).toBe('"a" +\n  # note\n  "b" + ...');
+      expect(
+        CBOR.format('"a" + ... + # note\n  "b"', {
+          indent: 2,
+          preserveConcatenation: true,
+          preserveComments: true,
+        })
+      ).toBe('"a" +\n  ... +\n  # note\n  "b"');
+    });
+
+    test('a trailing comment after the very last fragment is preserved, not lost', () => {
+      expect(
+        CBOR.format('"a" + ... /* end */', {
+          indent: 2,
+          preserveConcatenation: true,
+          preserveComments: true,
+        })
+      ).toBe('"a" + ... /* end */');
+    });
+
+    test('without indent, every comment is dropped, matching single-line output elsewhere', () => {
+      expect(
+        CBOR.format('"a" + /* c */ "b" + ...', {
+          preserveConcatenation: true,
+          preserveComments: true,
+        })
+      ).toBe('"a" + "b" + ...');
+    });
+
+    test('is stable under a second round trip', () => {
+      const opts = {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveComments: true,
+      };
+      const src = '"a" + /* c */ "b" + ...';
+      const once = CBOR.format(src, opts);
+      expect(CBOR.format(once, opts)).toBe(once);
+    });
+
+    test('without preserveComments the comment is dropped as before, with no crash', () => {
+      expect(
+        CBOR.format('"a" + /* c */ "b" + ...', {
+          indent: 2,
+          preserveConcatenation: true,
+        })
+      ).toBe('"a" + "b" + ...');
+    });
   });
 
   describe('preserveConcatenation with a leading/trailing/fully-elided literal on either side of a real +', () => {

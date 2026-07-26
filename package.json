@@ -7,7 +7,6 @@
     "cdn",
     "cddl",
     "cddl-validation",
-    "rfc8610",
     "cbor-edn",
     "diagnostic-notation",
     "json",
