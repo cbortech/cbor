@@ -1078,6 +1078,54 @@ describe('CBOR.format()', () => {
     );
   });
 
+  test('preserves a comment between concatenated text string parts', () => {
+    expect(
+      CBOR.format('"a" + /* c */ "b"', {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveComments: true,
+      })
+    ).toBe('"a" +\n  /* c */\n  "b"');
+  });
+
+  test('preserves a # comment between text parts without swallowing the next literal', () => {
+    expect(
+      CBOR.format('"a" + # note\n  "b"', {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveComments: true,
+      })
+    ).toBe('"a" +\n  # note\n  "b"');
+  });
+
+  test('preserves comments in each gap of a 3-part text string chain', () => {
+    expect(
+      CBOR.format('"a" + /* one */ "b" + /* two */ "c"', {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveComments: true,
+      })
+    ).toBe('"a" +\n  /* one */\n  "b" +\n  /* two */\n  "c"');
+  });
+
+  test('single-line mode still strips a mid-chain text string comment', () => {
+    expect(
+      CBOR.format('"a" + /* c */ "b"', {
+        preserveConcatenation: true,
+        preserveComments: true,
+      })
+    ).toBe('"ab"');
+  });
+
+  test('without preserveComments a mid-chain text comment is dropped, not crashing', () => {
+    expect(
+      CBOR.format('"a" + /* c */ "b"', {
+        indent: 2,
+        preserveConcatenation: true,
+      })
+    ).toBe('"a" +\n  "b"');
+  });
+
   test('splits preserved concatenation across lines with indent', () => {
     expect(
       CBOR.format('{"k": "a" + "b"}', {
@@ -1112,6 +1160,45 @@ describe('CBOR.format()', () => {
         preserveByteString: true,
       })
     ).toBe("h'68' +\n  b64'aQ'");
+  });
+
+  test('preserves a comment between concatenated byte string parts', () => {
+    expect(
+      CBOR.format("h'aa' + /* test */ h'aa'", {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveComments: true,
+      })
+    ).toBe("h'aa' +\n  /* test */\n  h'aa'");
+  });
+
+  test('preserves a # comment between parts without swallowing the next literal', () => {
+    expect(
+      CBOR.format("h'aa' + # note\n  h'bb'", {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveComments: true,
+      })
+    ).toBe("h'aa' +\n  # note\n  h'bb'");
+  });
+
+  test('preserves comments in each gap of a 3-part byte string chain', () => {
+    expect(
+      CBOR.format("h'aa' + /* one */ h'bb' + /* two */ h'cc'", {
+        indent: 2,
+        preserveConcatenation: true,
+        preserveComments: true,
+      })
+    ).toBe("h'aa' +\n  /* one */\n  h'bb' +\n  /* two */\n  h'cc'");
+  });
+
+  test('single-line mode still strips a mid-chain byte string comment', () => {
+    expect(
+      CBOR.format("h'aa' + /* test */ h'aa'", {
+        preserveConcatenation: true,
+        preserveComments: true,
+      })
+    ).toBe("h'aaaa'");
   });
 
   test('normalizes byte string parts in preserved text concatenation', () => {

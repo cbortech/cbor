@@ -1,4 +1,9 @@
-import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
+import type {
+  ToCDNOptions,
+  ToJSOptions,
+  ToCBOROptions,
+  CborComment,
+} from '../types';
 import { CborItem } from './CborItem';
 import { MT_TEXT } from '../cbor/constants';
 import type { CborWriter, EncodingWidth } from '../cbor/encode';
@@ -12,6 +17,7 @@ import {
   resolveIndent,
   resolveEiSuffix,
   canonicalEncodingWidth,
+  danglingCommentsByGap,
 } from '../cdn/serialize-utils';
 
 const textEncoder = new TextEncoder();
@@ -49,6 +55,15 @@ export class CborTextString extends CborItem {
    * `textString`.
    */
   readonly ednPartIsByteString: readonly boolean[] | undefined;
+  /**
+   * Source span of each `ednParts` entry's own literal token, aligned by
+   * index — used to place a comment sitting between two `+`-joined parts at
+   * the right gap instead of dropping it (there is no per-part AST node for
+   * such a comment to attach to; it lands as `dangling` on this whole node
+   * instead — see `CborByteString.ednParts`'s equivalent doc). `undefined`
+   * for a node not parsed from a `+` chain at all.
+   */
+  readonly ednPartSpans: readonly { start: number; end: number }[] | undefined;
 
   constructor(
     value: string,
@@ -59,6 +74,7 @@ export class CborTextString extends CborItem {
       quotedEdnSource?: string;
       ednPartSources?: readonly (string | undefined)[];
       ednPartIsByteString?: readonly boolean[];
+      ednPartSpans?: readonly { start: number; end: number }[];
     }
   ) {
     super();
@@ -69,6 +85,7 @@ export class CborTextString extends CborItem {
     this.quotedEdnSource = options?.quotedEdnSource;
     this.ednPartSources = options?.ednPartSources;
     this.ednPartIsByteString = options?.ednPartIsByteString;
+    this.ednPartSpans = options?.ednPartSpans;
   }
 
   override _encodeTo(writer: CborWriter, _options?: ToCBOROptions): void {
@@ -87,7 +104,9 @@ export class CborTextString extends CborItem {
       this.ednParts,
       this.ednSource,
       this.quotedEdnSource,
-      this.ednPartSources
+      this.ednPartSources,
+      this.ednPartSpans,
+      this.comments?.dangling
     );
   }
 
@@ -104,7 +123,9 @@ function formatTextString(
   ednParts: readonly string[] | undefined,
   ednSource: string | undefined,
   quotedEdnSource: string | undefined,
-  ednPartSources: readonly (string | undefined)[] | undefined
+  ednPartSources: readonly (string | undefined)[] | undefined,
+  ednPartSpans: readonly { start: number; end: number }[] | undefined,
+  dangling: readonly CborComment[] | undefined
 ): string {
   const indentStr = resolveIndent(options);
   // A preserved raw backtick literal is emitted verbatim — re-escaping,
@@ -159,6 +180,19 @@ function formatTextString(
     preservedParts !== undefined &&
     (cdnBreakpoints === null || hasPreservedRawPart)
   ) {
+    // A comment between two `+`-joined parts has no per-part AST node of
+    // its own to attach to — it lands as `dangling` on this whole node
+    // instead (see `ednPartSpans`'s doc) — so re-derive which gap each one
+    // belongs to from each part's own source span.
+    const gapComments = options?.preserveComments
+      ? danglingCommentsByGap(
+          dangling,
+          ednPartSpans,
+          typeof options.preserveComments === 'string'
+            ? options.preserveComments
+            : undefined
+        )
+      : undefined;
     const parts: StringPart[] = [];
     for (const [i, text] of preservedParts.entries()) {
       const source = partSources?.[i];
@@ -175,6 +209,13 @@ function formatTextString(
         parts.push(...splitAtBreakpoints(text, partBreakpoints));
       } else {
         parts.push({ text, contentDepth: 0 });
+      }
+      // Whichever output part `text` ended up split into, the comment for
+      // the gap right after it (if any) belongs on the last one — the true
+      // `+` boundary to the next preserved part sits right there.
+      const comments = gapComments?.[i];
+      if (comments && comments.length > 0) {
+        parts[parts.length - 1]!.commentsAfter = comments;
       }
     }
     return emitParts(parts, suffix, indentStr, depth);
@@ -225,7 +266,11 @@ function emitParts(
       indentStr,
       depth + 1 + parts[i]!.contentDepth
     );
-    result += ` +\n${continuationIndent}${literals[i]}`;
+    result += ' +\n';
+    for (const comment of parts[i - 1]!.commentsAfter ?? []) {
+      result += `${continuationIndent}${comment}\n`;
+    }
+    result += `${continuationIndent}${literals[i]}`;
   }
   return result;
 }
@@ -273,6 +318,13 @@ interface StringPart {
   contentDepth: number;
   /** Preserved literal source; emitted verbatim instead of escaping `text`. */
   source?: string;
+  /**
+   * Already-converted comment text that sat right after this part in the
+   * source — a genuine `+` boundary this part precedes, not a further split
+   * of the same original preserved part — emitted by `emitParts` right
+   * before the next part.
+   */
+  commentsAfter?: string[];
 }
 
 function collectNewlineBreakpoints(
