@@ -201,30 +201,6 @@ describe('playground', () => {
       expect(cmText('editor')).toBe("'Hello'");
     });
 
-    test('Keep string escapes preserves original double-quoted string spelling', async () => {
-      const importText = () =>
-        uploadTo(
-          'cdn-import-input',
-          new File(['"caf\\u00e9"'], 'text.cdn', { type: 'text/plain' })
-        );
-
-      // Default: "Keep string escapes" is on, so the é escape survives
-      // Format instead of being decoded into the literal character.
-      await importText();
-      await vi.waitFor(() => expect(cmText('editor')).toContain('caf'));
-      byId('format-opts-btn').click();
-      byId<HTMLSelectElement>('opt-indent').value = '';
-      expect(byId<HTMLInputElement>('opt-text-string').checked).toBe(true);
-      byId('format-btn').click();
-      expect(cmText('editor')).toBe('"caf\\u00e9"');
-
-      await importText();
-      await vi.waitFor(() => expect(cmText('editor')).toContain('caf'));
-      byId<HTMLInputElement>('opt-text-string').checked = false;
-      byId('format-btn').click();
-      expect(cmText('editor')).toBe('"café"');
-    });
-
     test('Keep blank lines preserves a blank line between array entries', async () => {
       const importArray = () =>
         uploadTo(
@@ -309,7 +285,6 @@ describe('playground', () => {
         'opt-concat',
         'opt-byte-string',
         'opt-raw-string',
-        'opt-text-string',
         'opt-number-format',
         'opt-app-sequence',
       ] as const;

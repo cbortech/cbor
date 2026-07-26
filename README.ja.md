@@ -330,25 +330,6 @@ CBOR.format('`\\d+`', { preserveRawString: true });
 // '`\\d+`'
 ```
 
-### ダブルクォート文字列の表記を保持する
-
-デフォルトでは、`CBOR.format()` はダブルクォートのテキスト文字列をデコード後の
-値から再エスケープします。そのため `\uXXXX` エスケープはリテラル文字に変換され
-ます。`preserveTextString` を指定すると、連結されていない `"..."` リテラルを
-元のソース表記のまま再出力します。(バッククォートの raw 文字列(`` `...` ``)
-はこのオプションではなく `preserveRawString` の対象です。`+` 連結を経由した
-文字列は、このオプションを指定していても通常どおり正規化されます。)
-
-```ts
-import { CBOR } from '@cbortech/cbor';
-
-CBOR.format('"caf\\u00e9"');
-// '"café"'
-
-CBOR.format('"caf\\u00e9"', { preserveTextString: true });
-// '"caf\\u00e9"'
-```
-
 ### 数値リテラルの表記を保持する
 
 デフォルトでは、`CBOR.format()` は整数・浮動小数点数リテラルを正規化します。
