@@ -1394,10 +1394,28 @@ describe('CBOR.format()', () => {
     expect(CBOR.format(CBOR.format(input))).toBe(CBOR.format(input));
   });
 
-  test('preserveAll turns on every preserve* option at once', () => {
+  test('preserveAll turns on every preserve* option at once, except the deprecated preserveTextString', () => {
     const text =
       '{"a":0xff,"b":1.5_1,"c":b64\'aGk=\',"d":"caf\\u00e9","e":`raw`,"f":"x"+"y"}';
     expect(CBOR.format(text, { preserveAll: true, indent: 2 })).toBe(
+      '{\n' +
+        '  "a": 0xff,\n' +
+        '  "b": 1.5_1,\n' +
+        '  "c": b64\'aGk=\',\n' +
+        '  "d": "café",\n' +
+        '  "e": `raw`,\n' +
+        '  "f": "x" +\n' +
+        '    "y"\n' +
+        '}'
+    );
+    // Explicitly opting into the deprecated option still works.
+    expect(
+      CBOR.format(text, {
+        preserveAll: true,
+        preserveTextString: true,
+        indent: 2,
+      })
+    ).toBe(
       '{\n' +
         '  "a": 0xff,\n' +
         '  "b": 1.5_1,\n' +
@@ -1419,6 +1437,32 @@ describe('CBOR.format()', () => {
         '  "f": "xy"\n' +
         '}'
     );
+  });
+
+  test('preserveAll no longer blocks splitNewline for a non-concatenated string', () => {
+    // Regression guard: before preserveTextString was dropped from
+    // preserveAll, this string's verbatim spelling would win over
+    // splitNewline and it would stay on one line.
+    expect(
+      CBOR.format('"line1\\nline2"', {
+        preserveAll: true,
+        splitNewline: true,
+        indent: 2,
+      })
+    ).toBe('"line1\\n" +\n  "line2"');
+  });
+
+  test('preserveAll no longer blocks splitCdn for a non-concatenated string', () => {
+    // Regression guard: before preserveTextString was dropped from
+    // preserveAll, this string's verbatim spelling would win over
+    // splitCdn and it would stay on one line.
+    expect(
+      CBOR.format('"[1, 2, 3]"', {
+        preserveAll: true,
+        splitCdn: true,
+        indent: 2,
+      })
+    ).toBe('"[" +\n    "1, " +\n    "2, " +\n    "3" +\n  "]"');
   });
 
   test('preserveAll leaves an explicitly-set individual option alone', () => {

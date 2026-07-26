@@ -137,10 +137,9 @@ export function wirePopoverToggle(buttonId: string, popoverId: string): void {
 /**
  * Checkboxes for layout-dependent `ToCDNOptions` that the library ignores in
  * single-line output (Indent: Compact); they are greyed out to make that
- * visible. `opt-raw-string`, `opt-text-string`, `opt-byte-string`, and
- * `opt-number-format` are deliberately excluded: single-line spellings are
- * still kept in compact mode (only multi-line raw/byte-string spellings
- * fall back).
+ * visible. `opt-raw-string`, `opt-byte-string`, and `opt-number-format` are
+ * deliberately excluded: single-line spellings are still kept in compact
+ * mode (only multi-line raw/byte-string spellings fall back).
  */
 const LAYOUT_OPTION_IDS = [
   'opt-split-newline',
@@ -161,7 +160,6 @@ const PRESERVE_OPTION_IDS = [
   'opt-concat',
   'opt-byte-string',
   'opt-raw-string',
-  'opt-text-string',
   'opt-number-format',
   'opt-app-sequence',
 ] as const;
@@ -259,8 +257,6 @@ export function readFormatOptions(): FromCDNOptions & ToCDNOptions {
     options.preserveByteString = true;
   if ((document.getElementById('opt-raw-string') as HTMLInputElement).checked)
     options.preserveRawString = true;
-  if ((document.getElementById('opt-text-string') as HTMLInputElement).checked)
-    options.preserveTextString = true;
   if (
     (document.getElementById('opt-number-format') as HTMLInputElement).checked
   )
