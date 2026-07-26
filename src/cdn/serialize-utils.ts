@@ -5,6 +5,7 @@
 
 import type { CborComment, CborComments, ToCDNOptions } from '../types';
 import type { EncodingWidth } from '../cbor/encode';
+import type { AppSeqEncodingEdit, AppSeqSourceFeatures } from '../ast/CborItem';
 import { bytesToHex as toHex } from '../utils/hex';
 
 // ─── Indent helpers ───────────────────────────────────────────────────────────
@@ -861,13 +862,6 @@ export function resolveEiSuffix(
 export type AppSeqRenderDecision =
   'verbatim' | 'adjusted' | 'source' | 'structural' | 'normal';
 
-interface AppSeqSourceFeatures {
-  byteString?: boolean;
-  textString?: boolean;
-  rawString?: boolean;
-  concatenation?: boolean;
-}
-
 /**
  * Decide how an extension result node — from a `prefix'...'` /
  * `` prefix`...` `` / `prefix<<...>>` source, or (for a tag-wrapper node
@@ -1026,14 +1020,7 @@ export function adjustRawAppSeqSource(
   appSeqSource: string,
   options: ToCDNOptions | undefined,
   comments: readonly CborComment[] | undefined,
-  encodingEdits:
-    | readonly {
-        start: number;
-        end: number;
-        always: string;
-        never: string;
-      }[]
-    | undefined
+  encodingEdits: readonly AppSeqEncodingEdit[] | undefined
 ): string {
   const replacements: {
     start: number;
