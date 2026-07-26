@@ -594,13 +594,13 @@ export interface ToCDNOptions {
   indent?: number | string;
 
   /**
-   * Master switch that turns on every `preserve*` option below at once —
-   * `preserveComments`, `preserveByteString`, `preserveRawString`,
-   * `preserveTextString`, `preserveConcatenation`, `preserveNumberFormat`,
-   * `preserveAppSequence`, and `preserveBlankLines` — for reformatting CDN
-   * text (e.g. on save in an editor) with minimal changes: only
-   * whitespace/indentation, plus anything an explicitly-set individual
-   * option overrides.
+   * Master switch that turns on every `preserve*` option below at once,
+   * except the deprecated `preserveTextString` — `preserveComments`,
+   * `preserveByteString`, `preserveRawString`, `preserveConcatenation`,
+   * `preserveNumberFormat`, `preserveAppSequence`, and
+   * `preserveBlankLines` — for reformatting CDN text (e.g. on save in an
+   * editor) with minimal changes: only whitespace/indentation, plus
+   * anything an explicitly-set individual option overrides.
    *
    * An option explicitly set to a value (including `false`) is left as-is;
    * `preserveAll` only fills in the ones left `undefined`. So
@@ -722,6 +722,13 @@ export interface ToCDNOptions {
    *
    * In single-line output (no `indent`), a spelling that spans multiple
    * lines falls back to normal escaping; single-line spellings are kept.
+   *
+   * @deprecated Verbatim spelling and `splitCdn` / `splitNewline` reflow
+   *   are mutually exclusive for a given literal — enabling this option
+   *   silently defeats both for any non-concatenated double-quoted string.
+   *   It still works when set explicitly, but no longer participates in
+   *   `preserveAll` and has been removed from the playground's preserve
+   *   options.
    *
    * @default false
    */

@@ -2,6 +2,8 @@
 export type {
   CBOROptions,
   CborExtension,
+  CborComment,
+  CborComments,
   DecodeWarning,
   ParseWarning,
   FromCBOROptions,
@@ -19,6 +21,10 @@ export type {
   ValidateOptions,
   ValidateResult,
 } from './types';
+
+// Encoding-width type used by `encodingWidth` fields on CborItem subclasses,
+// and by the `preserveAppSequence` primitives exposed from `@cbortech/cbor/cdn`.
+export type { EncodingWidth } from './cbor/encode';
 
 // Structured syntax error thrown by fromCDN/parse
 export { CdnSyntaxError } from './cdn/errors';

@@ -22,10 +22,68 @@ import {
   resolveIndent,
   serializeBytes,
   stripByteLiteralComments,
+  convertCommentText,
+  danglingCommentsByGap,
+  joinConcatParts,
   type ByteCommentSyntax,
 } from '../cdn/serialize-utils';
 
 export const CPA888_TAG = 888n;
+
+/**
+ * Comments between two top-level `items` entries (a real `+` the parser
+ * never fused away — see `CborByteString.ednParts`/`CborTextString
+ * .ednPartSpans` for the case where two literals *did* fuse into one node
+ * with no per-part AST node of their own) land on one of them as ordinary
+ * `leading`/`trailing`, exactly like any other array entry: `attachComments`
+ * runs generically over the whole tree, and both entries are real
+ * `CborItem`s once the parser stamps their `start`/`end`.
+ */
+function boundaryComments(
+  prev: CborItem,
+  next: CborItem,
+  preserveComments: boolean,
+  style: 'c-style' | 'cdn-style' | undefined
+): string[] {
+  if (!preserveComments) return [];
+  return [
+    ...(prev.comments?.trailing ?? []).map((c) => convertCommentText(c, style)),
+    ...(next.comments?.leading ?? []).map((c) => convertCommentText(c, style)),
+  ];
+}
+
+/**
+ * Join elision fragments with `+`. Elision is compact/single-line by
+ * default — an abbreviated, inherently short summary of the underlying
+ * value, not something meant to be reflowed across lines — but reflows
+ * across multiple lines, one fragment per line like a real `+`
+ * concatenation, when `indent` is enabled *and* there's a *mid-chain*
+ * comment to preserve: a single line has nowhere to put a `#`/`//` line
+ * comment sitting between two fragments (it has no way to terminate before
+ * the rest of the chain), and a block comment kept inline there would be
+ * indistinguishable from one actually written that way. With nothing to
+ * preserve, or with `indent` disabled (nothing can safely hold a newline),
+ * the whole chain still collapses onto one line and any such comment is
+ * dropped — matching every other comment kind in single-line output.
+ *
+ * A comment trailing the *whole* chain needs none of this: it's promoted
+ * onto this `CborEllipsis`'s own `comments.trailing` by the parser (see
+ * `promoteEllipsisTailComments`), so the ordinary `entryTrailing`/root-
+ * `toCDN()` machinery appends it after the rendered body — on the same
+ * line if the body stayed single-line, which is always safe since nothing
+ * else follows it there.
+ */
+function joinElisionParts(
+  rendered: readonly string[],
+  gapComments: readonly (readonly string[])[],
+  indentStr: string | null,
+  depth: number
+): string {
+  if (indentStr === null || !gapComments.some((g) => g.length > 0)) {
+    return rendered.join(' + ');
+  }
+  return joinConcatParts(rendered, indentStr, depth, gapComments);
+}
 
 /**
  * Resolve a preserved source spelling: strip any embedded comment unless
@@ -149,7 +207,7 @@ export class CborEllipsis extends CborTag {
         // as each source literal (e.g. a `h'xx...yy'`, however its own
         // `...` is positioned) was spelled — see `realBoundary`. With no
         // real boundary at all, this is just the one literal's own spelling.
-        const preserved = this._renderPreservedBytesElision(options);
+        const preserved = this._renderPreservedBytesElision(options, depth);
         if (preserved !== undefined) return preserved;
       }
       if (!preserveConcat || this.realBoundary === undefined) {
@@ -164,15 +222,30 @@ export class CborEllipsis extends CborTag {
         if (compactHex !== undefined) return compactHex;
       }
       // Otherwise (text elision, or bytes elision mixed with something
-      // else): frag + ... + frag. Always single-line, unlike a real `+`
-      // concatenation: the elision notation is an abbreviated, inherently
-      // short summary, not something meant to be reflowed across lines.
-      const parts = this.content.items.map((item) =>
+      // else): frag + ... + frag, single-line unless a comment needs the
+      // extra room — see `joinElisionParts`.
+      const items = this.content.items;
+      const parts = items.map((item) =>
         preserveConcat
-          ? this._renderFragment(item, options)
+          ? this._renderFragment(item, options, depth)
           : item._toCDN(options, depth)
       );
-      return parts.join(' + ');
+      const preserveComments = !!options?.preserveComments;
+      const style =
+        typeof options?.preserveComments === 'string'
+          ? options.preserveComments
+          : undefined;
+      const gapComments = items
+        .slice(1)
+        .map((item, i) =>
+          boundaryComments(items[i]!, item, preserveComments, style)
+        );
+      return joinElisionParts(
+        parts,
+        gapComments,
+        resolveIndent(options),
+        depth
+      );
     }
     return super._toCDN(options, depth);
   }
@@ -219,9 +292,15 @@ export class CborEllipsis extends CborTag {
    */
   private _renderFragment(
     item: CborItem,
-    options: ToCDNOptions | undefined
+    options: ToCDNOptions | undefined,
+    depth: number
   ): string {
     const indentStr = resolveIndent(options);
+    const preserveComments = !!options?.preserveComments;
+    const style =
+      typeof options?.preserveComments === 'string'
+        ? options.preserveComments
+        : undefined;
     if (
       item instanceof CborByteString &&
       item.ednParts !== undefined &&
@@ -231,21 +310,26 @@ export class CborEllipsis extends CborTag {
         options?.appStrings === false
           ? 'hex'
           : (options?.bstrEncoding ?? item.ednEncoding);
-      return item.ednParts
-        .map((part) => {
-          const source = options?.preserveByteString
-            ? preservedSource(
-                part.source,
-                options,
-                indentStr,
-                part.commentSyntax
-              )
-            : undefined;
-          return source !== undefined
-            ? source
-            : serializeBytes(part.bytes, encoding, options?.sqstr);
-        })
-        .join(' + ');
+      const literals = item.ednParts.map((part) => {
+        const source = options?.preserveByteString
+          ? preservedSource(part.source, options, indentStr, part.commentSyntax)
+          : undefined;
+        return source !== undefined
+          ? source
+          : serializeBytes(part.bytes, encoding, options?.sqstr);
+      });
+      // These parts merged into one `CborByteString` with no per-part AST
+      // node of their own — see `_renderPreservedBytesElision`'s equivalent
+      // comment — so a comment between two of them landed as `dangling` on
+      // `item` as a whole instead.
+      const internalGaps = preserveComments
+        ? (danglingCommentsByGap(
+            item.comments?.dangling,
+            item.ednParts,
+            style
+          ) ?? [])
+        : [];
+      return joinElisionParts(literals, internalGaps, indentStr, depth);
     }
     if (
       item instanceof CborTextString &&
@@ -255,16 +339,22 @@ export class CborEllipsis extends CborTag {
       const partSources = options?.preserveRawString
         ? item.ednPartSources
         : undefined;
-      return item.ednParts
-        .map((text, i) => {
-          const source = partSources?.[i];
-          return usableTextSource(source, indentStr)
-            ? source
-            : escapeString(text);
-        })
-        .join(' + ');
+      const literals = item.ednParts.map((text, i) => {
+        const source = partSources?.[i];
+        return usableTextSource(source, indentStr)
+          ? source
+          : escapeString(text);
+      });
+      const internalGaps = preserveComments
+        ? (danglingCommentsByGap(
+            item.comments?.dangling,
+            item.ednPartSpans,
+            style
+          ) ?? [])
+        : [];
+      return joinElisionParts(literals, internalGaps, indentStr, depth);
     }
-    return item._toCDN(options, 0);
+    return item._toCDN(options, depth);
   }
 
   /**
@@ -317,7 +407,8 @@ export class CborEllipsis extends CborTag {
    * the simpler per-fragment `frag + ... + frag` rendering.
    */
   private _renderPreservedBytesElision(
-    options: ToCDNOptions | undefined
+    options: ToCDNOptions | undefined,
+    depth: number
   ): string | undefined {
     if (this.realBoundary === undefined) return undefined;
     const boundary = this.realBoundary;
@@ -331,17 +422,34 @@ export class CborEllipsis extends CborTag {
         }
       | { ellipsis: true; fromByteLiteral: boolean; literalSource?: string };
     const groups: Segment[][] = [];
+    // `gapComments[i]` holds already-converted comment text that sat
+    // between `groups[i]` and `groups[i + 1]` in the source. Every
+    // `flush(comments)` call happens exactly at such a gap — `current`
+    // (about to become `groups[gapComments.length]`) is whatever came
+    // *before* the gap, and whatever gets pushed to `current` right after
+    // this call is what comes *after* it — so each call always records one
+    // entry, except the final, argument-less flush at the very end of the
+    // method (nothing follows the last group).
+    const gapComments: string[][] = [];
     let current: Segment[] = [];
-    const flush = () => {
+    const flush = (comments?: string[]) => {
       if (current.length > 0) {
         groups.push(current);
+        gapComments.push(comments ?? []);
         current = [];
       }
     };
 
+    const preserveComments = !!options?.preserveComments;
+    const style =
+      typeof options?.preserveComments === 'string'
+        ? options.preserveComments
+        : undefined;
+
     for (let i = 0; i < items.length; i++) {
       const item = items[i]!;
-      if (i > 0 && boundary[i]) flush();
+      if (i > 0 && boundary[i])
+        flush(boundaryComments(items[i - 1]!, item, preserveComments, style));
       if (item instanceof CborEllipsis && item.content instanceof CborSimple) {
         current.push({
           ellipsis: true,
@@ -356,14 +464,26 @@ export class CborEllipsis extends CborTag {
             source: firstPart.source,
             commentSyntax: firstPart.commentSyntax,
           });
-          for (const part of restParts) {
-            flush();
+          // These parts merged into one `CborByteString` with no per-part
+          // AST node of their own (no ellipsis sat between them — see
+          // `CborEllipsis._hasRealConcatenation`'s doc), so a comment
+          // between two of them landed as `dangling` on `item` as a whole
+          // instead; re-derive which internal gap each one belongs to.
+          const internalGaps = preserveComments
+            ? danglingCommentsByGap(
+                item.comments?.dangling,
+                item.ednParts,
+                style
+              )
+            : undefined;
+          restParts.forEach((part, j) => {
+            flush(internalGaps?.[j]);
             current.push({
               bytes: part.bytes,
               source: part.source,
               commentSyntax: part.commentSyntax,
             });
-          }
+          });
         } else {
           current.push({
             bytes: item.value,
@@ -375,77 +495,78 @@ export class CborEllipsis extends CborTag {
         return undefined;
       }
     }
-    flush();
+    // The closing flush has no gap after it, so it bypasses `flush()`'s own
+    // comment recording — pushing directly keeps `gapComments.length` at
+    // exactly `groups.length - 1`.
+    if (current.length > 0) groups.push(current);
     if (groups.length === 0) return undefined;
 
     const encoding =
       options?.appStrings === false ? 'hex' : (options?.bstrEncoding ?? 'hex');
-    // Elision is always single-line (see the class doc), but a preserved
-    // source spelling can itself contain embedded newlines (interior
-    // whitespace, or a surviving `#`/`//` line comment) — those are only
-    // safe to re-emit verbatim when `indent` enables multi-line output; see
-    // `preservedSource`. Otherwise fall back to freshly re-serializing the
-    // bytes.
+    // A preserved source spelling can itself contain embedded newlines
+    // (interior whitespace, or a surviving `#`/`//` line comment) — those
+    // are only safe to re-emit verbatim when `indent` enables multi-line
+    // output; see `preservedSource`. Otherwise fall back to freshly
+    // re-serializing the bytes.
     const indentStr = resolveIndent(options);
-    return groups
-      .map((group) => {
-        // A group with more than one segment, or a single ellipsis-only
-        // group, always came from exactly one `h'xx...yy'` literal (see the
-        // parser: nothing but that literal's own atoms ever ends up fused
-        // together) — so any ellipsis segment's `literalSource` is that
-        // whole group's original spelling.
-        if (options?.preserveByteString) {
-          for (const s of group) {
-            if (!('ellipsis' in s)) continue;
-            // Always came from a BYTES_HEX_ELIDED token (see `_elidedHexAtoms`),
-            // so its comment syntax is unconditionally hex's full syntax.
-            const literalSource = preservedSource(
-              s.literalSource,
+    const rendered = groups.map((group) => {
+      // A group with more than one segment, or a single ellipsis-only
+      // group, always came from exactly one `h'xx...yy'` literal (see the
+      // parser: nothing but that literal's own atoms ever ends up fused
+      // together) — so any ellipsis segment's `literalSource` is that
+      // whole group's original spelling.
+      if (options?.preserveByteString) {
+        for (const s of group) {
+          if (!('ellipsis' in s)) continue;
+          // Always came from a BYTES_HEX_ELIDED token (see `_elidedHexAtoms`),
+          // so its comment syntax is unconditionally hex's full syntax.
+          const literalSource = preservedSource(
+            s.literalSource,
+            options,
+            indentStr,
+            'full'
+          );
+          if (literalSource !== undefined) return literalSource;
+        }
+      }
+      const byteSegments = group.filter(
+        (
+          s
+        ): s is {
+          bytes: Uint8Array;
+          source?: string;
+          commentSyntax?: ByteCommentSyntax;
+        } => !('ellipsis' in s)
+      );
+      if (byteSegments.length === 0) {
+        // Isolated ellipsis-only group with no preserved source: bare
+        // `...` for a genuine standalone ellipsis token, `h'...'` when it
+        // came from an elided-hex literal (even an entirely-elided one)
+        // to keep its byte-typed spelling.
+        const fromByteLiteral = group.some(
+          (s) => 'ellipsis' in s && s.fromByteLiteral
+        );
+        return fromByteLiteral ? "h'...'" : '...';
+      }
+      if (group.length === 1) {
+        const segment = byteSegments[0];
+        const source = options?.preserveByteString
+          ? preservedSource(
+              segment.source,
               options,
               indentStr,
-              'full'
-            );
-            if (literalSource !== undefined) return literalSource;
-          }
-        }
-        const byteSegments = group.filter(
-          (
-            s
-          ): s is {
-            bytes: Uint8Array;
-            source?: string;
-            commentSyntax?: ByteCommentSyntax;
-          } => !('ellipsis' in s)
-        );
-        if (byteSegments.length === 0) {
-          // Isolated ellipsis-only group with no preserved source: bare
-          // `...` for a genuine standalone ellipsis token, `h'...'` when it
-          // came from an elided-hex literal (even an entirely-elided one)
-          // to keep its byte-typed spelling.
-          const fromByteLiteral = group.some(
-            (s) => 'ellipsis' in s && s.fromByteLiteral
-          );
-          return fromByteLiteral ? "h'...'" : '...';
-        }
-        if (group.length === 1) {
-          const segment = byteSegments[0];
-          const source = options?.preserveByteString
-            ? preservedSource(
-                segment.source,
-                options,
-                indentStr,
-                segment.commentSyntax
-              )
-            : undefined;
-          return source !== undefined
-            ? source
-            : serializeBytes(segment.bytes, encoding, options?.sqstr);
-        }
-        const hex = group
-          .map((s) => ('ellipsis' in s ? '...' : bytesToHex(s.bytes)))
-          .join('');
-        return `h'${hex}'`;
-      })
-      .join(' + ');
+              segment.commentSyntax
+            )
+          : undefined;
+        return source !== undefined
+          ? source
+          : serializeBytes(segment.bytes, encoding, options?.sqstr);
+      }
+      const hex = group
+        .map((s) => ('ellipsis' in s ? '...' : bytesToHex(s.bytes)))
+        .join('');
+      return `h'${hex}'`;
+    });
+    return joinElisionParts(rendered, gapComments, indentStr, depth);
   }
 }

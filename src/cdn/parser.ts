@@ -69,8 +69,10 @@ export function parseCDN(text: string, options?: FromCDNOptions): CborItem {
   });
   const parser = new CDNParser(tokenizer, options ?? {});
   const node = parser.parse();
-  if (options?.preserveComments || options?.preserveAll)
+  if (options?.preserveComments || options?.preserveAll) {
     attachComments(node, tokenizer.comments, text);
+    promoteEllipsisTailComments(node);
+  }
   return node;
 }
 
@@ -557,6 +559,63 @@ function addComment(
   node.comments[placement].push(comment);
 }
 
+/**
+ * A comment right after the very last fragment of a `+`/`...` chain ties,
+ * in source position, with the enclosing `CborEllipsis`'s own end — there
+ * is no closing delimiter after the last fragment (unlike an array's `]` or
+ * a map's `}`) to give the chain a later end of its own — so
+ * `attachComments`'s prev/next tie-break resolves it in favour of the more
+ * specific, innermost node: the comment lands as `trailing` on the last
+ * fragment itself, not on the `CborEllipsis`.
+ *
+ * Move it up onto the `CborEllipsis`'s own `comments.trailing` so the
+ * ordinary `entryTrailing`/root-`toCDN()` machinery renders it after
+ * whatever separator the parent adds (`,`, `:`, a closing bracket) instead
+ * of `CborEllipsis._toCDN()` folding it into the chain's own body — which
+ * would place a `#`/`//` line comment *before* that separator, swallowing
+ * it into the comment on re-parse (e.g. `[h'aa' + ..., # next\n 1]` would
+ * otherwise render the trailing `,` inside the comment text itself).
+ */
+function promoteEllipsisTailComments(node: CborItem): void {
+  if (node instanceof CborEllipsis) {
+    if (node.content instanceof CborArray) {
+      const items = node.content.items;
+      for (const item of items) promoteEllipsisTailComments(item);
+      const last = items[items.length - 1];
+      const lastTrailing = last?.comments?.trailing;
+      if (
+        lastTrailing !== undefined &&
+        lastTrailing.length > 0 &&
+        !node.comments?.trailing?.length
+      ) {
+        node.comments ??= {};
+        node.comments.trailing = lastTrailing;
+        last.comments!.trailing = undefined;
+      }
+    }
+    return;
+  }
+  if (node instanceof CborArray || node instanceof CborEmbeddedCBOR) {
+    for (const item of node.items) promoteEllipsisTailComments(item);
+    return;
+  }
+  if (node instanceof CborMap) {
+    for (const [key, value] of node.entries) {
+      promoteEllipsisTailComments(key);
+      promoteEllipsisTailComments(value);
+    }
+    return;
+  }
+  if (
+    node instanceof CborIndefiniteByteString ||
+    node instanceof CborIndefiniteTextString
+  ) {
+    for (const chunk of node.chunks) promoteEllipsisTailComments(chunk);
+    return;
+  }
+  if (node instanceof CborTag) promoteEllipsisTailComments(node.content);
+}
+
 function buildLineAt(source: string): (offset: number) => number {
   const starts = [0];
   for (let i = 0; i < source.length; i++) {
@@ -631,12 +690,31 @@ type ByteEllipsisAtom =
       source?: string;
       commentSyntax?: ByteCommentSyntax;
       real: boolean;
+      /**
+       * Source span this atom occupies — its own literal token's span for a
+       * direct `+`-joined fragment, or the enclosing `h'xx...yy'` token's
+       * whole span for an internal segment split out of it (see
+       * `_elidedHexAtoms`: no comment can ever sit between two of that
+       * token's own internal segments, so sharing the outer span is safe and
+       * still lets an *outer* boundary comment resolve correctly against the
+       * group as a whole). Lets `_buildFromByteAtoms` stamp `start`/`end` on
+       * the `CborByteString`/`CborEllipsis` nodes it builds, so the generic
+       * `attachComments` pass (and `CborByteString._toCDN`'s /
+       * `CborEllipsis._renderPreservedBytesElision`'s own dangling-comment
+       * lookups) can place a comment between two `+`-joined parts instead of
+       * dropping it.
+       */
+      start?: number;
+      end?: number;
     }
   | {
       ellipsis: true;
       real: boolean;
       fromByteLiteral: boolean;
       literalSource?: string;
+      /** See the byte-atom variant's `start`/`end` doc above. */
+      start?: number;
+      end?: number;
     };
 
 // ─── Parser ───────────────────────────────────────────────────────────────────
@@ -749,7 +827,9 @@ class CDNParser {
         return this._parseBytesConcat(
           this._decodeBytesToken(tok),
           tok.type,
-          tok.raw
+          tok.raw,
+          tok.offset,
+          tok.endOffset
         );
       }
       case 'EMPTY_INDEF_BYTES':
@@ -1144,12 +1224,23 @@ class CDNParser {
     // Concatenation chain — may include ellipsis, producing CborEllipsis
     let hasEllipsis = false;
     const parts: Array<
-      | { text: string; source?: string; isByteString?: boolean }
-      | { ellipsis: true }
+      | {
+          text: string;
+          source?: string;
+          isByteString?: boolean;
+          start: number;
+          end: number;
+        }
+      | { ellipsis: true; start: number; end: number }
     > = [
       tok.type === 'RAWSTRING'
-        ? { text: tok.value, source: tok.raw }
-        : { text: tok.value },
+        ? {
+            text: tok.value,
+            source: tok.raw,
+            start: tok.offset,
+            end: tok.endOffset,
+          }
+        : { text: tok.value, start: tok.offset, end: tok.endOffset },
     ];
 
     while (this.t.peek().type === 'PLUS') {
@@ -1157,14 +1248,19 @@ class CDNParser {
       const next = this.t.peek();
       if (next.type === 'ELLIPSIS') {
         this.t.consume();
-        parts.push({ ellipsis: true });
+        parts.push({ ellipsis: true, start: next.offset, end: next.endOffset });
         hasEllipsis = true;
       } else if (next.type === 'TSTR' || next.type === 'RAWSTRING') {
         this.t.consume();
         parts.push(
           next.type === 'RAWSTRING'
-            ? { text: next.value, source: next.raw }
-            : { text: next.value }
+            ? {
+                text: next.value,
+                source: next.raw,
+                start: next.offset,
+                end: next.endOffset,
+              }
+            : { text: next.value, start: next.offset, end: next.endOffset }
         );
       } else if (this._isBytesToken(next.type)) {
         this.t.consume();
@@ -1175,6 +1271,8 @@ class CDNParser {
           // to `byteString`, not the unpreservable `textString`, since both
           // leave `source` undefined here.
           isByteString: true,
+          start: next.offset,
+          end: next.endOffset,
         });
       } else {
         this._fail(
@@ -1192,12 +1290,14 @@ class CDNParser {
       const isByteStringFlags = parts.map((p) =>
         'text' in p ? (p.isByteString ?? false) : false
       );
+      const spans = parts.map((p) => ({ start: p.start, end: p.end }));
       const joined = texts.join('');
       const ew = this.consumeEncodingIndicator(() =>
         BigInt(textEncoder.encode(joined).length)
       );
       return new CborTextString(joined, {
         ednParts: texts,
+        ednPartSpans: spans,
         ...(sources.some((s) => s !== undefined)
           ? { ednPartSources: sources }
           : {}),
@@ -1215,6 +1315,8 @@ class CDNParser {
       text: string;
       source?: string;
       isByteString?: boolean;
+      start: number;
+      end: number;
     }> = [];
     const flushCurrentParts = () => {
       const texts = currentParts.map((part) => part.text);
@@ -1224,24 +1326,38 @@ class CDNParser {
         const isByteStringFlags = currentParts.map(
           (part) => part.isByteString ?? false
         );
-        items.push(
-          new CborTextString(currentText, {
-            ednParts: texts,
-            ...(sources.some((source) => source !== undefined)
-              ? { ednPartSources: sources }
-              : {}),
-            ...(isByteStringFlags.some((b) => b)
-              ? { ednPartIsByteString: isByteStringFlags }
-              : {}),
-          })
-        );
+        const spans = currentParts.map((part) => ({
+          start: part.start,
+          end: part.end,
+        }));
+        const node = new CborTextString(currentText, {
+          ednParts: texts,
+          ednPartSpans: spans,
+          ...(sources.some((source) => source !== undefined)
+            ? { ednPartSources: sources }
+            : {}),
+          ...(isByteStringFlags.some((b) => b)
+            ? { ednPartIsByteString: isByteStringFlags }
+            : {}),
+        });
+        // Stamp the generic start/end span so `attachComments` (run once,
+        // after the whole tree is built) can attach a comment between this
+        // item and its neighbour in `items` as `leading`/`trailing`, exactly
+        // like any other array entry — see
+        // `CborEllipsis._toCDN`'s text-elision rendering.
+        node.start = currentParts[0]!.start;
+        node.end = currentParts[currentParts.length - 1]!.end;
+        items.push(node);
       }
       currentParts.length = 0;
     };
     for (const part of parts) {
       if ('ellipsis' in part) {
         flushCurrentParts();
-        items.push(new CborEllipsis());
+        const ellipsisNode = new CborEllipsis();
+        ellipsisNode.start = part.start;
+        ellipsisNode.end = part.end;
+        items.push(ellipsisNode);
       } else {
         currentParts.push(part);
       }
@@ -1327,7 +1443,9 @@ class CDNParser {
   private _parseBytesConcat(
     first: Uint8Array,
     firstType: string,
-    firstSource: string
+    firstSource: string,
+    firstStart: number,
+    firstEnd: number
   ): CborByteString | CborEllipsis {
     if (this.t.peek().type !== 'PLUS') {
       const ew = this.consumeEncodingIndicator(() => BigInt(first.length));
@@ -1345,6 +1463,8 @@ class CDNParser {
         source: firstSource,
         commentSyntax: this._tokenTypeToCommentSyntax(firstType),
         real: false,
+        start: firstStart,
+        end: firstEnd,
       },
     ];
     const atoms = this._consumeByteEllipsisChain(initial);
@@ -1390,7 +1510,13 @@ class CDNParser {
       const next = this.t.peek();
       if (next.type === 'ELLIPSIS') {
         this.t.consume();
-        atoms.push({ ellipsis: true, real: true, fromByteLiteral: false });
+        atoms.push({
+          ellipsis: true,
+          real: true,
+          fromByteLiteral: false,
+          start: next.offset,
+          end: next.endOffset,
+        });
       } else if (next.type === 'BYTES_HEX_ELIDED') {
         this.t.consume();
         const sub = this._elidedHexAtoms(next.value, next);
@@ -1403,6 +1529,8 @@ class CDNParser {
           source: next.raw,
           commentSyntax: this._tokenTypeToCommentSyntax(next.type),
           real: true,
+          start: next.offset,
+          end: next.endOffset,
         });
       } else if (next.type === 'TSTR' || next.type === 'RAWSTRING') {
         // §5.1: when a byte string leads, the right-hand side must also be a
@@ -1414,7 +1542,12 @@ class CDNParser {
           'text string in a byte-string concatenation is not allowed; ' +
           "use a byte string literal (h'...', b64'...', or '...') instead";
         this._warnOrFail(mixMsg, next);
-        atoms.push({ bytes: textEncoder.encode(next.value), real: true });
+        atoms.push({
+          bytes: textEncoder.encode(next.value),
+          real: true,
+          start: next.offset,
+          end: next.endOffset,
+        });
       } else {
         this._fail(
           `expected byte string after +, got ${JSON.stringify(next.value)}`,
@@ -1444,12 +1577,16 @@ class CDNParser {
           real: false,
           fromByteLiteral: true,
           literalSource: tok.raw,
+          start: tok.offset,
+          end: tok.endOffset,
         });
       if (segments[i].length > 0) {
         atoms.push({
           bytes: this._hexToBytes(segments[i], tok),
           commentSyntax: 'full',
           real: false,
+          start: tok.offset,
+          end: tok.endOffset,
         });
       }
     }
@@ -1476,6 +1613,8 @@ class CDNParser {
         bytes: Uint8Array;
         source?: string;
         commentSyntax?: ByteCommentSyntax;
+        start?: number;
+        end?: number;
       }>;
       const concat = this._concatBytes(byteParts.map((p) => p.bytes));
       const ew = this.consumeEncodingIndicator(() => BigInt(concat.length));
@@ -1493,29 +1632,43 @@ class CDNParser {
       source?: string;
       commentSyntax?: ByteCommentSyntax;
       real: boolean;
+      start?: number;
+      end?: number;
     }> = [];
     const flushPending = () => {
       if (pending.length > 0) {
-        items.push(
-          new CborByteString(this._concatBytes(pending.map((p) => p.bytes)), {
+        const node = new CborByteString(
+          this._concatBytes(pending.map((p) => p.bytes)),
+          {
             // A single fragment (no merge across a real `+`) still needs its
             // own source spelling preserved — e.g. the sole byte atom
             // adjacent to an ellipsis in `h'41' + ...` — so
             // `preserveByteString` has something to round-trip.
             ...(pending.length > 1
               ? {
-                  ednParts: pending.map(({ bytes, source, commentSyntax }) => ({
-                    bytes,
-                    source,
-                    commentSyntax,
-                  })),
+                  ednParts: pending.map(
+                    ({ bytes, source, commentSyntax, start, end }) => ({
+                      bytes,
+                      source,
+                      commentSyntax,
+                      start,
+                      end,
+                    })
+                  ),
                 }
               : {
                   ednSource: pending[0]!.source,
                   ednCommentSyntax: pending[0]!.commentSyntax,
                 }),
-          })
+          }
         );
+        // Stamp the generic start/end span so `attachComments` (run once,
+        // after the whole tree is built) can attach a comment between this
+        // item and its neighbour in `items` as `leading`/`trailing`, exactly
+        // like any other array entry — see `CborEllipsis._renderPreservedBytesElision`.
+        node.start = pending[0]!.start;
+        node.end = pending[pending.length - 1]!.end;
+        items.push(node);
         realBoundary.push(pending[0]!.real);
         pending.length = 0;
       }
@@ -1523,7 +1676,13 @@ class CDNParser {
     for (const atom of atoms) {
       if ('ellipsis' in atom) {
         flushPending();
-        items.push(new CborEllipsis(atom.fromByteLiteral, atom.literalSource));
+        const ellipsisNode = new CborEllipsis(
+          atom.fromByteLiteral,
+          atom.literalSource
+        );
+        ellipsisNode.start = atom.start;
+        ellipsisNode.end = atom.end;
+        items.push(ellipsisNode);
         realBoundary.push(atom.real);
       } else {
         pending.push(atom);

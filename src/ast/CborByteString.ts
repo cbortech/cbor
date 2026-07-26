@@ -13,6 +13,7 @@ import {
   joinConcatParts,
   canonicalEncodingWidth,
   stripByteLiteralComments,
+  danglingCommentsByGap,
   type ByteCommentSyntax,
 } from '../cdn/serialize-utils';
 
@@ -44,6 +45,17 @@ export interface CborByteStringPart {
   source?: string;
   /** Which comment syntax `source` recognizes, if any — see `ednCommentSyntax`. */
   commentSyntax?: ByteCommentSyntax;
+  /**
+   * Source span of this part's own literal token, when known — used to place
+   * a comment sitting between two `+`-joined parts (attached to the whole
+   * `CborByteString` as a `dangling` comment, since there is no per-part AST
+   * node for it to attach to) at the right gap in `_toCDN`'s
+   * `preserveConcatenation` branch. `undefined` for a part merged from a
+   * single elided literal's own internal segments, which cannot have a
+   * comment between them.
+   */
+  start?: number;
+  end?: number;
 }
 
 /** CBOR Major Type 2 — definite-length byte string. */
@@ -115,7 +127,16 @@ export class CborByteString extends CborItem {
           : serializeBytes(part.bytes, encoding, options?.sqstr);
       });
       literals[literals.length - 1] += suffix;
-      return joinConcatParts(literals, indentStr, _depth);
+      const midComments = options?.preserveComments
+        ? danglingCommentsByGap(
+            this.comments?.dangling,
+            this.ednParts,
+            typeof options.preserveComments === 'string'
+              ? options.preserveComments
+              : undefined
+          )
+        : undefined;
+      return joinConcatParts(literals, indentStr, _depth, midComments);
     }
     const preservedWhole = options?.preserveByteString
       ? preservedSource(this.ednSource, options, this.ednCommentSyntax)
