@@ -41,6 +41,9 @@ import { parseIPv4, parseIPv6, formatIPv4, formatIPv6 } from '../utils/ip';
 import {
   resolveEiSuffix,
   canonicalEncodingWidth,
+  decideTaggedAppSeqRendering,
+  adjustRawAppSeqSource,
+  adjustAppSeqIndicator,
 } from '../cdn/serialize-utils';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -636,10 +639,24 @@ function criItemsToUri(items: readonly CborItem[]): string {
 export class CborCriExt extends CborArray {
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     if (options?.appStrings === false) return super._toCDN(options, depth);
-    try {
-      const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
-        canonicalEncodingWidth(BigInt(this.items.length))
+    const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
+      canonicalEncodingWidth(BigInt(this.items.length))
+    );
+    const decision = decideTaggedAppSeqRendering(
+      options,
+      this.appSeqSource,
+      undefined,
+      this.appSeqSourceFeatures
+    );
+    if (decision === 'adjusted')
+      return adjustAppSeqIndicator(
+        this.appSeqSource!,
+        eiSuffix,
+        options,
+        this.appSeqInnerEnd,
+        this.appSeqComments
       );
+    try {
       return `${PREFIX_CRI}'${criItemsToUri(this.items)}'${eiSuffix}`;
     } catch {
       return super._toCDN(options, depth);
@@ -658,6 +675,25 @@ export class CborTaggedCriExt extends CborTag {
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     if (options?.appStrings === false) return super._toCDN(options, depth);
+    const decision = decideTaggedAppSeqRendering(
+      options,
+      this.appSeqSource,
+      this.ednSource,
+      this.appSeqSourceFeatures,
+      this.appSeqEncodingEditsComplete
+    );
+    if (decision === 'verbatim') return this.appSeqSource!;
+    if (decision === 'source')
+      return adjustRawAppSeqSource(
+        this.appSeqSource!,
+        options,
+        this.appSeqComments,
+        this.appSeqEncodingEdits
+      );
+    // Like dt's content classes, cri's content (CborCriExt) re-switches to
+    // its own app-string notation unless `appStrings` is forced false here.
+    if (decision === 'structural')
+      return super._toCDN({ ...options, appStrings: false }, depth);
     try {
       const inner = this.content as CborArray;
       // CRI'...'_N only encodes the tag's width. If the inner array uses a
@@ -667,6 +703,14 @@ export class CborTaggedCriExt extends CborTag {
       const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
         canonicalEncodingWidth(TAG_CRI)
       );
+      if (decision === 'adjusted')
+        return adjustAppSeqIndicator(
+          this.appSeqSource!,
+          eiSuffix,
+          options,
+          this.appSeqInnerEnd,
+          this.appSeqComments
+        );
       return `${PREFIX_CRI_TAGGED}'${criItemsToUri(inner.items)}'${eiSuffix}`;
     } catch {
       return super._toCDN(options, depth);
@@ -704,6 +748,11 @@ function buildCriValue(prefix: string, uri: string): CborItem {
 export const cri: CborExtension = {
   appStringPrefixes: [PREFIX_CRI, PREFIX_CRI_TAGGED],
   tagNumbers: [TAG_CRI],
+  // cri/CRI results always have a dedicated subclass (CborCriExt /
+  // CborTaggedCriExt) that regenerates its notation by default; 'optional'
+  // preserves the source spelling only when ToCDNOptions.preserveAppSequence
+  // is set, without changing the returned node's class/identity.
+  preserveAppSeqSource: 'optional',
 
   parseAppString(prefix: string, content: string): CborItem {
     return buildCriValue(prefix, content);
