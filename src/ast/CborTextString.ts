@@ -169,7 +169,9 @@ function formatTextString(
     return escapeString(value) + suffix;
   }
 
-  const cdnBreakpoints = cdn ? collectCdnBreakpoints(value) : null;
+  const cdnBreakpoints = cdn
+    ? collectCdnBreakpoints(value, !!options?.inlineLeafContainers, newline)
+    : null;
 
   // Preserved concatenation applies unless CDN reflow is applicable (the
   // string content parses as CDN — then structure-aware indentation wins).
@@ -348,7 +350,11 @@ function collectNewlineBreakpoints(
   return points;
 }
 
-function collectCdnBreakpoints(value: string): StringBreakpoint[] | null {
+function collectCdnBreakpoints(
+  value: string,
+  inlineLeafContainers: boolean,
+  newline: boolean
+): StringBreakpoint[] | null {
   try {
     parseCDN(value);
   } catch {
@@ -367,6 +373,94 @@ function collectCdnBreakpoints(value: string): StringBreakpoint[] | null {
   } | null = null;
   let sawToken = false;
   let lastTokenEnd = 0;
+  // The token immediately before the current one (ignoring the EOF/first
+  // iteration), used only to tell an integer-tag's `(` (`100(2)`) apart
+  // from an indefinite-length string group's `(` (`(_ "a", "b")`) — both
+  // tokenize as a bare LPAREN.
+  let prevType: TokenType | null = null;
+
+  // Mirrors serializeContainer's `inlineLeafContainers` probe on the real
+  // AST, but over token spans instead of rendered strings: a bracket's own
+  // breakpoints are held in `ownCandidates` until it closes, then either
+  // discarded (stays on one line) or merged into the parent frame (or
+  // `points`, at depth 0). Breakpoints inherited from a child that itself
+  // couldn't be fully suppressed live separately in `childCandidates` —
+  // those are never discardable no matter what this frame decides for its
+  // own brackets (see the tag-paren case below), so they always forward.
+  //
+  // - LBRACKET/LBRACE (array/map) use the strict rule — no entry may
+  //   contain a nested array/map at any depth (`entryHasContainer`, set on
+  //   every currently-open frame so it reaches ancestors through wrapper
+  //   brackets), matching `_containsCdnContainer`.
+  // - LT_LT (embedded CBOR) and APP_SEQUENCE (`prefix<<...>>`) use the
+  //   loose rule: an entry only has to render without a break of its own
+  //   (`entryForcedBreak`), regardless of what it contains — matching
+  //   CborEmbeddedCBOR's `entryIsLeaf`-less probe. Resolved app-sequence
+  //   extensions vary in how they render, but this is the closest
+  //   approximation without invoking the parser's extension resolution.
+  // - LPAREN as an indefinite-length string group (`(_ ...)` /
+  //   `CborIndefiniteTextString`/`ByteString`) also uses the loose rule.
+  // - LPAREN as tag content (`100(2)`) has its *own* `(`/`)` breakpoints
+  //   unconditionally suppressed (once `inlineLeafContainers` is on)
+  //   regardless of `allOk`: real `CborTag` wraps its content with bare
+  //   parens (`renderSingleChildWithComments`) that never add their own
+  //   line break, even when the content itself renders multi-line — only
+  //   a comment forces it. But content that itself required real breaks
+  //   (e.g. `100([[1, 2], [3, 4]])`) still needs those breaks to show up
+  //   and to keep propagating outward — that's exactly what
+  //   `childCandidates` carries regardless of this frame's own decision.
+  //
+  // `entryForcedBreak` is only ever set on the immediate parent frame (not
+  // eagerly on every ancestor like `entryHasContainer`): forwarding a
+  // frame's breakpoints (own, child-inherited, or both) always marks the
+  // parent's current entry forced, which in turn forwards *its* parent's
+  // entry when it closes — so it cascades upward one level at a time.
+  // `anyForcedBreak` is the same signal, but never reset between entries —
+  // needed because a tag-paren frame ignores `entryForcedBreak`/`allOk`
+  // for its *own* suppression (its parens stay tight either way), yet
+  // still must tell its parent a break happened somewhere inside, even
+  // when that break produced no breakpoint of its own to carry the
+  // signal (e.g. a `splitNewline` break inside a nested string — the
+  // actual breakpoint for that is added by a separate pass entirely).
+  interface CdnFrame {
+    kind: TokenType;
+    isTagParen: boolean;
+    openOffset: number;
+    ownCandidates: StringBreakpoint[];
+    childCandidates: StringBreakpoint[];
+    entryHasContainer: boolean;
+    entryForcedBreak: boolean;
+    anyForcedBreak: boolean;
+    allOk: boolean;
+  }
+  const stack: CdnFrame[] = [];
+
+  const emit = (point: number, contentDepth: number): void => {
+    const top = stack[stack.length - 1];
+    if (top) top.ownCandidates.push({ point, contentDepth });
+    else points.push({ point, contentDepth });
+  };
+
+  const isLooseFrame = (frame: CdnFrame): boolean =>
+    frame.kind === 'LT_LT' ||
+    frame.kind === 'APP_SEQUENCE' ||
+    (frame.kind === 'LPAREN' && !frame.isTagParen);
+
+  // Folds the entry that just ended (at a comma, or at the closing
+  // bracket) into the frame's running "can this stay on one line" verdict,
+  // then resets the per-entry flags for the next entry. Tag-paren frames
+  // never gate their own suppression on this — see the class comment
+  // above — but `anyForcedBreak` still accumulates for them.
+  const foldEntry = (frame: CdnFrame): void => {
+    const ok = isLooseFrame(frame)
+      ? !frame.entryForcedBreak
+      : !frame.entryHasContainer && !frame.entryForcedBreak;
+    frame.allOk = frame.allOk && ok;
+    frame.anyForcedBreak = frame.anyForcedBreak || frame.entryForcedBreak;
+    frame.entryHasContainer = false;
+    frame.entryForcedBreak = false;
+  };
+
   for (;;) {
     const token = tokenizer.consume();
     if (token.type === 'EOF') break;
@@ -378,7 +472,7 @@ function collectCdnBreakpoints(value: string): StringBreakpoint[] | null {
         token.offset > 0 &&
         hasCommentBetween(tokenizer.comments, 0, token.offset)
       ) {
-        points.push({ point: token.offset, contentDepth: nesting });
+        emit(token.offset, nesting);
       }
     }
 
@@ -387,6 +481,7 @@ function collectCdnBreakpoints(value: string): StringBreakpoint[] | null {
     if (pending !== null) {
       if (pending.kind === 'opener' && OPENER_MODIFIER_TOKENS.has(token.type)) {
         pending.point = token.endOffset;
+        prevType = token.type;
         lastTokenEnd = token.endOffset;
         continue;
       } else if (
@@ -396,33 +491,114 @@ function collectCdnBreakpoints(value: string): StringBreakpoint[] | null {
       ) {
         skipClosePoint = true;
       } else {
-        points.push({
-          point: token.offset,
-          contentDepth: pending.contentDepth,
-        });
+        emit(token.offset, pending.contentDepth);
       }
       pending = null;
     }
 
     if (OPEN_TOKENS.has(token.type)) {
+      if (token.type === 'LBRACKET' || token.type === 'LBRACE') {
+        // A nested array/map disqualifies every ancestor's current entry
+        // from the strict leaf rule, no matter how deep it sits.
+        for (const frame of stack) frame.entryHasContainer = true;
+      }
       nesting++;
       pending = {
         point: token.endOffset,
         contentDepth: nesting,
         kind: 'opener',
       };
+      stack.push({
+        kind: token.type,
+        isTagParen: token.type === 'LPAREN' && prevType === 'INTEGER',
+        openOffset: token.offset,
+        ownCandidates: [],
+        childCandidates: [],
+        entryHasContainer: false,
+        entryForcedBreak: false,
+        anyForcedBreak: false,
+        allOk: true,
+      });
     } else if (CLOSE_TOKENS.has(token.type)) {
       nesting = Math.max(0, nesting - 1);
       if (!skipClosePoint) {
-        points.push({ point: token.offset, contentDepth: nesting });
+        emit(token.offset, nesting);
+      }
+      const frame = stack.pop();
+      if (frame) {
+        foldEntry(frame);
+        const isTag = frame.kind === 'LPAREN' && frame.isTagParen;
+        const suppressible =
+          inlineLeafContainers &&
+          (isTag ||
+            frame.kind === 'LBRACKET' ||
+            frame.kind === 'LBRACE' ||
+            isLooseFrame(frame));
+        const suppressOwn =
+          suppressible &&
+          frame.ownCandidates.length > 0 &&
+          (isTag || frame.allOk) &&
+          !hasCommentBetween(
+            tokenizer.comments,
+            frame.openOffset,
+            token.endOffset
+          );
+        // Child-inherited breakpoints always forward, regardless of what
+        // this frame decided for its own brackets — they represent breaks
+        // some descendant already determined were unavoidable.
+        const forwarded = suppressOwn
+          ? frame.childCandidates
+          : [...frame.ownCandidates, ...frame.childCandidates];
+        const parent = stack[stack.length - 1];
+        // Looped rather than `push(...forwarded)`: spreading a huge array
+        // as call arguments can exceed the engine's argument-count limit
+        // (a ~130k-item CDN array reproduces a RangeError here).
+        if (parent) {
+          for (const candidate of forwarded) {
+            parent.childCandidates.push(candidate);
+          }
+          // Even when nothing here produced a breakpoint of its own to
+          // carry forward (a suppressed tag paren whose content still had
+          // a forced break somewhere inside it), the break itself still
+          // happened and still needs to reach the parent.
+          if (forwarded.length > 0 || frame.anyForcedBreak) {
+            parent.entryForcedBreak = true;
+          }
+        } else {
+          for (const candidate of forwarded) {
+            points.push(candidate);
+          }
+        }
       }
     } else if (token.type === 'COMMA') {
+      const top = stack[stack.length - 1];
+      if (top) foldEntry(top);
       pending = {
         point: token.endOffset,
         contentDepth: nesting,
         kind: 'comma',
       };
+    } else if (
+      newline &&
+      (token.type === 'TSTR' || token.type === 'RAWSTRING')
+    ) {
+      // A literal/escaped newline inside this token will itself become a
+      // breakpoint once `splitNewline` runs (merged in by the caller,
+      // outside this function) — that forces this entry's own rendering
+      // to contain a line break, exactly like a child bracket that
+      // couldn't be suppressed. Mirrors serializeContainer's `s.includes
+      // ('\n')` check on a rendered entry.
+      const tokenText = value.slice(token.offset, token.endOffset);
+      const hasNewline =
+        token.type === 'TSTR'
+          ? collectTstrNewlineBreakpoints(tokenText).length > 0
+          : collectNewlineBreakpoints(tokenText, 0).length > 0;
+      if (hasNewline) {
+        const top = stack[stack.length - 1];
+        if (top) top.entryForcedBreak = true;
+      }
     }
+    prevType = token.type;
     lastTokenEnd = token.endOffset;
   }
 
@@ -520,6 +696,11 @@ const OPEN_TOKENS = new Set<TokenType>([
   'LBRACE',
   'LPAREN',
   'LT_LT',
+  // `prefix<<` (app-sequence) is tokenized as one token, unlike a plain
+  // `<<`; its close is still a separate GT_GT (in CLOSE_TOKENS), so it
+  // must be tracked as an opener here too or nesting/frame bookkeeping
+  // desyncs on the matching close.
+  'APP_SEQUENCE',
 ]);
 
 const CLOSE_TOKENS = new Set<TokenType>([

@@ -1300,6 +1300,164 @@ describe('CBOR.format()', () => {
     ).toBe('{\n  "edn": "[\\n" +\n      "1," +\n      "2\\n" +\n    "]"\n}');
   });
 
+  test('splitCdn respects inlineLeafContainers for the embedded CDN structure', () => {
+    // Same rule as the real AST: a leaf array/map stays on one line, but a
+    // container whose entries are themselves arrays/maps still breaks.
+    expect(
+      CBOR.format('"[1, 2, 3]"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[1, 2, 3]"');
+    expect(CBOR.format('"[1, 2, 3]"', { indent: 2, splitCdn: true })).toBe(
+      '"[" +\n    "1, " +\n    "2, " +\n    "3" +\n  "]"'
+    );
+    expect(
+      CBOR.format('"[[1, 2], [3, 4]]"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[" +\n    "[1, 2], " +\n    "[3, 4]" +\n  "]"');
+    expect(
+      CBOR.format('"<<1, 2>>"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"<<1, 2>>"');
+  });
+
+  test('splitCdn + inlineLeafContainers: app-sequences do not corrupt the bracket stack', () => {
+    // `prefix<<` tokenizes as one APP_SEQUENCE token (no separate opener),
+    // while its `>>` close is a normal GT_GT — regression guard for a stack
+    // desync that used to pop an unrelated ancestor frame here.
+    expect(
+      CBOR.format('"[float<<h\'0000\'>>]"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[float<<h\'0000\'>>]"');
+    // A nested array inside a sibling entry still forces the outer array
+    // to break, same as the real AST.
+    expect(
+      CBOR.format('"[float<<h\'0000\'>>, [1, 2]]"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[" +\n    "float<<h\'0000\'>>, " +\n    "[1, 2]" +\n  "]"');
+  });
+
+  test('splitCdn + inlineLeafContainers: tag content and indefinite-length string groups inline', () => {
+    // A tag wrapping a primitive is a leaf, same as real CborTag — its own
+    // parens never force a break, matching renderSingleChildWithComments.
+    expect(
+      CBOR.format('"[100(2), 100(3)]"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[100(2), 100(3)]"');
+    // A tag wrapping an array is not a leaf — the array inside still
+    // disqualifies the outer array via entryHasContainer.
+    expect(
+      CBOR.format('"[100([1, 2]), 3]"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[" +\n    "100([1, 2]), " +\n    "3" +\n  "]"');
+    // Indefinite-length string groups go through serializeContainer for
+    // real and use the loose rule, same as `<<...>>`.
+    expect(
+      CBOR.format('"(_ \\"a\\", \\"b\\")"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"(_ \\"a\\", \\"b\\")"');
+    // Without inlineLeafContainers, both still split unconditionally as
+    // before — the flag gates all of this, it isn't a baseline change.
+    expect(
+      CBOR.format('"[100(2), 100(3)]"', { indent: 2, splitCdn: true })
+    ).toBe(
+      '"[" +\n    "100(" +\n      "2" +\n    "), " +\n    "100(" +\n      "3" +\n    ")" +\n  "]"'
+    );
+  });
+
+  test("splitCdn + inlineLeafContainers: suppressing a tag paren keeps its content's own real breaks", () => {
+    // The tag's own `(`/`)` stay tight (unconditionally suppressed), but a
+    // non-leaf array inside still needs its own breakpoints — those must
+    // not be discarded along with the tag's parens.
+    expect(
+      CBOR.format('"100([[1, 2], [3, 4]])"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"100([" +\n      "[1, 2], " +\n      "[3, 4]" +\n    "])"');
+    // A `splitNewline` break inside the tag's string content produces no
+    // breakpoint of its own within the tag (that's added by a separate
+    // pass) — the forced-break signal must still reach the outer array so
+    // its own brackets aren't wrongly suppressed either.
+    const node = CBOR.fromCBOR(CBOR.encode('[100("a\\nb")]'));
+    const quoted = node.toCDN({ indent: 2 });
+    expect(
+      CBOR.format(quoted, {
+        indent: 2,
+        splitCdn: true,
+        splitNewline: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[" +\n    "100(\\"a\\\\n" +\n        "b\\")" +\n  "]"');
+  });
+
+  test('splitCdn handles a very large embedded CDN array without blowing the call stack', () => {
+    // Forwarding breakpoints between frames must loop rather than spread a
+    // whole array as call arguments (`push(...huge)`) — spreading hits the
+    // engine's argument-count limit well before 130k elements.
+    const source = `[${Array(130_000).fill('1').join(',')}]`;
+    expect(() =>
+      CBOR.format(JSON.stringify(source), {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: false,
+      })
+    ).not.toThrow();
+    // A leaf array that size should still collapse to one inline literal
+    // once inlineLeafContainers is on.
+    expect(
+      CBOR.format(JSON.stringify(source), {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe(JSON.stringify(source));
+  });
+
+  test('splitCdn + splitNewline: an embedded newline forces the surrounding CDN structure to break too', () => {
+    // The array's own breakpoints must not be suppressed just because its
+    // single entry looked leaf at the bracket level — the entry's own
+    // rendering will contain a line break once splitNewline splits it,
+    // same as serializeContainer's `s.includes('\n')` check on a rendered
+    // entry.
+    const node = CBOR.fromCBOR(CBOR.encode('["a\\nb"]'));
+    const quoted = node.toCDN({ indent: 2 });
+    const result = CBOR.format(`[${quoted}]`, {
+      indent: 2,
+      splitCdn: true,
+      splitNewline: true,
+      inlineLeafContainers: true,
+    });
+    // The outer array's own `[`/`]` breakpoints survive alongside the
+    // newline-forced split inside the string.
+    expect(result).toContain('"[" +');
+    expect(result).toContain('+\n    "]"');
+  });
+
   test('splitCdn / splitNewline take precedence over textStringFormat', () => {
     expect(
       CBOR.format('{"text": "line1\\nline2"}', {

@@ -872,6 +872,11 @@ export interface ToCDNOptions {
    * `preserveConcatenation`; when it does not, the original concatenation
    * is preserved as usual.
    *
+   * `inlineLeafContainers` applies to the embedded CDN structure too: an
+   * array/map/`<<...>>` in the string content that would stay on one line
+   * as a real value keeps its split points collapsed here as well (e.g.
+   * `"[1, 2, 3]"` stays a single literal instead of splitting per element).
+   *
    * Replaces the deprecated `textStringFormat: ['cdn']`.
    *
    * @default false
