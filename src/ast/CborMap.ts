@@ -19,6 +19,7 @@ import {
 import {
   convertCommentText,
   hasPreservedComments,
+  pushAll,
   serializeContainer,
 } from '../cdn/serialize-utils';
 import { byteToHexUpper, bytesToSpacedHexUpper } from '../utils/hex';
@@ -110,8 +111,8 @@ export class CborMap extends CborItem {
         },
       ];
       for (const [k, v] of this.entries) {
-        lines.push(...k._toHexDump(depth + 1, options));
-        lines.push(...v._toHexDump(depth + 1, options));
+        pushAll(lines, k._toHexDump(depth + 1, options));
+        pushAll(lines, v._toHexDump(depth + 1, options));
       }
       lines.push({
         depth,
@@ -130,8 +131,8 @@ export class CborMap extends CborItem {
       },
     ];
     for (const [k, v] of this.entries) {
-      lines.push(...k._toHexDump(depth + 1, options));
-      lines.push(...v._toHexDump(depth + 1, options));
+      pushAll(lines, k._toHexDump(depth + 1, options));
+      pushAll(lines, v._toHexDump(depth + 1, options));
     }
     return lines;
   }

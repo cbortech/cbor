@@ -7,6 +7,7 @@ import type { CborWriter } from '../cbor/encode';
 import {
   formatTrailingComments,
   hasPreservedComments,
+  pushAll,
   serializeContainer,
 } from '../cdn/serialize-utils';
 import { byteToHexUpper } from '../utils/hex';
@@ -59,7 +60,7 @@ export class CborIndefiniteTextString extends CborItem {
       },
     ];
     for (const chunk of this.chunks)
-      lines.push(...chunk._toHexDump(depth + 1, options));
+      pushAll(lines, chunk._toHexDump(depth + 1, options));
     lines.push({ depth, hex: byteToHexUpper(BREAK_CODE), comment: '"break"' });
     return lines;
   }

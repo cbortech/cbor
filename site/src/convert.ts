@@ -43,6 +43,18 @@ export interface ConversionErr {
 
 export type Conversion = ConversionOk | ConversionEmpty | ConversionErr;
 
+/**
+ * Append every element of `source` onto `target` in place.
+ *
+ * Not `target.push(...source)`: spreading a large array as call arguments
+ * can exceed the engine's argument-count limit. `buildRows`/`buildRangeMap`
+ * return one entry per byte/node of a whole document, so a large pasted
+ * CBOR document can make this happen.
+ */
+function pushAll<T>(target: T[], source: readonly T[]): void {
+  for (const item of source) target.push(item);
+}
+
 export function convertCdn(text: string): Conversion {
   if (text.trim() === '') return { ok: true, empty: true };
   try {
@@ -91,8 +103,8 @@ export function convertCdn(text: string): Conversion {
     const ranges: NodeRange[] = [];
     const pairCount = Math.min(cdnAsts.length, binAsts.length);
     for (let i = 0; i < pairCount; i++) {
-      rows.push(...buildRows(binAsts[i]!, bytes));
-      ranges.push(...buildRangeMap(cdnAsts[i]!, binAsts[i]!));
+      pushAll(rows, buildRows(binAsts[i]!, bytes));
+      pushAll(ranges, buildRangeMap(cdnAsts[i]!, binAsts[i]!));
     }
 
     return {

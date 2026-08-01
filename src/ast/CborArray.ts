@@ -12,6 +12,7 @@ import {
 import {
   formatTrailingComments,
   hasPreservedComments,
+  pushAll,
   serializeContainer,
 } from '../cdn/serialize-utils';
 import { byteToHexUpper, bytesToSpacedHexUpper } from '../utils/hex';
@@ -75,7 +76,7 @@ export class CborArray extends CborItem {
         },
       ];
       for (const item of this.items)
-        lines.push(...item._toHexDump(depth + 1, options));
+        pushAll(lines, item._toHexDump(depth + 1, options));
       lines.push({
         depth,
         hex: byteToHexUpper(BREAK_CODE),
@@ -93,7 +94,7 @@ export class CborArray extends CborItem {
       },
     ];
     for (const item of this.items)
-      lines.push(...item._toHexDump(depth + 1, options));
+      pushAll(lines, item._toHexDump(depth + 1, options));
     return lines;
   }
 

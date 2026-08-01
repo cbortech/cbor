@@ -1438,6 +1438,21 @@ describe('CBOR.format()', () => {
     ).toBe(JSON.stringify(source));
   });
 
+  test('preserveConcatenation + splitNewline handles a part with many newlines without blowing the call stack', () => {
+    // Regression: splitting a preserved concatenation part at its newline
+    // breakpoints used `parts.push(...splitAtBreakpoints(...))` — spreading
+    // the result as call arguments hits the engine's argument-count limit
+    // well before 130k newlines in a single part.
+    const source = `"${'\\n'.repeat(130_000)}" + "tail"`;
+    expect(() =>
+      CBOR.format(source, {
+        indent: 2,
+        preserveConcatenation: true,
+        splitNewline: true,
+      })
+    ).not.toThrow();
+  });
+
   test('splitCdn + splitNewline: an embedded newline forces the surrounding CDN structure to break too', () => {
     // The array's own breakpoints must not be suppressed just because its
     // single entry looked leaf at the bracket level — the entry's own

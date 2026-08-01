@@ -841,4 +841,13 @@ describe('CborEllipsis — toCDN', () => {
     ]);
     expect(node.toCDN({ indent: 2 })).toBe('[\n  "hello" + ... + "world"\n]');
   });
+
+  test('a huge number of `...` markers inside one elided hex literal does not overflow the call stack', () => {
+    // Regression: parsing an elided hex literal's atoms (split on `...`)
+    // used `atoms.push(...sub)` — spreading `sub` as call arguments hits
+    // the engine's argument-count limit long before 130k markers, and
+    // `...` count inside a single token is unbounded by input size.
+    const source = `h'00' + h'${'00...'.repeat(130_000)}00'`;
+    expect(() => CBOR.fromCDN(source)).not.toThrow();
+  });
 });

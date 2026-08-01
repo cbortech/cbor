@@ -18,6 +18,7 @@ import {
   resolveEiSuffix,
   canonicalEncodingWidth,
   danglingCommentsByGap,
+  pushAll,
 } from '../cdn/serialize-utils';
 
 const textEncoder = new TextEncoder();
@@ -208,7 +209,7 @@ function formatTextString(
         )) {
           partBreakpoints.set(point, contentDepth);
         }
-        parts.push(...splitAtBreakpoints(text, partBreakpoints));
+        pushAll(parts, splitAtBreakpoints(text, partBreakpoints));
       } else {
         parts.push({ text, contentDepth: 0 });
       }

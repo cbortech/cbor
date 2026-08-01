@@ -12,6 +12,7 @@ import {
 import {
   resolveEiSuffix,
   canonicalEncodingWidth,
+  pushAll,
   renderSingleChildWithComments,
 } from '../cdn/serialize-utils';
 import { bytesToSpacedHexUpper } from '../utils/hex';
@@ -82,8 +83,9 @@ export class CborTag extends CborItem {
         comment: `Tag ${this.tag}`,
       },
     ];
-    lines.push(
-      ...this.content._toHexDump(depth + 1, { ...options, appStrings: false })
+    pushAll(
+      lines,
+      this.content._toHexDump(depth + 1, { ...options, appStrings: false })
     );
     return lines;
   }

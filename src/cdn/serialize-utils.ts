@@ -8,6 +8,19 @@ import type { EncodingWidth } from '../cbor/encode';
 import type { AppSeqEncodingEdit, AppSeqSourceFeatures } from '../ast/CborItem';
 import { bytesToHex as toHex } from '../utils/hex';
 
+/**
+ * Append every element of `source` onto `target` in place.
+ *
+ * Not `target.push(...source)`: spreading a large array as call arguments
+ * can exceed the engine's argument-count limit (observed with hex-dump
+ * lines for a deeply nested large array/map, and with CDN reflow
+ * breakpoints for a large embedded array — RangeError: Maximum call stack
+ * size exceeded).
+ */
+export function pushAll<T>(target: T[], source: readonly T[]): void {
+  for (const item of source) target.push(item);
+}
+
 // ─── Indent helpers ───────────────────────────────────────────────────────────
 
 /** Resolve indent option to a string, or null for single-line output. */
@@ -427,7 +440,7 @@ export function serializeContainer(p: {
         childIndent,
         commentStyle
       );
-      lines.push(...ownLines);
+      pushAll(lines, ownLines);
       inlinePrefix = prefix;
     }
     const sep = i < count - 1 ? multilineSep : trailSep;
@@ -437,7 +450,7 @@ export function serializeContainer(p: {
     );
   }
   if (preserveComments)
-    lines.push(...formatDanglingComments(p.node, childIndent, commentStyle));
+    pushAll(lines, formatDanglingComments(p.node, childIndent, commentStyle));
   const body = lines.join('\n');
   return `${open}\n${body}\n${closeIndent}${closeChar}${closeSuffix}`;
 }

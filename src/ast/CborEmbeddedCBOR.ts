@@ -11,6 +11,7 @@ import {
 import {
   formatTrailingComments,
   hasPreservedComments,
+  pushAll,
   serializeContainer,
 } from '../cdn/serialize-utils';
 import { bytesToSpacedHexUpper } from '../utils/hex';
@@ -90,7 +91,7 @@ export class CborEmbeddedCBOR extends CborItem {
       },
     ];
     for (const item of this.items) {
-      lines.push(...item._toHexDump(depth + 1, options));
+      pushAll(lines, item._toHexDump(depth + 1, options));
     }
     return lines;
   }
