@@ -444,12 +444,33 @@ function collectCdnBreakpoints(
   interface CdnFrame {
     kind: TokenType;
     isTagParen: boolean;
+    // `true` for the one frame pushed immediately after `pushChainSuspend`
+    // — the outermost bracket/tag of an ellipsis-led chain's own
+    // continuation value (`... + (_ "a")`, `... + 100("a")`, ...). Used
+    // only to decide, when *this exact* frame closes and is a tag-paren,
+    // whether a purely semantic multi-word signal from its content may
+    // propagate outward — see `entryForcedBreakStructural` and the
+    // `CLOSE_TOKENS` handling below.
+    isChainContinuationRoot: boolean;
     openOffset: number;
     ownCandidates: StringBreakpoint[];
     childCandidates: StringBreakpoint[];
     entryHasContainer: boolean;
     entryForcedBreak: boolean;
     anyForcedBreak: boolean;
+    // Mirrors `entryForcedBreak`/`anyForcedBreak`, but only for a
+    // *structural* reason (a real embedded newline, or an actual forwarded
+    // breakpoint from a nested container that genuinely expanded) — never
+    // for the purely semantic "this content is multi-word" reason. A tag
+    // never collapses/expands based on its content's word count the way a
+    // real container does, and `CborEllipsis`'s own rendering never
+    // delegates to a fragment's semantic multi-word-ness either (it only
+    // ever joins each fragment's *actual* rendered text) — so when an
+    // `isChainContinuationRoot` tag-paren closes, only this structural
+    // signal (not the ordinary one) may propagate to the chain state it's
+    // about to restore.
+    entryForcedBreakStructural: boolean;
+    anyForcedBreakStructural: boolean;
     allOk: boolean;
   }
   const stack: CdnFrame[] = [];
@@ -497,8 +518,11 @@ function collectCdnBreakpoints(
       : !frame.entryHasContainer && !frame.entryForcedBreak;
     frame.allOk = frame.allOk && ok;
     frame.anyForcedBreak = frame.anyForcedBreak || frame.entryForcedBreak;
+    frame.anyForcedBreakStructural =
+      frame.anyForcedBreakStructural || frame.entryForcedBreakStructural;
     frame.entryHasContainer = false;
     frame.entryForcedBreak = false;
+    frame.entryForcedBreakStructural = false;
   };
 
   // Chain-aware multi-word tracking for `+`-concatenation, mirroring
@@ -533,18 +557,81 @@ function collectCdnBreakpoints(
   // for why that distinction matters.
   let chainHasEllipsis = false;
   let chainSawPlus = false;
-  // Non-null while inside a bracketed value that continues an ellipsis-led
-  // chain (`... + (_ "a")`, `... + [1, 2]`, ...) — only an ellipsis-led
-  // chain's continuations can be arbitrary value shapes at all (§ the
-  // restricted string/byte-literal-led grammar never allows one), matching
-  // consumeOneItem's recursive handling in serialize-utils.ts. Holds the
-  // `nesting` depth from *before* that bracket opened, so its own matching
-  // close (nesting back down to this value) can be recognized regardless of
-  // further brackets nested inside it. While suspended, no chain state may
-  // be read or written by anything the bracket's own content triggers — the
-  // whole point is to preserve the chain exactly as it was until this
-  // bracket closes, then decide whether a further `+` resumes it.
-  let chainSuspendDepth: number | null = null;
+  // `true` right after an `INTEGER` was seen as an ellipsis-led chain's
+  // continuation start — `parseValue()` accepts a bare integer *or* a tag
+  // (`INTEGER [ENCODING_INDICATOR] LPAREN ... RPAREN`) there, and the two
+  // aren't distinguishable until the token right after the integer (and its
+  // own possible encoding indicator) is seen: `LPAREN` means it's a tag
+  // (pushes into bracket tracking, same as any other bracketed
+  // continuation, below); anything else means it was just a bare integer,
+  // and that token is re-resolved as an ordinary chain-continuation check
+  // instead.
+  let chainAwaitingTagCheck = false;
+
+  interface SavedChainState {
+    depth: number;
+    kind: 'none' | 'text' | 'byte';
+    texts: string[];
+    broken: boolean;
+    hasEllipsis: boolean;
+    sawPlus: boolean;
+    awaitingTagCheck: boolean;
+  }
+  // A stack of *saved* (outer) chain states, one per bracketed value
+  // currently being scanned as a continuation of an ellipsis-led chain
+  // (`... + (_ "a")`, `... + [1, 2]`, ...) — only an ellipsis-led chain's
+  // continuations can be arbitrary value shapes at all (the restricted
+  // string/byte-literal-led grammar never allows one), matching
+  // consumeOneItem's recursive handling in serialize-utils.ts. Pushing
+  // saves the outer chain exactly as it was and resets the live
+  // `chainKind`/etc. variables to a *fresh*, empty chain — the bracket's own
+  // content is scanned completely normally against that fresh chain (its
+  // own entries need their own, ordinary multi-word tracking; suspending
+  // that entirely, an earlier version of this fix's bug, silently dropped
+  // e.g. `["two words"]`'s own multi-word check). Each entry's `depth` is
+  // the `nesting` level from *before* that bracket opened, so its own
+  // matching close (nesting back down to this value) can be recognized
+  // regardless of further brackets nested inside it — popping then restores
+  // the outer chain exactly as it was, so a further `+` after the bracket
+  // resumes the *same* chain rather than starting a new one.
+  const chainSuspendStack: SavedChainState[] = [];
+  // One-shot: set by `pushChainSuspend`, consumed by the very next
+  // `OPEN_TOKENS` push (which is always the bracket/tag that triggered the
+  // suspend, in the same iteration) to mark that frame
+  // `isChainContinuationRoot`.
+  let nextFrameIsChainContinuationRoot = false;
+
+  const pushChainSuspend = (depth: number): void => {
+    chainSuspendStack.push({
+      depth,
+      kind: chainKind,
+      texts: chainTexts,
+      broken: chainBroken,
+      hasEllipsis: chainHasEllipsis,
+      sawPlus: chainSawPlus,
+      awaitingTagCheck: chainAwaitingTagCheck,
+    });
+    chainKind = 'none';
+    chainTexts = [];
+    chainBroken = false;
+    chainHasEllipsis = false;
+    chainSawPlus = false;
+    chainAwaitingTagCheck = false;
+    nextFrameIsChainContinuationRoot = true;
+  };
+
+  const popChainSuspendIfDepthMatches = (): void => {
+    const saved = chainSuspendStack[chainSuspendStack.length - 1];
+    if (saved !== undefined && nesting === saved.depth) {
+      chainSuspendStack.pop();
+      chainKind = saved.kind;
+      chainTexts = saved.texts;
+      chainBroken = saved.broken;
+      chainHasEllipsis = saved.hasEllipsis;
+      chainSawPlus = saved.sawPlus;
+      chainAwaitingTagCheck = saved.awaitingTagCheck;
+    }
+  };
 
   const finalizeChain = (): void => {
     if (chainHasEllipsis && chainSawPlus) {
@@ -579,6 +666,7 @@ function collectCdnBreakpoints(
     chainBroken = false;
     chainHasEllipsis = false;
     chainSawPlus = false;
+    chainAwaitingTagCheck = false;
   };
 
   for (;;) {
@@ -590,29 +678,72 @@ function collectCdnBreakpoints(
     let skipClosePoint = false;
 
     // A chain can still be waiting to continue past `PLUS`, an
-    // `ENCODING_INDICATOR` trailing an individual part, or (once seen)
-    // straight into the next chained literal or elision-chain `...` link —
-    // anything else means it's over, and must be resolved before this
-    // token's own handling (e.g. a closing bracket popping the frame the
-    // chain's break belongs on).
-    if (chainSuspendDepth === null) {
+    // `ENCODING_INDICATOR` trailing an individual part, straight into the
+    // next chained literal or elision-chain `...` link, or (for an
+    // ellipsis-led chain specifically, whose continuations aren't
+    // restricted to string/byte literals at all — `parseValue()` in
+    // src/cdn/parser.ts accepts *any* value there) into a bracketed value,
+    // a tag, or a bare atom — anything else means it's over, and must be
+    // resolved before this token's own handling (e.g. a closing bracket
+    // popping the frame the chain's break belongs on). This always
+    // operates on whatever the *current* chain is — the outer one, or (see
+    // `chainSuspendStack`) a bracketed continuation's own fresh one, once
+    // pushed — never anything that needs its own suspension.
+    let chainContinuationResolved = false;
+    if (chainAwaitingTagCheck) {
+      if (token.type === 'ENCODING_INDICATOR') {
+        // Still deciding — this is the integer's own encoding indicator;
+        // wait for what follows it.
+        chainContinuationResolved = true;
+      } else if (token.type === 'LPAREN') {
+        // It's a tag after all (`100(...)`, `100_1(...)`): push into the
+        // same bracket tracking as any other bracketed continuation —
+        // `nesting` is incremented for this same `LPAREN` by the ordinary
+        // `OPEN_TOKENS` handling below, in this same iteration.
+        chainAwaitingTagCheck = false;
+        pushChainSuspend(nesting);
+        chainContinuationResolved = true;
+      } else {
+        // Just a bare integer after all — fall through to the ordinary
+        // check below for this same token, as if nothing special had
+        // intervened (mirrors consumeOneItem's own "not a tag, return
+        // p" — the integer's own extent already ended).
+        chainAwaitingTagCheck = false;
+      }
+    }
+    if (!chainContinuationResolved) {
       const chainCanContinueHere =
         token.type === 'PLUS' ||
         token.type === 'ENCODING_INDICATOR' ||
         (prevType === 'PLUS' &&
           (STRINGISH_CHAIN_TYPES.has(token.type) || token.type === 'ELLIPSIS'));
       if (chainKind !== 'none' && !chainCanContinueHere) {
-        if (
-          prevType === 'PLUS' &&
-          chainHasEllipsis &&
-          OPEN_TOKENS.has(token.type)
-        ) {
-          // An ellipsis-led chain's continuation may itself be an
-          // arbitrary bracketed value (`... + (_ "a")`, `... + [1, 2]`,
-          // ...) — suspend instead of finalizing, so this bracket's own
-          // content (handled entirely normally below, on its own frame)
-          // doesn't touch the chain state it has nothing to do with.
-          chainSuspendDepth = nesting;
+        if (prevType === 'PLUS' && chainHasEllipsis) {
+          if (OPEN_TOKENS.has(token.type)) {
+            // An ellipsis-led chain's continuation may itself be an
+            // arbitrary bracketed value (`... + (_ "a")`, `... + [1, 2]`,
+            // ...) — push a fresh chain for this bracket's own content
+            // (handled entirely normally below, on its own frame, exactly
+            // like a standalone entry — it needs its *own* ordinary
+            // multi-word tracking, e.g. `["two words"]`'s own entry, not a
+            // suspension that would silently skip it) rather than
+            // finalizing the outer one.
+            pushChainSuspend(nesting);
+          } else if (token.type === 'INTEGER') {
+            // Could be a bare integer continuation, or the start of a tag
+            // (`100(...)`) — not distinguishable yet; resolved on the next
+            // token, above.
+            chainAwaitingTagCheck = true;
+          }
+          // Any other bare atom (a float, a simple value, ...): the
+          // continuation is exactly this one token (plus an optional
+          // trailing encoding indicator, already deferred by the
+          // unconditional `ENCODING_INDICATOR` clause above) — nothing to
+          // track, since none of the chain-state-mutating branches below
+          // match any of these token types anyway; just don't finalize
+          // here, and let the *next* token's own check (this token's type
+          // becomes the new `prevType`, not `PLUS`) decide normally
+          // whether the chain continues (`+`) or ends.
         } else {
           finalizeChain();
         }
@@ -667,26 +798,30 @@ function collectCdnBreakpoints(
       stack.push({
         kind: token.type,
         isTagParen: token.type === 'LPAREN' && prevType === 'INTEGER',
+        isChainContinuationRoot: nextFrameIsChainContinuationRoot,
         openOffset: token.offset,
         ownCandidates: [],
         childCandidates: [],
         entryHasContainer: false,
         entryForcedBreak: false,
         anyForcedBreak: false,
+        entryForcedBreakStructural: false,
+        anyForcedBreakStructural: false,
         allOk: true,
       });
+      nextFrameIsChainContinuationRoot = false;
     } else if (CLOSE_TOKENS.has(token.type)) {
       nesting = Math.max(0, nesting - 1);
-      if (chainSuspendDepth !== null && nesting === chainSuspendDepth) {
-        // The bracket that suspended an ellipsis-led chain's tracking has
-        // now fully closed (matching brackets nested inside it, if any,
-        // already came and went via their own increments/decrements of
-        // `nesting`) — resume: the very next iteration's
-        // `chainCanContinueHere` check decides, from the chain state exactly
-        // as it was before suspension, whether a further `+` continues it
-        // or it's time to finalize.
-        chainSuspendDepth = null;
-      }
+      // If this closes the bracket that pushed a fresh chain for an
+      // ellipsis-led chain's continuation, restore the outer chain exactly
+      // as it was before that (matching brackets nested inside it, if any,
+      // already came and went via their own push/pop) — the very next
+      // iteration's `chainCanContinueHere` check then decides, from that
+      // restored state, whether a further `+` continues it or it's time to
+      // finalize. The fresh chain this bracket's own content was using (if
+      // any) was already finalized against *this* frame by the top-of-loop
+      // check earlier in this same iteration, before it's popped below.
+      popChainSuspendIfDepthMatches();
       if (!skipClosePoint) {
         emit(token.offset, nesting);
       }
@@ -733,9 +868,28 @@ function collectCdnBreakpoints(
           // Even when nothing here produced a breakpoint of its own to
           // carry forward (a suppressed tag paren whose content still had
           // a forced break somewhere inside it), the break itself still
-          // happened and still needs to reach the parent.
-          if (forwarded.length > 0 || frame.anyForcedBreak) {
+          // happened and still needs to reach the parent — *unless* this
+          // frame is the outermost bracket/tag of an ellipsis-led chain's
+          // continuation (`isChainContinuationRoot`) and a tag-paren
+          // specifically: closing it is about to restore the chain state
+          // it was pushed to protect, and only a *structural* reason (a
+          // real newline, or an actual forwarded breakpoint) should reach
+          // that restored chain — a purely semantic "my content is
+          // multi-word" signal has no real analogue there (see
+          // `entryForcedBreakStructural`'s doc; `CborEllipsis`'s own
+          // rendering never delegates to a fragment's semantic
+          // multi-word-ness, only its actual rendered text).
+          const hasStructuralBreak =
+            forwarded.length > 0 || frame.anyForcedBreakStructural;
+          const shouldPropagate =
+            frame.isChainContinuationRoot && frame.isTagParen
+              ? hasStructuralBreak
+              : forwarded.length > 0 || frame.anyForcedBreak;
+          if (shouldPropagate) {
             parent.entryForcedBreak = true;
+          }
+          if (hasStructuralBreak) {
+            parent.entryForcedBreakStructural = true;
           }
         } else {
           for (const candidate of forwarded) {
@@ -773,25 +927,30 @@ function collectCdnBreakpoints(
       // point in the scan.
       if (hasNewline) {
         const top = stack[stack.length - 1];
-        if (top) top.entryForcedBreak = true;
+        if (top) {
+          top.entryForcedBreak = true;
+          // A real, literal newline — unlike the multi-word check just
+          // below — is a genuinely structural fact that would show up in
+          // the actual rendered text regardless of what wraps it; see
+          // `entryForcedBreakStructural`'s doc.
+          top.entryForcedBreakStructural = true;
+        }
       }
       // Multi-word-ness (mirrors serializeContainer's `entryIsMultiWordText`
       // probe) is chain-aware: append to an in-progress text-leading chain
       // continuation, or start a new (possibly single-part) one — resolved
       // by `finalizeChain` once the chain is known to be over (see above).
-      // Skipped entirely while `chainSuspendDepth` is set: this token is
-      // inside an ellipsis-led chain's bracketed continuation, tracking a
-      // frame of its own that has nothing to do with the (frozen) outer
-      // chain state — mutating it here would corrupt what's being preserved
-      // for when the bracket closes.
-      if (chainSuspendDepth === null) {
-        if (prevType === 'PLUS' && chainKind === 'text') {
-          chainTexts.push(token.value);
-        } else {
-          chainKind = 'text';
-          chainTexts = [token.value];
-          chainBroken = false;
-        }
+      // Always operates on whichever chain is *current* (see
+      // `chainSuspendStack`) — a bracketed continuation's own fresh chain
+      // needs this exact same tracking for its own entries (e.g. a plain
+      // `"two words"` inside `... + ["two words"]`), not a suspension that
+      // would silently skip it.
+      if (prevType === 'PLUS' && chainKind === 'text') {
+        chainTexts.push(token.value);
+      } else {
+        chainKind = 'text';
+        chainTexts = [token.value];
+        chainBroken = false;
       }
     } else if (token.type === 'SQSTR') {
       // A bare sqstr byte-string literal (`'...'`) is printable text by
@@ -803,22 +962,21 @@ function collectCdnBreakpoints(
       // text-leading chain — see the `chainKind` block comment above; it's
       // still just a further byte span of that same byte string, already
       // exempted from the multi-word check by the byte-leading chain's own
-      // start (the BYTES_HEX/etc branch below). Entirely chain-tracking, so
-      // (like the TSTR/RAWSTRING branch above) skipped while suspended.
-      if (chainSuspendDepth === null) {
-        if (prevType === 'PLUS' && chainKind === 'byte') {
-          // no-op: part of an already-exempt byte-leading chain
+      // start (the BYTES_HEX/etc branch below). Always operates on
+      // whichever chain is *current*, same as the TSTR/RAWSTRING branch
+      // above.
+      if (prevType === 'PLUS' && chainKind === 'byte') {
+        // no-op: part of an already-exempt byte-leading chain
+      } else {
+        const bytes = (token as SqstrToken)._sqstrBytes;
+        const decoded = bytes ? textDecoder.decode(bytes) : null;
+        if (prevType === 'PLUS' && chainKind === 'text') {
+          if (decoded === null) chainBroken = true;
+          else chainTexts.push(decoded);
         } else {
-          const bytes = (token as SqstrToken)._sqstrBytes;
-          const decoded = bytes ? textDecoder.decode(bytes) : null;
-          if (prevType === 'PLUS' && chainKind === 'text') {
-            if (decoded === null) chainBroken = true;
-            else chainTexts.push(decoded);
-          } else {
-            chainKind = 'text';
-            chainTexts = decoded !== null ? [decoded] : [];
-            chainBroken = decoded === null;
-          }
+          chainKind = 'text';
+          chainTexts = decoded !== null ? [decoded] : [];
+          chainBroken = decoded === null;
         }
       }
     } else if (
@@ -827,11 +985,7 @@ function collectCdnBreakpoints(
       token.type === 'BYTES_B64' ||
       token.type === 'APP_STRING'
     ) {
-      if (
-        chainSuspendDepth === null &&
-        prevType === 'PLUS' &&
-        chainKind === 'text'
-      ) {
+      if (prevType === 'PLUS' && chainKind === 'text') {
         // A continuation of a *text*-leading chain (`"a" + h'62'`) is
         // decoded and merged into the accumulated text instead — the
         // unconditional "always strict" rule below only applies when *this*
@@ -882,10 +1036,7 @@ function collectCdnBreakpoints(
         if (top && (!ruleFrame || !isLooseFrame(ruleFrame))) {
           top.entryForcedBreak = true;
         }
-        if (
-          chainSuspendDepth === null &&
-          (prevType !== 'PLUS' || chainKind === 'none')
-        ) {
+        if (prevType !== 'PLUS' || chainKind === 'none') {
           // Not a continuation — this token starts a fresh, byte-leading
           // chain (or stands alone, which is the same thing as a one-part
           // chain). Recorded so a *following* continuation part (including
@@ -917,19 +1068,17 @@ function collectCdnBreakpoints(
       // ...`, which none of those cases otherwise touch) — see
       // `finalizeChain`'s `chainHasEllipsis`/`chainSawPlus` check for why a
       // truly standalone `...` (this flag set, but `chainSawPlus` never
-      // becomes true) is harmless. Entirely chain-tracking, so skipped
-      // while suspended (an `ELLIPSIS` inside an ellipsis-led chain's own
-      // bracketed continuation, if that's even reachable, has nothing to do
-      // with the outer, frozen chain).
-      if (chainSuspendDepth === null) {
-        chainHasEllipsis = true;
-        if (prevType === 'PLUS' && chainKind === 'text') {
-          chainBroken = true;
-        } else if (prevType !== 'PLUS' || chainKind === 'none') {
-          chainKind = 'text';
-          chainTexts = [];
-          chainBroken = true;
-        }
+      // becomes true) is harmless. Always operates on whichever chain is
+      // *current* — an `ELLIPSIS` inside an ellipsis-led chain's own
+      // bracketed continuation, if that's even reachable, correctly poisons
+      // *that* (fresh, pushed) chain rather than the outer one.
+      chainHasEllipsis = true;
+      if (prevType === 'PLUS' && chainKind === 'text') {
+        chainBroken = true;
+      } else if (prevType !== 'PLUS' || chainKind === 'none') {
+        chainKind = 'text';
+        chainTexts = [];
+        chainBroken = true;
       }
     }
     prevType = token.type;

@@ -1917,6 +1917,148 @@ describe('CBOR.format()', () => {
     ).toBe('"[" +\n    "... + (_ " +\n      "h\'00\'" +\n    ")" +\n  "]"');
   });
 
+  test("splitCdn: an ellipsis-led chain's continuation may be a bare atom or a tag, not just a bracketed value", () => {
+    // Round 13 only suspended chain tracking for OPEN_TOKENS (bracketed)
+    // continuations — but parseValue() (what src/cdn/parser.ts actually
+    // uses to parse an ellipsis-led chain's continuations) also accepts a
+    // bare atom (a number, e.g.) or a tag (`INTEGER [EI] LPAREN ... RPAREN`
+    // — which *starts* with an INTEGER token, not a bracket opener at all).
+    // Neither was suspended, so the chain finalized (losing its
+    // indeterminate state) right before the atom/tag, and the following
+    // `+ "two words"` looked like a fresh, unpoisoned chain whose own
+    // multi-word content wrongly forced a break.
+    const options = { indent: 2, inlineLeafContainers: true };
+    // Bare atom (integer) continuation.
+    expect(CBOR.format('<<... + 1 + "two words">>', options)).toBe(
+      '<<... + 1 + "two words">>'
+    );
+    expect(
+      CBOR.format('"<<... + 1 + \\"two words\\">>"', {
+        ...options,
+        splitCdn: true,
+      })
+    ).toBe('"<<... + 1 + \\"two words\\">>"');
+    // Tag continuation — distinguished from a bare integer only by the
+    // token *after* it (`LPAREN` vs. anything else).
+    expect(CBOR.format('<<... + 100("a") + "two words">>', options)).toBe(
+      '<<... + 100("a") + "two words">>'
+    );
+    expect(
+      CBOR.format('"<<... + 100(\\"a\\") + \\"two words\\">>"', {
+        ...options,
+        splitCdn: true,
+      })
+    ).toBe('"<<... + 100(\\"a\\") + \\"two words\\">>"');
+    // A chain ending right after a bare atom/tag, with no further `+`,
+    // still correctly finalizes (rather than getting stuck "awaiting").
+    expect(CBOR.format('<<... + 1>>', options)).toBe('<<... + 1>>');
+    expect(CBOR.format('<<... + 100("a")>>', options)).toBe(
+      '<<... + 100("a")>>'
+    );
+  });
+
+  test("splitCdn: a bracketed continuation's own content still gets its own, ordinary multi-word tracking", () => {
+    // Rounds 13/14 suspended chain tracking entirely while inside a
+    // bracketed/tag continuation of an ellipsis-led chain — correctly
+    // freezing the *outer* chain, but as a side effect also skipping the
+    // multi-word tracking that continuation's *own* content needs for
+    // itself: `["two words"]`'s own entry never got checked, so the array
+    // never picked up its own entryForcedBreak, and neither did the outer
+    // `<<...>>` (whose own break depends on the entry's rendering
+    // containing one). Fixed by pushing the outer chain onto a stack and
+    // resetting to a *fresh* chain for the bracket's content — restored
+    // when the bracket closes — rather than freezing tracking altogether.
+    const options = { indent: 2, inlineLeafContainers: true };
+    expect(CBOR.format('<<... + ["two words"]>>', options)).toBe(
+      '<<\n  ... + [\n    "two words"\n  ]\n>>'
+    );
+    expect(
+      CBOR.format('"<<... + [\\"two words\\"]>>"', {
+        ...options,
+        splitCdn: true,
+      })
+    ).toBe(
+      '"<<" +\n    "... + [" +\n      "\\"two words\\"" +\n    "]" +\n  ">>"'
+    );
+    // A single-word entry inside the same shape stays inline — confirms
+    // this is real word-count tracking, not just "always break".
+    expect(CBOR.format('<<... + ["a"]>>', options)).toBe('<<... + ["a"]>>');
+    expect(
+      CBOR.format('"<<... + [\\"a\\"]>>"', { ...options, splitCdn: true })
+    ).toBe('"<<... + [\\"a\\"]>>"');
+    // A plain (non-ellipsis) `+`-chain inside the continuation array is
+    // also tracked correctly on its own — merges to "one word", one word,
+    // but a further check with two genuinely separate words confirms the
+    // merge-then-check still runs inside the pushed context too.
+    expect(
+      CBOR.format('"<<... + [\\"one \\" + \\"word\\"]>>"', {
+        ...options,
+        splitCdn: true,
+      })
+    ).toBe(
+      '"<<" +\n    "... + [" +\n      "\\"one \\" + \\"word\\"" +\n    "]" +\n  ">>"'
+    );
+  });
+
+  test("splitCdn: a tag continuation's semantic multi-word content must not leak past the ellipsis it belongs to", () => {
+    // Round 15's fix let a bracketed continuation's own content be tracked
+    // normally against its own frame — correct for a container (array/map/
+    // indefinite-length group), which genuinely collapses/expands based on
+    // its entries' word count, producing a *real* newline that should
+    // propagate. But a *tag* never collapses/expands based on content word
+    // count at all (CborTag always renders `tagNum(content)` on one
+    // physical line, deferring entirely to the content's own rendering),
+    // and CborEllipsis's own rendering never delegates to a fragment's
+    // semantic multi-word-ness either — it only ever joins each fragment's
+    // *actual* rendered text. So `100("two words")`'s own semantic
+    // multi-word-ness (which correctly disqualifies a *real* strict
+    // parent, e.g. `[100("two words")]`) must not leak past the ellipsis
+    // when the tag is itself one of its continuation values.
+    const options = { indent: 2, inlineLeafContainers: true };
+    expect(CBOR.format('<<... + 100("two words")>>', options)).toBe(
+      '<<... + 100("two words")>>'
+    );
+    expect(
+      CBOR.format('"<<... + 100(\\"two words\\")>>"', {
+        ...options,
+        splitCdn: true,
+      })
+    ).toBe('"<<... + 100(\\"two words\\")>>"');
+    // A plain (non-ellipsis) tag with multi-word content is unaffected —
+    // still correctly disqualifies a real strict array...
+    expect(CBOR.format('[100("two words")]', options)).toBe(
+      '[\n  100("two words")\n]'
+    );
+    expect(
+      CBOR.format('"[100(\\"two words\\")]"', { ...options, splitCdn: true })
+    ).toBe('"[" +\n    "100(\\"two words\\")" +\n  "]"');
+    // ...and a plain (non-ellipsis) tag directly inside `<<...>>` — since
+    // that check isn't gated on strict/loose either.
+    expect(CBOR.format('<<100("two words")>>', options)).toBe(
+      '<<\n  100("two words")\n>>'
+    );
+    expect(
+      CBOR.format('"<<100(\\"two words\\")>>"', { ...options, splitCdn: true })
+    ).toBe('"<<" +\n    "100(\\"two words\\")" +\n  ">>"');
+    // A tag *nested inside* an ellipsis's array-continuation still
+    // disqualifies that array normally (isChainContinuationRoot only ever
+    // applies to the outermost bracket/tag of the continuation, not
+    // anything nested deeper within it) — the array's own genuine
+    // collapse/expand decision produces a real newline, which correctly
+    // still propagates all the way out.
+    expect(CBOR.format('<<... + [100("two words")]>>', options)).toBe(
+      '<<\n  ... + [\n    100("two words")\n  ]\n>>'
+    );
+    expect(
+      CBOR.format('"<<... + [100(\\"two words\\")]>>"', {
+        ...options,
+        splitCdn: true,
+      })
+    ).toBe(
+      '"<<" +\n    "... + [" +\n      "100(\\"two words\\")" +\n    "]" +\n  ">>"'
+    );
+  });
+
   test('splitCdn: <<...>> collapses without inlineLeafContainers; indefinite-length string groups do not', () => {
     // <<...>>'s one-line collapse isn't gated behind inlineLeafContainers
     // at all — mirrors the real AST's `alwaysInlineLeaf` (serializeContainer).
