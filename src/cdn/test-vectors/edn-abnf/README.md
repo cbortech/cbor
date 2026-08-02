@@ -31,17 +31,16 @@ actual CDN text (used to embed inputs with control characters).
 
 ## Running the optional tests
 
-Clone the upstream repository and copy the CSV files into this directory:
+Fetch the CSV files with:
 
 ```sh
-git clone https://github.com/cabo/edn-abnf.git /tmp/edn-abnf
-cp /tmp/edn-abnf/tests/basic.csv \
-   /tmp/edn-abnf/tests/level-shifter.csv \
-   /tmp/edn-abnf/tests/float.csv \
-   /tmp/edn-abnf/tests/rawstrings.csv \
-   /tmp/edn-abnf/tests/encoding-indicators.csv \
-   src/cdn/test-vectors/edn-abnf/
+npm run fetch-test-vectors -- edn-abnf
 ```
+
+This clones the upstream repository into a temporary directory and copies
+the relevant `tests/*.csv` files into this directory. (Equivalent to cloning
+https://github.com/cabo/edn-abnf.git and copying its `tests/` CSV files here
+by hand.)
 
 Then run:
 
