@@ -231,6 +231,58 @@ describe('playground', () => {
       byId<HTMLInputElement>('opt-blank-lines').checked = true; // restore
     });
 
+    test('Keep blank lines preserves a blank line between CBOR Sequence items', async () => {
+      // Includes the blank line, unlike any formatted output this test
+      // produces below — `waitFor` on this exact text (not just a
+      // substring like "line", which the pre-import editor content already
+      // has) proves the async file import actually landed before Format
+      // runs, and specifically the version *with* the blank line.
+      const raw = '{ "line": 1 }\n\n{ "line": 2 }';
+      const importSeq = () =>
+        uploadTo(
+          'cdn-import-input',
+          new File([raw], 'seq-blank-lines.cdn', { type: 'text/plain' })
+        );
+
+      // Each item is a single-entry map, which the (default-on) "Inline leaf
+      // containers" option renders on one line regardless of indent; only
+      // the blank line *between* the two Sequence items is under test here.
+      await importSeq();
+      await vi.waitFor(() => expect(cmText('editor')).toBe(raw));
+      byId('format-opts-btn').click();
+      expect(byId<HTMLInputElement>('opt-blank-lines').checked).toBe(true);
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe('{"line": 1}\n\n{"line": 2}');
+
+      await importSeq();
+      await vi.waitFor(() => expect(cmText('editor')).toBe(raw));
+      byId<HTMLInputElement>('opt-blank-lines').checked = false;
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe('{"line": 1}\n{"line": 2}');
+      byId<HTMLInputElement>('opt-blank-lines').checked = true; // restore
+    });
+
+    test('Compact indent ignores Keep blank lines between CBOR Sequence items', async () => {
+      const raw = '{ "line": 1 }\n\n{ "line": 2 }';
+      await uploadTo(
+        'cdn-import-input',
+        new File([raw], 'seq-blank-lines.cdn', { type: 'text/plain' })
+      );
+      // Waiting for the exact raw (blank-line-containing) text, not just a
+      // substring like "line" that the pre-import editor content already
+      // contains, confirms the async import landed before Format runs.
+      await vi.waitFor(() => expect(cmText('editor')).toBe(raw));
+      byId('format-opts-btn').click();
+      expect(byId<HTMLInputElement>('opt-blank-lines').checked).toBe(true);
+      byId<HTMLSelectElement>('opt-indent').value = ''; // Compact
+      byId('format-btn').click();
+      // Compact mode ignores Keep blank lines, same as it does for blank
+      // lines inside a single item's own containers — the blank line
+      // between the two Sequence items does not survive.
+      expect(cmText('editor')).toBe('{"line":1}\n{"line":2}');
+      byId<HTMLSelectElement>('opt-indent').value = '2'; // restore
+    });
+
     test('individual preserve options open in their own submenu popover', () => {
       byId('format-opts-btn').click();
       const preserveBtn = byId<HTMLButtonElement>('preserve-opts-btn');

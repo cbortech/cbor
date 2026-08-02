@@ -6,7 +6,12 @@
  * §2) are supported.  CBOR Sequence output (RFC 8742) is produced automatically
  * when the input contains more than one item.
  */
-import { CBOR, type ParseWarning, type ToCDNOptions } from '@cbortech/cbor';
+import {
+  CBOR,
+  type FromCDNOptions,
+  type ParseWarning,
+  type ToCDNOptions,
+} from '@cbortech/cbor';
 import type { CborItem } from '@cbortech/cbor/ast';
 import { buildRangeMap, type NodeRange } from './mapping/lockstep';
 import { buildRows, type HexRow } from './hexview/build-rows';
@@ -111,6 +116,47 @@ export function convertCdn(text: string): Conversion {
   } catch (error) {
     return { ok: false, error };
   }
+}
+
+const BLANK_LINE_RE = /\r?\n[ \t]*\r?\n/;
+
+/**
+ * Whether `indent` turns on pretty-printing, mirroring the library's own
+ * `resolveIndent()` (unexported): `undefined`, `0`, and `''` all mean
+ * compact/single-line output.
+ */
+function hasPrettyIndent(indent: ToCDNOptions['indent']): boolean {
+  if (indent === undefined) return false;
+  return (typeof indent === 'number' ? ' '.repeat(indent) : indent) !== '';
+}
+
+/**
+ * Reformat CDN text (a single item or a CBOR Sequence per draft-ietf-cbor-edn-literals
+ * §2). Each item is re-serialized independently; when `preserveBlankLines` is
+ * set *and* pretty-printing is active, a blank line between two items in the
+ * source is kept in the output (plain `.join('\n')` would otherwise collapse
+ * it, since blank lines between sequence items are outside any single item's
+ * own AST). In compact mode `preserveBlankLines` has no effect, matching how
+ * the option behaves for blank lines inside a single item's containers.
+ */
+export function formatCdnText(
+  text: string,
+  options: FromCDNOptions & ToCDNOptions
+): string {
+  const preserveBlankLines =
+    !!options.preserveBlankLines && hasPrettyIndent(options.indent);
+  const items = [...CBOR.fromCDNSeq(text, options)];
+  let cdn = '';
+  let prevEnd: number | null = null;
+  for (const item of items) {
+    if (prevEnd !== null) {
+      const between = text.slice(prevEnd, item.start!);
+      cdn += preserveBlankLines && BLANK_LINE_RE.test(between) ? '\n\n' : '\n';
+    }
+    cdn += item.toCDN(options);
+    prevEnd = item.end!;
+  }
+  return cdn;
 }
 
 /**
