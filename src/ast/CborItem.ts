@@ -195,6 +195,52 @@ export abstract class CborItem {
     return false;
   }
 
+  /**
+   * @internal
+   * True when this node's own text content (a text string, or a byte
+   * string that would render as bare sqstr text) has two or more words —
+   * `inlineLeafContainers` never collapses a container whose entries hold
+   * such a string onto the container's own line, even though the entry
+   * itself has no nested array/map, since a multi-word string reads better
+   * with room of its own. See `isMultiWordText()`/`isMultiWordByteString()`
+   * in `cdn/serialize-utils.ts`. Takes `options` because whether a byte
+   * string even renders as text (`'...'`) rather than a prefixed literal
+   * (`h'...'`, `b64'...'`, ...) depends on the `sqstr` option.
+   *
+   * This method deliberately does *not* also cover the "is this (or does
+   * it wrap) a prefixed literal" question — a prefixed literal has no word
+   * count to check, but still disqualifies under the strict rule (and, per
+   * `strict`, is an ordinary leaf under the loose one). That's handled
+   * generically elsewhere instead, from the *actual rendered text* rather
+   * than predicted from this node's type: `isPrefixedLiteralText` for a
+   * bare entry (`serializeContainer` checks it against the already
+   * rendered `s`), or `isMultiWordRenderedLiteral` for `CborTag`, which
+   * overrides this method entirely to tokenize its own `_toCDN()` output
+   * instead of delegating here — necessary because a `CborTag` subclass
+   * (`CborTaggedIpExt`, `CborTaggedEpochDtExt`, ...) may override `_toCDN()`
+   * to render something that doesn't look like generic `tagNum(content)`
+   * notation at all, which a semantic prediction from `this.content` alone
+   * could never know about.
+   *
+   * `strict` (default `true`) is passed down by whichever container's own
+   * `_toCDN` directly holds this entry: `true` for the strict rule
+   * (`CborArray`/`CborMap`, and `CborIndefiniteTextString`/
+   * `CborIndefiniteByteString` too — all four provide `entryIsLeaf`),
+   * `false` only for `CborEmbeddedCBOR` (`<<...>>`), the one container
+   * whose collapse isn't gated behind `inlineLeafContainers` at all and
+   * the only one that omits `entryIsLeaf`. This base implementation and
+   * `CborTextString`/`CborByteString`'s overrides ignore `strict` (a text
+   * string's, or byte string's own sqstr-text, word count is unaffected by
+   * it either way) — only `CborTag` (and, transitively, `CborAppSeqResult`
+   * delegating to its inner value) actually consult it.
+   */
+  _isMultiWordText(
+    _options: ToCDNOptions | undefined,
+    _strict = true
+  ): boolean {
+    return false;
+  }
+
   // ─── Public template methods ────────────────────────────────────────────────
 
   /** Serialize this node to CBOR binary. */

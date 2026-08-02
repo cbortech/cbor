@@ -7,6 +7,7 @@ import type { CborWriter } from '../cbor/encode';
 import {
   formatTrailingComments,
   hasPreservedComments,
+  pushAll,
   serializeContainer,
 } from '../cdn/serialize-utils';
 import { byteToHexUpper } from '../utils/hex';
@@ -25,6 +26,36 @@ export class CborIndefiniteByteString extends CborItem {
     writer.writeByte((MT_BYTES << 5) | AI_INDEFINITE);
     for (const chunk of this.chunks) chunk._encode(writer, options);
     writer.writeByte(BREAK_CODE);
+  }
+
+  /**
+   * True when any chunk's own decoded content, if it renders as bare sqstr
+   * text, has two or more words. Reachable when this node is a *direct*
+   * entry of another container (`[(_ "two words")]`) — though even then,
+   * its own `_toCDN()` already self-disqualifies internally in that case
+   * (a multi-word chunk forces a multi-line self-render), which the
+   * ordinary "entry's own rendering has a line break" check would catch
+   * regardless of what this method answers, so this mostly exists for
+   * robustness/consistency with `CborTextString`/`CborByteString` rather
+   * than because some case is otherwise unreachable.
+   *
+   * `CborAppSeqResult`, which wraps this node for results like
+   * `ilbs<<...>>`, does *not* delegate to this method — it tokenizes its
+   * own rendered output directly instead (`isMultiWordRenderedLiteral`),
+   * which is exactly why `ilbs<<h'00'>>` stays an ordinary leaf (checked
+   * under the loose rule, matching `<<...>>`) while `[h'00']`/`(_ h'00')`
+   * still always disqualify — this method's own `_strict` (always `true`,
+   * matching how a chunk renders when this container *is* regenerated
+   * directly) plays no part in that distinction anymore, and a byte string
+   * chunk's own `_isMultiWordText` doesn't consult `strict` at all
+   * regardless (see `CborByteString`'s doc — its "prefixed literal" case
+   * was removed there too).
+   */
+  override _isMultiWordText(
+    options: ToCDNOptions | undefined,
+    _strict = true
+  ): boolean {
+    return this.chunks.some((c) => c._isMultiWordText(options));
   }
 
   _toCDN(options: ToCDNOptions | undefined, depth: number): string {
@@ -50,6 +81,15 @@ export class CborIndefiniteByteString extends CborItem {
       encodingWidth: undefined,
       hasEntryComments: () => this.chunks.some(hasPreservedComments),
       renderEntry: (i) => this.chunks[i]._toCDN(options, depth + 1),
+      // Unlike CborEmbeddedCBOR (`<<...>>`), an indefinite-length string
+      // group follows the same strict rule as CborArray/CborMap, gated
+      // behind inlineLeafContainers: entryIsLeaf is trivially always true
+      // (chunks can never be containers), but its presence is what signals
+      // "strict" to serializeContainer's probe — so a chunk that renders as
+      // a prefixed literal (`h'...'`) always disqualifies inlining here,
+      // same as it would in `[h'...']`.
+      entryIsLeaf: () => true,
+      entryIsMultiWordText: (i) => this.chunks[i]._isMultiWordText(options),
       entryLeadingNode: (i) => this.chunks[i],
       entryTrailing: (i, style) =>
         formatTrailingComments(this.chunks[i], style),
@@ -65,7 +105,7 @@ export class CborIndefiniteByteString extends CborItem {
       },
     ];
     for (const chunk of this.chunks)
-      lines.push(...chunk._toHexDump(depth + 1, options));
+      pushAll(lines, chunk._toHexDump(depth + 1, options));
     lines.push({ depth, hex: byteToHexUpper(BREAK_CODE), comment: '"break"' });
     return lines;
   }

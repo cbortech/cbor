@@ -36,6 +36,7 @@ import {
 } from '../cbor/encode';
 import {
   canonicalEncodingWidth,
+  pushAll,
   type ByteCommentSyntax,
 } from './serialize-utils';
 import { b32, h32 } from '../extensions/b32';
@@ -401,7 +402,7 @@ function collectContentEncodingEdits(
     for (const item of node.items) {
       const itemEdits = collectContentEncodingEdits(source, sourceStart, item);
       if (itemEdits === undefined) return undefined;
-      edits.push(...itemEdits);
+      pushAll(edits, itemEdits);
     }
     return edits;
   }
@@ -1521,7 +1522,7 @@ class CDNParser {
         this.t.consume();
         const sub = this._elidedHexAtoms(next.value, next);
         if (sub.length > 0) sub[0]!.real = true;
-        atoms.push(...sub);
+        pushAll(atoms, sub);
       } else if (this._isBytesToken(next.type)) {
         this.t.consume();
         atoms.push({

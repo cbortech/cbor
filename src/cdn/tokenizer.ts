@@ -1234,6 +1234,13 @@ export class Tokenizer {
     this._advance(); // opening quote
     let hex = '';
     let elided = false;
+    // Tracks whether `hex` currently ends with an ellipsis, without asking
+    // `hex` itself: `hex` is built by repeated `+=` and can end up as an
+    // unflattened V8 rope string, where `.endsWith()` forces a flatten —
+    // negligible once, but this runs per `...` occurrence in the literal,
+    // making a many-ellipsis literal (e.g. thousands of `...` markers)
+    // quadratic instead of linear.
+    let hexEndsWithEllipsis = false;
     while (!this._eof() && this._ch() !== quote) {
       const ch = this._ch();
       // lblank = %x0A / %x20 only; HT is forbidden per §5.2 Figure 3
@@ -1261,8 +1268,9 @@ export class Tokenizer {
         // consume any additional dots (spec says "three or more")
         while (!this._eof() && this._ch() === '.') this._advance();
         // adjacent ... separated only by whitespace collapse into a single ellipsis
-        if (!hex.endsWith('...')) hex += '...';
+        if (!hexEndsWithEllipsis) hex += '...';
         elided = true;
+        hexEndsWithEllipsis = true;
         continue;
       }
       if (isHexDigitCode(ch.charCodeAt(0))) {
@@ -1274,6 +1282,7 @@ export class Tokenizer {
         this.col += p - runStart;
         this.pos = p;
         hex += this.input.slice(runStart, p);
+        hexEndsWithEllipsis = false;
         continue;
       }
       this._fail(

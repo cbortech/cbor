@@ -392,6 +392,17 @@ describe('cri — preserveAppSequence', () => {
     expect(n).toBeInstanceOf(CborTaggedCriExt);
   });
 
+  test('a huge path segment array does not overflow the call stack collecting encoding-indicator edits', () => {
+    // Regression: parsing raw tag notation recursively collects
+    // content-encoding edits via `edits.push(...itemEdits)`, where
+    // `itemEdits` is one whole subtree's worth of edits gathered in a
+    // single call — spreading it as call arguments hits the engine's
+    // argument-count limit well before 130k path segments.
+    const path = Array(130_000).fill('"a"').join(',');
+    const source = `99([-4,["example","com"],[${path}]])`;
+    expect(() => CBOR.fromCDN(source)).not.toThrow();
+  });
+
   test('preserveNumberFormat: false overrides verbatim raw tag notation', () => {
     // preserveAll turns preserveAppSequence on but leaves an explicit
     // preserveNumberFormat: false alone; the 'structural' fallback must

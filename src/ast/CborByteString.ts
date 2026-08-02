@@ -8,6 +8,7 @@ import {
 } from '../cbor/encode';
 import {
   serializeBytes,
+  isMultiWordByteString,
   resolveEiSuffix,
   resolveIndent,
   joinConcatParts,
@@ -96,6 +97,28 @@ export class CborByteString extends CborItem {
     this.ednSource = options?.ednSource;
     this.ednCommentSyntax = options?.ednCommentSyntax;
     this.ednParts = options?.ednParts;
+  }
+
+  /**
+   * Only the "bare sqstr text with 2+ words" case — the "is this a
+   * prefixed literal" question is deliberately *not* predicted here from
+   * raw bytes at all (a subclass like `CborIpExt` might override `_toCDN()`
+   * to render something else entirely, e.g. a preserved
+   * `ip<<'192.0.2.42'>>` app-sequence spelling, that raw-byte prediction
+   * knows nothing about — see `isMultiWordByteString`'s doc). That
+   * question is instead answered from the *actual rendering*: for a bare
+   * entry, `serializeContainer`'s own `isPrefixedLiteralText(s)` check
+   * already covers it (this node's render *is* `s`, unobscured); for one
+   * wrapped in a `CborTag`, `CborTag._isMultiWordText`'s
+   * `isMultiWordRenderedLiteral` check covers it instead. `strict` isn't
+   * needed here at all now — it's accepted purely for interface
+   * consistency with the base class.
+   */
+  override _isMultiWordText(
+    options: ToCDNOptions | undefined,
+    _strict = true
+  ): boolean {
+    return isMultiWordByteString(this.value, options?.sqstr);
   }
 
   override _encodeTo(writer: CborWriter, _options?: ToCBOROptions): void {
