@@ -19,6 +19,7 @@ import {
   canonicalEncodingWidth,
   danglingCommentsByGap,
   isMultiWordText,
+  joinAppSeqParts,
   pushAll,
 } from '../cdn/serialize-utils';
 import { hexToBytes } from '../utils/hex';
@@ -231,6 +232,11 @@ function formatTextString(
       if (comments && comments.length > 0) {
         parts[parts.length - 1]!.commentsAfter = comments;
       }
+    }
+    if (options?.modernConcat && options?.appStrings !== false) {
+      const literals = parts.map(({ text, source }) => source ?? escapeString(text));
+      const midComments = parts.map((p) => p.commentsAfter ?? []);
+      return joinAppSeqParts('t1', literals, suffix, indentStr, depth, midComments);
     }
     return emitParts(parts, suffix, indentStr, depth);
   }

@@ -165,6 +165,19 @@ describe('README examples', () => {
     ).toBe("h'68' +\n  b64'aQ'");
   });
 
+  test('modernConcat / modernStreamSyntax emit t1/b1/ilbs/ilts notation', () => {
+    expect(
+      CBOR.format('"a" + "b"', {
+        indent: 2,
+        preserveConcatenation: true,
+        modernConcat: true,
+      })
+    ).toBe('t1<<"a", "b">>');
+    expect(CBOR.format('(_ "a", "b")', { modernStreamSyntax: true })).toBe(
+      'ilts<<"a","b">>'
+    );
+  });
+
   test('preserveTextString keeps double-quoted escape spelling', () => {
     expect(CBOR.format('"caf\\u00e9"')).toBe('"café"');
     expect(CBOR.format('"caf\\u00e9"', { preserveTextString: true })).toBe(

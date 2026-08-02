@@ -932,6 +932,70 @@ export interface ToCDNOptions {
   preserveConcatenation?: boolean;
 
   /**
+   * Render preserved `+` string concatenation (see `preserveConcatenation`)
+   * or an elision chain (`...`, §4.2) using `t1<<...>>` / `b1<<...>>`
+   * application-sequence notation (draft-ietf-cbor-edn-literals-26 §3.4)
+   * instead of the legacy `+` operator.
+   *
+   * - `false` (default): `"a" + "b"` / `'test' + h'1234...abcd' + ...`.
+   * - `true`: `t1<<"a", "b">>` / `b1<<h'1234', h'..abcd'>>`. Falls back to
+   *   `false`'s rendering when `appStrings` is `false`, since this notation
+   *   is itself an app-string form.
+   *
+   * For a plain (non-elision) concatenation, only changes the spelling used
+   * where `preserveConcatenation` already causes multi-part rendering; has
+   * no effect when concatenation collapses into a single merged literal
+   * (e.g. `preserveConcatenation` unset, or a text string whose content is
+   * reflowed by `splitCdn` instead). An elision chain is different: `...`
+   * denotes genuinely unknown content, so it always renders as multiple
+   * parts regardless of `preserveConcatenation` — `modernConcat` therefore
+   * also applies to it unconditionally (`preserveConcatenation` there only
+   * controls how much of a fragment's *own* internal boundary is shown, not
+   * whether the chain itself is shown as multiple parts).
+   *
+   * Has no effect on a value that was itself parsed from `t1<<...>>` /
+   * `b1<<...>>` source: when `appStrings` is not `false`, `encodingIndicators`
+   * is `'auto'` (both defaults), and the source is either single-line or
+   * being rendered with `indent` enabled, that spelling is kept verbatim
+   * regardless of `modernConcat` (see `t1`/`b1` in
+   * [String Concatenation and Indefinite-Length Strings](../README.md#string-concatenation-and-indefinite-length-strings)).
+   * A multi-line source falls back to normalized (collapsed) output in
+   * single-line mode, since that layout can't be reproduced without
+   * `indent`. `modernConcat` only affects values reconstructed from a `+`
+   * chain.
+   *
+   * @default false
+   */
+  modernConcat?: boolean;
+
+  /**
+   * Render an indefinite-length string using `ilts<<...>>` / `ilbs<<...>>`
+   * application-sequence notation (draft-ietf-cbor-edn-literals-26 §3.5)
+   * instead of the legacy `(_ "a", "b")` streamstring form.
+   *
+   * - `false` (default): `(_ "a", "b")`.
+   * - `true`: `ilts<<"a", "b">>` / `ilbs<<h'..', h'..'>>`. Falls back to
+   *   `false`'s rendering when `appStrings` is `false`, since this notation
+   *   is itself an app-string form.
+   *
+   * Applies whenever an indefinite-length string is rendered as chunks;
+   * unaffected by `encodingIndicators: 'never'`, which merges the chunks
+   * into a single definite-length literal regardless of this option.
+   *
+   * Has no effect on a value that was itself parsed from `ilts<<...>>` /
+   * `ilbs<<...>>` source: when `appStrings` is not `false`, `encodingIndicators`
+   * is `'auto'` (both defaults), and the source is either single-line or
+   * being rendered with `indent` enabled, that spelling is kept verbatim
+   * regardless of `modernStreamSyntax`. A multi-line source falls back to
+   * normalized (collapsed) output in single-line mode, since that layout
+   * can't be reproduced without `indent`. `modernStreamSyntax` only affects
+   * values reconstructed from a legacy `(_ ...)` chunk list.
+   *
+   * @default false
+   */
+  modernStreamSyntax?: boolean;
+
+  /**
    * When pretty-printing with `indent`, keep an array, map, or
    * indefinite-length string group (`(_ "a", "b")`) on a single line when
    * none of its entries contains an array or map (even wrapped in a tag),

@@ -55,25 +55,35 @@ export class CborIndefiniteTextString extends CborItem {
       const merged = this.chunks.map((c) => c.value).join('');
       return new CborTextString(merged)._toCDN(options, depth);
     }
-    if (this.chunks.length === 0) return '""_';
+    // `ilts<<...>>` (draft-26 §3.5) replaces the legacy `(_ ...)` marker
+    // notation; falls back to it when `appStrings` disables app-string
+    // notation entirely.
+    const useIlts =
+      !!options?.modernStreamSyntax && options?.appStrings !== false;
+    if (!useIlts && this.chunks.length === 0) return '""_';
     return serializeContainer({
       node: this,
       options,
       depth,
-      openChar: '(',
-      closeChar: ')',
+      openChar: useIlts ? 'ilts<<' : '(',
+      closeChar: useIlts ? '>>' : ')',
       count: this.chunks.length,
       indefiniteLength: true,
+      indefiniteMarker: !useIlts,
       encodingWidth: undefined,
       hasEntryComments: () => this.chunks.some(hasPreservedComments),
       renderEntry: (i) => this.chunks[i]._toCDN(options, depth + 1),
-      // Unlike CborEmbeddedCBOR (`<<...>>`), an indefinite-length string
-      // group follows the same strict rule as CborArray/CborMap, gated
-      // behind inlineLeafContainers: entryIsLeaf is trivially always true
-      // (chunks can never be containers), but its presence is what signals
-      // "strict" to serializeContainer's probe.
-      entryIsLeaf: () => true,
-      entryIsMultiWordText: (i) => this.chunks[i]._isMultiWordText(options),
+      // Unlike CborEmbeddedCBOR (`<<...>>`), the legacy `(_ ...)` group
+      // follows the same strict rule as CborArray/CborMap, gated behind
+      // inlineLeafContainers: entryIsLeaf is trivially always true (chunks
+      // can never be containers), but its presence is what signals "strict"
+      // to serializeContainer's probe. `ilts<<...>>` is itself an
+      // application-sequence form, so it always collapses like
+      // CborEmbeddedCBOR instead (loose rule, entryIsLeaf omitted).
+      entryIsLeaf: useIlts ? undefined : () => true,
+      alwaysInlineLeaf: useIlts,
+      entryIsMultiWordText: (i) =>
+        this.chunks[i]._isMultiWordText(options, !useIlts),
       entryLeadingNode: (i) => this.chunks[i],
       entryTrailing: (i, style) =>
         formatTrailingComments(this.chunks[i], style),

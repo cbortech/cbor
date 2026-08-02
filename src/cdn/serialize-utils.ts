@@ -73,6 +73,49 @@ export function joinConcatParts(
   return out;
 }
 
+/**
+ * Serialize string parts as a `t1<<...>>` / `b1<<...>>` application-sequence
+ * (draft-ietf-cbor-edn-literals-26 §3.4) — the `modernConcat` replacement
+ * for `joinConcatParts`'s `+`-joining. Unlike a `+` chain, this
+ * notation has its own closing delimiter, so (matching how `<<...>>`/
+ * `CborEmbeddedCBOR` places its own encoding-width indicator, and unlike
+ * `emitParts`, which has nowhere else to put it) `suffix` is appended after
+ * `>>` rather than onto the last literal — it describes the one merged value
+ * `t1<<...>>` denotes as a whole, not any individual argument.
+ *
+ * Always single-line (an application-sequence is loose/collapsible, like
+ * every other `<<...>>` form), except when there's a mid-chain comment to
+ * preserve — nothing else forces it multi-line, since (unlike a real `+`
+ * chain) there's no risk of an unbounded single line growing unreadable that
+ * this format was ever meant to solve; a comment is the one thing a single
+ * line genuinely cannot hold, mirroring `joinConcatParts`'s own reason for
+ * going multi-line.
+ */
+export function joinAppSeqParts(
+  prefix: 't1' | 'b1',
+  literals: readonly string[],
+  suffix: string,
+  indentStr: string | null,
+  depth: number,
+  midComments?: readonly (readonly string[])[]
+): string {
+  const hasMidComments = midComments?.some((c) => c.length > 0) ?? false;
+  if (indentStr === null || !hasMidComments) {
+    return `${prefix}<<${literals.join(', ')}>>${suffix}`;
+  }
+  const indent = indentOf(indentStr, depth + 1);
+  const closeIndent = indentOf(indentStr, depth);
+  const lines: string[] = [];
+  for (let i = 0; i < literals.length; i++) {
+    const sep = i < literals.length - 1 ? ',' : '';
+    lines.push(`${indent}${literals[i]}${sep}`);
+    for (const comment of midComments?.[i] ?? []) {
+      lines.push(`${indent}${comment}`);
+    }
+  }
+  return `${prefix}<<\n${lines.join('\n')}\n${closeIndent}>>${suffix}`;
+}
+
 // ─── Comment helpers ─────────────────────────────────────────────────────────
 
 export interface Commented {
@@ -300,6 +343,17 @@ export function serializeContainer(p: {
   closeChar: string;
   count: number;
   indefiniteLength: boolean;
+  /**
+   * Whether an indefinite-length container shows the `_` marker
+   * (`(_ "a", "b")`) before its content. Defaults to `true`; set `false` for
+   * a container that denotes an indefinite-length value through some other
+   * notation entirely (e.g. `ilts<<"a", "b">>`) rather than through the
+   * `_`-marked legacy streamstring form — the value is still genuinely
+   * indefinite-length (so `indefiniteLength: true` still correctly
+   * suppresses any encoding-width suffix, which has no meaning for it), but
+   * that other notation has no `_` marker of its own to show.
+   */
+  indefiniteMarker?: boolean;
   encodingWidth: EncodingWidth | undefined;
   /**
    * Where the resolved encoding-indicator suffix is placed.
@@ -403,7 +457,9 @@ export function serializeContainer(p: {
   const eiSuffix = eiPosition === 'open' && eiRaw ? eiRaw + ' ' : '';
   const closeSuffix = eiPosition === 'close' ? eiRaw : '';
   const showIndef =
-    p.indefiniteLength && (options?.encodingIndicators ?? 'auto') !== 'never';
+    p.indefiniteLength &&
+    (p.indefiniteMarker ?? true) &&
+    (options?.encodingIndicators ?? 'auto') !== 'never';
 
   const singleLine = (inner: string): string => {
     if (p.indefiniteLength) {

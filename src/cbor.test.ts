@@ -1080,6 +1080,49 @@ describe('CBOR.format()', () => {
     );
   });
 
+  test('modernConcat: true renders preserved concatenation as t1<<>>/b1<<>>', () => {
+    expect(
+      CBOR.format('"a" + "b"', {
+        indent: 2,
+        preserveConcatenation: true,
+        modernConcat: true,
+      })
+    ).toBe('t1<<"a", "b">>');
+    expect(
+      CBOR.format("h'01' + h'02'", {
+        indent: 2,
+        preserveConcatenation: true,
+        modernConcat: true,
+      })
+    ).toBe("b1<<h'01', h'02'>>");
+  });
+
+  test('modernConcat: true falls back to + when appStrings is false', () => {
+    expect(
+      CBOR.format('"a" + "b"', {
+        indent: 2,
+        preserveConcatenation: true,
+        modernConcat: true,
+        appStrings: false,
+      })
+    ).toBe('"a" +\n  "b"');
+  });
+
+  test('modernConcat: true has no effect without preserveConcatenation', () => {
+    expect(
+      CBOR.format('"a" + "b"', { indent: 2, modernConcat: true })
+    ).toBe('"ab"');
+  });
+
+  test('modernConcat: true round-trips through the parser', () => {
+    const rendered = CBOR.format('"a" + "b"', {
+      indent: 2,
+      preserveConcatenation: true,
+      modernConcat: true,
+    });
+    expect(CBOR.fromCDN(rendered).toJS()).toBe('ab');
+  });
+
   test('preserves a comment between concatenated text string parts', () => {
     expect(
       CBOR.format('"a" + /* c */ "b"', {

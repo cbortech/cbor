@@ -392,6 +392,10 @@ CBOR.format("h'68' + b64'aQ'", {
 //   b64'aQ'
 ```
 
+To render the preserved concatenation using draft-26's `t1<<...>>` /
+`b1<<...>>` notation instead of `+`, see `modernConcat` in
+[String Concatenation and Indefinite-Length Strings](#string-concatenation-and-indefinite-length-strings).
+
 ### Preserve application-string/-sequence notation
 
 Some built-in extensions (`dt`/`DT`, `ip`/`IP`) support `prefix'...'`
@@ -714,6 +718,56 @@ const v = CBOR.fromCDN("ilbs<<'Hello ', 'world'>>");
 console.log(v.toCDN({ appStrings: false }));
 // (_ 'Hello ','world')
 ```
+
+### Emitting `t1`/`b1`/`ilbs`/`ilts` notation
+
+Parsing already accepts `t1`/`b1`/`ilbs`/`ilts` notation, but by default
+`toCDN()`/`CBOR.format()` never emit it on their own: a preserved
+concatenation (`preserveConcatenation`) still renders as `+`, and an
+indefinite-length string still renders as the legacy `(_ ...)` streamstring
+form. `modernConcat` and `modernStreamSyntax` opt into emitting the draft-26
+notation instead — both default to `false` (the legacy syntax), and both fall
+back to it when `appStrings` is `false`.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+CBOR.format('"a" + "b"', {
+  indent: 2,
+  preserveConcatenation: true,
+  modernConcat: true,
+});
+// t1<<"a", "b">>
+
+CBOR.format('(_ "a", "b")', { modernStreamSyntax: true });
+// ilts<<"a","b">>
+```
+
+`modernConcat` also applies within a `...` elision chain (§4.2), rendering
+`"a" + ... + "b"` as `t1<<"a", ..., "b">>` — unlike plain concatenation, this
+happens regardless of `preserveConcatenation`, since an elision chain has no
+single-literal collapsed form to fall back to in the first place.
+
+> [!NOTE]
+> Neither option *converts* `t1`/`b1`/`ilbs`/`ilts` source back to the
+> legacy notation: a value parsed from `t1<<...>>` (or `ilbs<<...>>`, etc.)
+> keeps that exact spelling on output regardless of `modernConcat` /
+> `modernStreamSyntax` — as long as `appStrings` is not `false`,
+> `encodingIndicators` is `'auto'` (both defaults), and the source is either
+> single-line or being rendered with `indent` enabled. `encodingIndicators:
+> 'always'`/`'never'` or `appStrings: false` still normalize it like any
+> other application-string value (e.g. `t1<<"a", "b">>` becomes `"ab"_i`
+> under `encodingIndicators: 'always'`), and a multi-line source falls back
+> to normalized output in single-line mode (that layout can't be reproduced
+> without `indent`):
+> ```ts
+> CBOR.format('t1<<\n  "a",\n  "b"\n>>');
+> // '"ab"' — falls back: multi-line source, no `indent`
+> CBOR.format('t1<<\n  "a",\n  "b"\n>>', { indent: 2 });
+> // 't1<<\n  "a",\n  "b"\n>>' — kept verbatim
+> ```
+> Both options only affect how a value reconstructed from a `+` chain or a
+> `(_ ...)` chunk list is *newly* rendered.
 
 > [!NOTE]
 > The identifiers `t1` and `b1` are explicitly provisional in draft-26 and
