@@ -5,6 +5,7 @@ import {
   bytesToCdnText,
   bytesToHexString,
   convertCdn,
+  formatCdnText,
   type Conversion,
 } from './convert';
 import { createEditor, selectRange, setEditorText } from './editor/editor';
@@ -325,8 +326,7 @@ el('format-btn').addEventListener('click', () => {
   if (text.trim() === '') return;
   try {
     const opts = { ...readFormatOptions(), ...getEnabledExtensions() };
-    const items = [...CBOR.fromCDNSeq(text, opts)];
-    setEditorText(editor, items.map((item) => item.toCDN(opts)).join('\n'));
+    setEditorText(editor, formatCdnText(text, opts));
   } catch {
     // Invalid CDN: the lint squiggle already explains the problem.
   }
