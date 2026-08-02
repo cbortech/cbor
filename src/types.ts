@@ -932,17 +932,38 @@ export interface ToCDNOptions {
   preserveConcatenation?: boolean;
 
   /**
-   * When pretty-printing with `indent`, keep a container on a single line
-   * when none of its entries contains an array or map (even wrapped in a
-   * tag) and every entry serializes without a line break (e.g. `[1, 2, 3]`,
-   * `{"a": 1}`, `(_ "a", "b")`). Nested leaf containers still collapse
-   * individually: `[[1, 2], [3, 4]]` renders with one inner array per line.
+   * When pretty-printing with `indent`, keep an array, map, or
+   * indefinite-length string group (`(_ "a", "b")`) on a single line when
+   * none of its entries contains an array or map (even wrapped in a tag),
+   * none of its entries is a text string with two or more words (also even
+   * wrapped in a tag), and every entry serializes without a line break
+   * (e.g. `[1, 2, 3]`, `{"a": 1}`, `(_ "a", "b")`). Word boundaries follow
+   * `Intl.Segmenter`'s word-break rules, so `["hello", "world"]` still
+   * collapses to one line (each entry is a single word) while `["Hello,
+   * World!", "This is the CBOR library."]` renders one entry per line (each
+   * has two or more) — space-less scripts (Japanese, Chinese, ...) are still
+   * split on their own dictionary-based word boundaries. Nested leaf
+   * containers still collapse individually: `[[1, 2], [3, 4]]` renders with
+   * one inner array per line.
    *
-   * `<<...>>` (CBOR Sequence Literal / embedded CBOR) is the one exception:
-   * since it's a flat sequence of encoded items rather than a
-   * nested-structure display, an entry that is itself an array/map still
-   * inlines there as long as its own rendering fits on one line — e.g.
-   * `<<{1: -7}>>` stays on one line, even though `[{1: -7}]` would not.
+   * `<<...>>` (CBOR Sequence Literal / embedded CBOR) is not governed by
+   * this option at all: its own parens never require an additional line
+   * break by themselves, regardless of `inlineLeafContainers`'s value,
+   * since (unlike an array, map, or indefinite-length string group) it has
+   * no nested-structure display of its own to spread out — it's a flat
+   * sequence of encoded items. Instead it stays on one line exactly when
+   * every entry's own actual rendering already does — an entry that is
+   * itself an array/map is not disqualified just for being one, unlike in
+   * an outer array/map. Concretely: `<<{1: -7}>>` renders as `<<{1: -7}>>`
+   * when `inlineLeafContainers` lets the inner map collapse to one line,
+   * but as `<<\n  {\n    1: -7\n  }\n>>` when it doesn't (the map itself
+   * still spreads one entry per line without the option, same as it would
+   * anywhere else — `<<...>>` just doesn't add a break of its own on top
+   * of that). `[{1: -7}]`, by contrast, always spreads its `{1: -7}` entry
+   * onto its own line regardless of whether the map itself collapses,
+   * since a nested array/map always disqualifies an outer array/map's
+   * entry. A two-or-more-word text entry still forces a break inside
+   * `<<...>>` either way, irrespective of `inlineLeafContainers`.
    *
    * Containers with preserved comments are always emitted in multi-line
    * form. Has no effect when `indent` is omitted.

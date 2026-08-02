@@ -10,7 +10,7 @@ import type { CborWriter, EncodingWidth } from '../cbor/encode';
 import { parseCDN } from '../cdn/parser';
 // Internal lexer reuse: parseCDN() validates embedded CDN first; this pass
 // only needs token offsets so string formatting can split without changing text.
-import { Tokenizer, type TokenType } from '../cdn/tokenizer';
+import { Tokenizer, type TokenType, type SqstrToken } from '../cdn/tokenizer';
 import {
   escapeString,
   indentOf,
@@ -18,10 +18,14 @@ import {
   resolveEiSuffix,
   canonicalEncodingWidth,
   danglingCommentsByGap,
+  isMultiWordText,
   pushAll,
 } from '../cdn/serialize-utils';
+import { hexToBytes } from '../utils/hex';
+import { base64ToBytes } from '../utils/base64';
 
 const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
 let didWarnCborEdnTextStringFormat = false;
 
 /** CBOR Major Type 3 — definite-length UTF-8 text string. */
@@ -87,6 +91,13 @@ export class CborTextString extends CborItem {
     this.ednPartSources = options?.ednPartSources;
     this.ednPartIsByteString = options?.ednPartIsByteString;
     this.ednPartSpans = options?.ednPartSpans;
+  }
+
+  override _isMultiWordText(
+    _options: ToCDNOptions | undefined,
+    _strict = true
+  ): boolean {
+    return isMultiWordText(this.value);
   }
 
   override _encodeTo(writer: CborWriter, _options?: ToCBOROptions): void {
@@ -394,13 +405,20 @@ function collectCdnBreakpoints(
   //   every currently-open frame so it reaches ancestors through wrapper
   //   brackets), matching `_containsCdnContainer`.
   // - LT_LT (embedded CBOR) and APP_SEQUENCE (`prefix<<...>>`) use the
-  //   loose rule: an entry only has to render without a break of its own
-  //   (`entryForcedBreak`), regardless of what it contains — matching
-  //   CborEmbeddedCBOR's `entryIsLeaf`-less probe. Resolved app-sequence
+  //   loose rule — the *only* frames whose own suppression is unconditional
+  //   (`isLooseFrame`, independent of `inlineLeafContainers`): an entry only
+  //   has to render without a break of its own (`entryForcedBreak`),
+  //   regardless of what it contains — matching CborEmbeddedCBOR's
+  //   `entryIsLeaf`-less, `alwaysInlineLeaf` probe. Resolved app-sequence
   //   extensions vary in how they render, but this is the closest
   //   approximation without invoking the parser's extension resolution.
   // - LPAREN as an indefinite-length string group (`(_ ...)` /
-  //   `CborIndefiniteTextString`/`ByteString`) also uses the loose rule.
+  //   `CborIndefiniteTextString`/`ByteString`) uses the *strict* rule
+  //   instead, same as LBRACKET/LBRACE (and gated behind
+  //   `inlineLeafContainers` the same way, unlike LT_LT/APP_SEQUENCE) — a
+  //   chunk can never actually contain a nested array/map, so this only
+  //   differs from the loose rule in practice for a prefixed-literal byte
+  //   chunk (`h'...'`), which disqualifies here but not inside `<<...>>`.
   // - LPAREN as tag content (`100(2)`) has its *own* `(`/`)` breakpoints
   //   unconditionally suppressed (once `inlineLeafContainers` is on)
   //   regardless of `allOk`: real `CborTag` wraps its content with bare
@@ -442,10 +460,31 @@ function collectCdnBreakpoints(
     else points.push({ point, contentDepth });
   };
 
+  // Only <<...>>/app-sequence are "loose" in the sense of always collapsing
+  // regardless of inlineLeafContainers (mirrors CborEmbeddedCBOR's
+  // `alwaysInlineLeaf`). An indefinite-length string group (non-tag-paren
+  // LPAREN) follows the same strict rule as CborArray/CborMap instead,
+  // gated behind inlineLeafContainers like everything else — see
+  // `suppressible` below.
   const isLooseFrame = (frame: CdnFrame): boolean =>
-    frame.kind === 'LT_LT' ||
-    frame.kind === 'APP_SEQUENCE' ||
-    (frame.kind === 'LPAREN' && !frame.isTagParen);
+    frame.kind === 'LT_LT' || frame.kind === 'APP_SEQUENCE';
+
+  // A tag-paren frame is transparent for the strict/loose decision — like
+  // real CborTag, which just forwards whatever `strict` it was given to its
+  // content rather than deciding independently — so a prefixed byte-string
+  // literal's forced-break check (see the BYTES_HEX branch below) must walk
+  // up past any enclosing tag-paren frames to find the frame whose own
+  // strict/loose rule actually governs it (e.g. `<<100(h'00')>>` stays
+  // inline: the tag is transparent, and the governing frame is the loose
+  // `<<...>>`, not the tag's own parens).
+  const nearestRuleFrame = (): CdnFrame | undefined => {
+    for (let i = stack.length - 1; i >= 0; i--) {
+      const frame = stack[i];
+      if (frame.kind === 'LPAREN' && frame.isTagParen) continue;
+      return frame;
+    }
+    return undefined;
+  };
 
   // Folds the entry that just ended (at a comma, or at the closing
   // bracket) into the frame's running "can this stay on one line" verdict,
@@ -462,10 +501,126 @@ function collectCdnBreakpoints(
     frame.entryForcedBreak = false;
   };
 
+  // Chain-aware multi-word tracking for `+`-concatenation, mirroring
+  // isMultiWordTokenRange's chain handling in serialize-utils.ts:
+  // `"one " + "word"` denotes one 2-word text string, not two 1-word ones,
+  // so checking each TSTR individually (as every other token type in this
+  // scan is checked, immediately, in isolation) under-counts. `chainKind`
+  // tracks *which* chain (if any) is in progress — not just whether one is,
+  // since a byte-leading chain (first part a prefixed `h'...'`/`b64'...'`)
+  // must stay marked as such through every continuation part, even a bare
+  // `SQSTR` one that would look text-leading in isolation: that
+  // continuation is still part of the *byte* string the chain denotes
+  // (concatenation never re-spells a byte-leading chain as one bare
+  // `sqstr`), so it must not start its own independent text-leading
+  // sub-chain — a byte-leading chain already forces a break unconditionally
+  // via the existing BYTES_HEX/etc branch (on its first token, regardless
+  // of continuation), independent of chain length, so `finalizeChain` never
+  // needs to check anything for one. Only a text-leading chain (first part
+  // TSTR/RAWSTRING/bare SQSTR — the same types the branches below check by
+  // decoded word count rather than always-strict) accumulates into
+  // `chainTexts`. `chainBroken` marks a part that couldn't be decoded
+  // (elided hex, an elision-chain `...` link, or a malformed part that
+  // shouldn't occur in this library's own output but isn't assumed) so a
+  // text-leading chain is never falsely flagged from incomplete data.
+  let chainKind: 'none' | 'text' | 'byte' = 'none';
+  let chainTexts: string[] = [];
+  let chainBroken = false;
+  // Whether the chain currently in progress has seen at least one
+  // `ELLIPSIS` link and at least one real `+` — i.e. it's a genuine elision
+  // *chain* (`"a" + ...`, `... + h'00'`, `... + (_ "a")`, ...), not a bare
+  // standalone `...` with nothing to concatenate at all. See `finalizeChain`
+  // for why that distinction matters.
+  let chainHasEllipsis = false;
+  let chainSawPlus = false;
+  // Non-null while inside a bracketed value that continues an ellipsis-led
+  // chain (`... + (_ "a")`, `... + [1, 2]`, ...) — only an ellipsis-led
+  // chain's continuations can be arbitrary value shapes at all (§ the
+  // restricted string/byte-literal-led grammar never allows one), matching
+  // consumeOneItem's recursive handling in serialize-utils.ts. Holds the
+  // `nesting` depth from *before* that bracket opened, so its own matching
+  // close (nesting back down to this value) can be recognized regardless of
+  // further brackets nested inside it. While suspended, no chain state may
+  // be read or written by anything the bracket's own content triggers — the
+  // whole point is to preserve the chain exactly as it was until this
+  // bracket closes, then decide whether a further `+` resumes it.
+  let chainSuspendDepth: number | null = null;
+
+  const finalizeChain = (): void => {
+    if (chainHasEllipsis && chainSawPlus) {
+      // An elision chain resolves, in the real AST, to a `CborEllipsis`
+      // wrapping a `CborArray` of fragments (see `src/cdn/parser.ts`'s
+      // `concatenate()`) — a *container*-shaped node per
+      // `CborArray._containsCdnContainer` (always `true`) and
+      // `CborTag._containsCdnContainer` (delegates to its content) — even
+      // though its own written source has no literal `[`/`{` of its own.
+      // So it disqualifies a strict array/map's inlining the same way an
+      // actual nested `[...]`/`{...}` would (mirrors the `LBRACKET`/
+      // `LBRACE` handling below: propagated to *every* open frame, since a
+      // nested container disqualifies every ancestor's current entry no
+      // matter how deep it sits), regardless of what the word-count check
+      // above concludes. A loose frame (`<<...>>`/app-sequence) ignores
+      // `entryHasContainer` entirely in its own `foldEntry` check, so
+      // setting it unconditionally here is safe — it only has an effect
+      // where the strict rule already looks at it. A truly standalone bare
+      // `...` (no `+` at all, `chainSawPlus` stays `false`) does *not* get
+      // this: it resolves to `CborEllipsis(CborSimple.NULL)` — no array, no
+      // container.
+      for (const frame of stack) frame.entryHasContainer = true;
+    }
+    if (chainKind === 'text' && !chainBroken && chainTexts.length > 0) {
+      if (isMultiWordText(chainTexts.join(''))) {
+        const top = stack[stack.length - 1];
+        if (top) top.entryForcedBreak = true;
+      }
+    }
+    chainKind = 'none';
+    chainTexts = [];
+    chainBroken = false;
+    chainHasEllipsis = false;
+    chainSawPlus = false;
+  };
+
   for (;;) {
     const token = tokenizer.consume();
-    if (token.type === 'EOF') break;
+    if (token.type === 'EOF') {
+      finalizeChain();
+      break;
+    }
     let skipClosePoint = false;
+
+    // A chain can still be waiting to continue past `PLUS`, an
+    // `ENCODING_INDICATOR` trailing an individual part, or (once seen)
+    // straight into the next chained literal or elision-chain `...` link —
+    // anything else means it's over, and must be resolved before this
+    // token's own handling (e.g. a closing bracket popping the frame the
+    // chain's break belongs on).
+    if (chainSuspendDepth === null) {
+      const chainCanContinueHere =
+        token.type === 'PLUS' ||
+        token.type === 'ENCODING_INDICATOR' ||
+        (prevType === 'PLUS' &&
+          (STRINGISH_CHAIN_TYPES.has(token.type) || token.type === 'ELLIPSIS'));
+      if (chainKind !== 'none' && !chainCanContinueHere) {
+        if (
+          prevType === 'PLUS' &&
+          chainHasEllipsis &&
+          OPEN_TOKENS.has(token.type)
+        ) {
+          // An ellipsis-led chain's continuation may itself be an
+          // arbitrary bracketed value (`... + (_ "a")`, `... + [1, 2]`,
+          // ...) — suspend instead of finalizing, so this bracket's own
+          // content (handled entirely normally below, on its own frame)
+          // doesn't touch the chain state it has nothing to do with.
+          chainSuspendDepth = nesting;
+        } else {
+          finalizeChain();
+        }
+      }
+      if (token.type === 'PLUS' && chainKind !== 'none') {
+        chainSawPlus = true;
+      }
+    }
 
     if (!sawToken) {
       sawToken = true;
@@ -522,6 +677,16 @@ function collectCdnBreakpoints(
       });
     } else if (CLOSE_TOKENS.has(token.type)) {
       nesting = Math.max(0, nesting - 1);
+      if (chainSuspendDepth !== null && nesting === chainSuspendDepth) {
+        // The bracket that suspended an ellipsis-led chain's tracking has
+        // now fully closed (matching brackets nested inside it, if any,
+        // already came and went via their own increments/decrements of
+        // `nesting`) — resume: the very next iteration's
+        // `chainCanContinueHere` check decides, from the chain state exactly
+        // as it was before suspension, whether a further `+` continues it
+        // or it's time to finalize.
+        chainSuspendDepth = null;
+      }
       if (!skipClosePoint) {
         emit(token.offset, nesting);
       }
@@ -529,12 +694,19 @@ function collectCdnBreakpoints(
       if (frame) {
         foldEntry(frame);
         const isTag = frame.kind === 'LPAREN' && frame.isTagParen;
-        const suppressible =
-          inlineLeafContainers &&
-          (isTag ||
-            frame.kind === 'LBRACKET' ||
-            frame.kind === 'LBRACE' ||
-            isLooseFrame(frame));
+        // A loose frame (LT_LT/APP_SEQUENCE) collapses onto one line
+        // whenever it fits regardless of inlineLeafContainers — mirrors
+        // serializeContainer's `alwaysInlineLeaf`, since there's no
+        // structural reason to ever spread a flat encoded-item sequence one
+        // item per line if it fits. Everything else — array/map brackets,
+        // tag parens, *and* an indefinite-length string group's parens
+        // (LPAREN, tag or not) — stays gated behind inlineLeafContainers.
+        const suppressible = isLooseFrame(frame)
+          ? true
+          : inlineLeafContainers &&
+            (frame.kind === 'LBRACKET' ||
+              frame.kind === 'LBRACE' ||
+              frame.kind === 'LPAREN');
         const suppressOwn =
           suppressible &&
           frame.ownCandidates.length > 0 &&
@@ -579,10 +751,7 @@ function collectCdnBreakpoints(
         contentDepth: nesting,
         kind: 'comma',
       };
-    } else if (
-      newline &&
-      (token.type === 'TSTR' || token.type === 'RAWSTRING')
-    ) {
+    } else if (token.type === 'TSTR' || token.type === 'RAWSTRING') {
       // A literal/escaped newline inside this token will itself become a
       // breakpoint once `splitNewline` runs (merged in by the caller,
       // outside this function) — that forces this entry's own rendering
@@ -591,12 +760,176 @@ function collectCdnBreakpoints(
       // ('\n')` check on a rendered entry.
       const tokenText = value.slice(token.offset, token.endOffset);
       const hasNewline =
-        token.type === 'TSTR'
+        newline &&
+        (token.type === 'TSTR'
           ? collectTstrNewlineBreakpoints(tokenText).length > 0
-          : collectNewlineBreakpoints(tokenText, 0).length > 0;
+          : collectNewlineBreakpoints(tokenText, 0).length > 0);
+      // A literal/escaped newline always forces a break immediately,
+      // independent of concatenation. Not gated on `inlineLeafContainers`
+      // here — setting `entryForcedBreak` is a no-op whenever the
+      // enclosing frame isn't suppressible anyway (see `suppressible`
+      // above), so this stays correct for a loose frame's unconditional
+      // collapse too, without needing to know which case applies at this
+      // point in the scan.
       if (hasNewline) {
         const top = stack[stack.length - 1];
         if (top) top.entryForcedBreak = true;
+      }
+      // Multi-word-ness (mirrors serializeContainer's `entryIsMultiWordText`
+      // probe) is chain-aware: append to an in-progress text-leading chain
+      // continuation, or start a new (possibly single-part) one — resolved
+      // by `finalizeChain` once the chain is known to be over (see above).
+      // Skipped entirely while `chainSuspendDepth` is set: this token is
+      // inside an ellipsis-led chain's bracketed continuation, tracking a
+      // frame of its own that has nothing to do with the (frozen) outer
+      // chain state — mutating it here would corrupt what's being preserved
+      // for when the bracket closes.
+      if (chainSuspendDepth === null) {
+        if (prevType === 'PLUS' && chainKind === 'text') {
+          chainTexts.push(token.value);
+        } else {
+          chainKind = 'text';
+          chainTexts = [token.value];
+          chainBroken = false;
+        }
+      }
+    } else if (token.type === 'SQSTR') {
+      // A bare sqstr byte-string literal (`'...'`) is printable text by
+      // construction — mirrors CborByteString._isMultiWordText's sqstr
+      // branch. `.value` holds hex bytes for SQSTR (byte-string convention),
+      // so the decoded UTF-8 payload comes from `_sqstrBytes` instead. As a
+      // *continuation* of an already-byte-leading chain (`h'' + 'two
+      // words'`), though, it must NOT start its own independent
+      // text-leading chain — see the `chainKind` block comment above; it's
+      // still just a further byte span of that same byte string, already
+      // exempted from the multi-word check by the byte-leading chain's own
+      // start (the BYTES_HEX/etc branch below). Entirely chain-tracking, so
+      // (like the TSTR/RAWSTRING branch above) skipped while suspended.
+      if (chainSuspendDepth === null) {
+        if (prevType === 'PLUS' && chainKind === 'byte') {
+          // no-op: part of an already-exempt byte-leading chain
+        } else {
+          const bytes = (token as SqstrToken)._sqstrBytes;
+          const decoded = bytes ? textDecoder.decode(bytes) : null;
+          if (prevType === 'PLUS' && chainKind === 'text') {
+            if (decoded === null) chainBroken = true;
+            else chainTexts.push(decoded);
+          } else {
+            chainKind = 'text';
+            chainTexts = decoded !== null ? [decoded] : [];
+            chainBroken = decoded === null;
+          }
+        }
+      }
+    } else if (
+      token.type === 'BYTES_HEX' ||
+      token.type === 'BYTES_HEX_ELIDED' ||
+      token.type === 'BYTES_B64' ||
+      token.type === 'APP_STRING'
+    ) {
+      if (
+        chainSuspendDepth === null &&
+        prevType === 'PLUS' &&
+        chainKind === 'text'
+      ) {
+        // A continuation of a *text*-leading chain (`"a" + h'62'`) is
+        // decoded and merged into the accumulated text instead — the
+        // unconditional "always strict" rule below only applies when *this*
+        // token is what fixes the chain's element type (byte-leading, or
+        // standalone); a byte-shaped *continuation* of an already
+        // text-leading chain doesn't get its own independent say — the
+        // combined word count, computed once the chain ends, is what
+        // decides it, exactly like isMultiWordTokenRange's chain decoding
+        // in serialize-utils.ts (`"a" + h'62'` merges to `"ab"`, one word,
+        // and must not be disqualified just because one part happened to
+        // be spelled as `h'62'`). APP_STRING never participates in
+        // concatenation (§5.1), so it never continues one; `BYTES_HEX_ELIDED`'s
+        // missing data can't be decoded, so it always breaks the chain
+        // instead of silently under-counting.
+        let decoded: string | null = null;
+        try {
+          if (token.type === 'BYTES_HEX') {
+            decoded = textDecoder.decode(hexToBytes(token.value));
+          } else if (token.type === 'BYTES_B64') {
+            decoded = textDecoder.decode(base64ToBytes(token.value));
+          }
+        } catch {
+          decoded = null;
+        }
+        if (decoded === null) chainBroken = true;
+        else chainTexts.push(decoded);
+      } else {
+        // Mirrors CborByteString._isMultiWordText's prefixed-literal branch
+        // (and, via APP_STRING, `isPrefixedLiteralText`'s generic catch-all
+        // for other app-string extensions like `ip'...'`/`dt'...'`): none of
+        // these have natural word boundaries to check, so they always count
+        // as multi-word under the strict rule (array/map, and — unlike a
+        // multi-word text entry — an indefinite-length string group too) —
+        // but the *only* loose frame (`<<...>>`/app-sequence) treats it as
+        // an ordinary leaf instead, e.g. `<<h'00'>>`/`<<ip'...'>>` stay
+        // inline while `(_ h'00')` still breaks. The governing frame is
+        // found by `nearestRuleFrame`, not just `top`, since an enclosing
+        // tag paren is transparent to this decision. This unconditional
+        // check applies whether this literal starts a byte-leading chain or
+        // stands alone — a byte-leading chain is never re-spelled as one
+        // bare `sqstr`, so it disqualifies the same way a lone prefixed
+        // literal already does, independent of chain length (see
+        // serialize-utils.ts's isMultiWordTokenRange for the same
+        // reasoning) — but *not* when it's really a continuation of a
+        // text-leading chain, handled above instead.
+        const top = stack[stack.length - 1];
+        const ruleFrame = nearestRuleFrame();
+        if (top && (!ruleFrame || !isLooseFrame(ruleFrame))) {
+          top.entryForcedBreak = true;
+        }
+        if (
+          chainSuspendDepth === null &&
+          (prevType !== 'PLUS' || chainKind === 'none')
+        ) {
+          // Not a continuation — this token starts a fresh, byte-leading
+          // chain (or stands alone, which is the same thing as a one-part
+          // chain). Recorded so a *following* continuation part (including
+          // a bare SQSTR, which would otherwise look text-leading in
+          // isolation) is correctly recognized as still belonging to this
+          // byte-leading chain rather than starting an independent one.
+          chainKind = 'byte';
+        }
+      }
+    } else if (token.type === 'ELLIPSIS') {
+      // An elision-chain link (`"a" + ...`, or leading — `... + "b"`, an
+      // unknown prefix concatenated with a known suffix — CDN's notation
+      // for a value with a part deliberately omitted; see
+      // serialize-utils.ts's `CHAIN_ATOM_TYPES` for the same grammar,
+      // accepted both as a chain's own first value and as any later
+      // continuation). Either way its missing content makes the *combined*
+      // word count of the whole chain unknowable, never just this part's —
+      // so as a *continuation* of a text-leading chain, it poisons that
+      // chain (without ending it — more parts may still follow) rather
+      // than silently under-counting from only the visible parts; as a
+      // *fresh start* (nothing to continue), it begins one already
+      // poisoned, so a *later* continuation part (including a bare SQSTR,
+      // which would otherwise look like its own fresh text-leading start)
+      // is still recognized as belonging to this now-indeterminate chain
+      // instead of starting an independent one. A byte-leading chain
+      // doesn't track decoded text at all, so there's nothing to poison
+      // there. Set unconditionally, regardless of which case below applies
+      // (including a continuation of a *byte*-kind chain, e.g. `h'00' +
+      // ...`, which none of those cases otherwise touch) — see
+      // `finalizeChain`'s `chainHasEllipsis`/`chainSawPlus` check for why a
+      // truly standalone `...` (this flag set, but `chainSawPlus` never
+      // becomes true) is harmless. Entirely chain-tracking, so skipped
+      // while suspended (an `ELLIPSIS` inside an ellipsis-led chain's own
+      // bracketed continuation, if that's even reachable, has nothing to do
+      // with the outer, frozen chain).
+      if (chainSuspendDepth === null) {
+        chainHasEllipsis = true;
+        if (prevType === 'PLUS' && chainKind === 'text') {
+          chainBroken = true;
+        } else if (prevType !== 'PLUS' || chainKind === 'none') {
+          chainKind = 'text';
+          chainTexts = [];
+          chainBroken = true;
+        }
       }
     }
     prevType = token.type;
@@ -709,6 +1042,17 @@ const CLOSE_TOKENS = new Set<TokenType>([
   'RBRACE',
   'RPAREN',
   'GT_GT',
+]);
+
+// Token types that can appear as one part of a `+`-concatenation chain
+// (§5.1) — mirrors `STRINGISH_TYPES` in serialize-utils.ts.
+const STRINGISH_CHAIN_TYPES = new Set<TokenType>([
+  'TSTR',
+  'RAWSTRING',
+  'SQSTR',
+  'BYTES_HEX',
+  'BYTES_HEX_ELIDED',
+  'BYTES_B64',
 ]);
 
 function hasCommentBetween(

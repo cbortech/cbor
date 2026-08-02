@@ -73,6 +73,12 @@ export class CborEmbeddedCBOR extends CborItem {
       // unlike CborArray/CborMap, an item that is itself an array/map still
       // inlines here as long as its own rendering fits on one line — <<...>>
       // is a flat sequence of encoded items, not a nested-structure display.
+      // alwaysInlineLeaf: this collapse isn't gated behind
+      // inlineLeafContainers at all — there's no structural reason to ever
+      // spread a flat encoded-item sequence one item per line if it fits.
+      alwaysInlineLeaf: true,
+      entryIsMultiWordText: (i) =>
+        this.items[i]._isMultiWordText(options, false),
       entryLeadingNode: (i) => this.items[i],
       entryTrailing: (i, style) => formatTrailingComments(this.items[i], style),
     });

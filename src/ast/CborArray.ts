@@ -61,6 +61,7 @@ export class CborArray extends CborItem {
       hasEntryComments: () => this.items.some(hasPreservedComments),
       renderEntry: (i) => this.items[i]._toCDN(options, depth + 1),
       entryIsLeaf: (i) => !this.items[i]._containsCdnContainer,
+      entryIsMultiWordText: (i) => this.items[i]._isMultiWordText(options),
       entryLeadingNode: (i) => this.items[i],
       entryTrailing: (i, style) => formatTrailingComments(this.items[i], style),
     });
