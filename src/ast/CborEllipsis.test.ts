@@ -851,3 +851,90 @@ describe('CborEllipsis — toCDN', () => {
     expect(() => CBOR.fromCDN(source)).not.toThrow();
   });
 });
+
+// ─── modernConcat ─────────────────────────────────────────────────────────────
+
+describe('CborEllipsis — toCDN with modernConcat', () => {
+  const opts = { preserveConcatenation: true, modernConcat: true };
+
+  test('text elision renders as t1<<...>>, with ... as a literal argument', () => {
+    expect(CBOR.format('"a" + ... + "b"', opts)).toBe('t1<<"a", ..., "b">>');
+  });
+
+  test('bytes elision with a real boundary renders as b1<<...>>', () => {
+    expect(CBOR.format("h'ab' + h'cd...ef' + h'01'", opts)).toBe(
+      "b1<<h'ab', h'cd...ef', h'01'>>"
+    );
+  });
+
+  test('a lone h\'xx...yy\' literal (no real boundary) is not wrapped', () => {
+    // Nothing to concatenate — modernConcat only changes how a real `+`
+    // boundary is spelled, not the compact elided-literal form itself.
+    expect(CBOR.format("h'AB...CD'", opts)).toBe("h'ab...cd'");
+  });
+
+  test('falls back to raw tag notation when appStrings is false, same as without modernConcat', () => {
+    // `...`/`+` elision notation is itself app-string sugar, so
+    // `appStrings: false` already reverts the whole thing to `888([...])`
+    // regardless of `modernConcat` — matching plain `preserveConcatenation`
+    // with `appStrings: false`.
+    const withT1B1 = CBOR.format('"a" + ... + "b"', {
+      ...opts,
+      appStrings: false,
+    });
+    const withoutT1B1 = CBOR.format('"a" + ... + "b"', {
+      preserveConcatenation: true,
+      appStrings: false,
+    });
+    expect(withT1B1).toBe(withoutT1B1);
+  });
+
+  test('applies even without preserveConcatenation — an elision chain always renders as multiple parts', () => {
+    // Unlike plain (non-elision) concatenation, an elision chain has no
+    // single-merged-literal state to begin with (the `...` denotes
+    // genuinely unknown content), so modernConcat isn't gated behind
+    // preserveConcatenation here.
+    expect(CBOR.format('"a" + ... + "b"', { modernConcat: true })).toBe(
+      't1<<"a", ..., "b">>'
+    );
+    // Also applies to a value reconstructed with no realBoundary info at
+    // all (e.g. from raw CBOR — `_hasRealConcatenation`-style provenance is
+    // irrelevant here, only the fragment shape matters).
+    const raw = new CborEllipsis([
+      new CborTextString('a'),
+      new CborEllipsis(),
+      new CborTextString('b'),
+    ]);
+    expect(raw.toCDN({ modernConcat: true })).toBe('t1<<"a", ..., "b">>');
+  });
+
+  test('plain (non-elision) concatenation still requires preserveConcatenation', () => {
+    // The asymmetry with the elision case above is intentional: plain
+    // concatenation collapses to one merged literal by default, and
+    // modernConcat only changes the spelling of an already-preserved
+    // expansion — see CborTextString/CborByteString.
+    expect(CBOR.format('"a" + "b"', { modernConcat: true })).toBe('"ab"');
+  });
+
+  test('a fused (non-elided) `+` part inside an elision fragment nests its own t1<<>>', () => {
+    const original = CBOR.fromCDN('"a" + "b" + ... + "c"');
+    const rendered = original.toCDN(opts);
+    expect(rendered).toBe('t1<<t1<<"a", "b">>, ..., "c">>');
+    // Round-trips through t1/b1's own parser back to an equivalent value
+    // (t1<<>>'s own parseAppSequence flattens the nested t1<<>> argument).
+    expect(CBOR.fromCDN(rendered).toCBOR()).toEqual(original.toCBOR());
+  });
+
+  test('round-trips through the parser to an equivalent CBOR encoding', () => {
+    const original = CBOR.fromCDN("h'ab' + h'cd...ef' + h'01'");
+    const rendered = original.toCDN(opts);
+    const reparsed = CBOR.fromCDN(rendered);
+    expect(reparsed.toCBOR()).toEqual(original.toCBOR());
+  });
+
+  test('stays single-line even with indent, matching the plain + rendering', () => {
+    expect(CBOR.format('"a" + ... + "b"', { ...opts, indent: 2 })).toBe(
+      't1<<"a", ..., "b">>'
+    );
+  });
+});

@@ -515,6 +515,34 @@
           <label class="check">
             <input
               type="checkbox"
+              id="opt-concat-t1b1"
+              aria-describedby="hint-opt-concat-t1b1"
+            />
+            Use t1/b1 concatenation
+            <span class="opt-hint" role="tooltip" id="hint-opt-concat-t1b1"
+              >Render preserved + concatenation as t1&lt;&lt;"a",
+              "b"&gt;&gt; / b1&lt;&lt;…&gt;&gt; application-sequence notation
+              (draft-ietf-cbor-edn-literals-26 §3.4) instead of "a" + "b". No
+              effect unless Concatenation (below) is on</span
+            >
+          </label>
+          <label class="check">
+            <input
+              type="checkbox"
+              id="opt-stream-ilbs-ilts"
+              aria-describedby="hint-opt-stream-ilbs-ilts"
+            />
+            Use ilbs/ilts streaming
+            <span class="opt-hint" role="tooltip" id="hint-opt-stream-ilbs-ilts"
+              >Render indefinite-length strings as ilts&lt;&lt;"a",
+              "b"&gt;&gt; / ilbs&lt;&lt;…&gt;&gt; application-sequence notation
+              (draft-ietf-cbor-edn-literals-26 §3.5) instead of the legacy
+              (_ "a", "b") streamstring form</span
+            >
+          </label>
+          <label class="check">
+            <input
+              type="checkbox"
               id="opt-inline-leaf"
               aria-describedby="hint-opt-inline-leaf"
               checked

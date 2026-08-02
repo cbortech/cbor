@@ -385,6 +385,10 @@ CBOR.format("h'68' + b64'aQ'", {
 //   b64'aQ'
 ```
 
+保持した連結を `+` ではなく draft-26 の `t1<<...>>` / `b1<<...>>` 記法で
+出力するには、[文字列連結と不定長文字列](#文字列連結と不定長文字列) の
+`modernConcat` を参照してください。
+
 ### application-string / -sequence 記法を保持する
 
 一部の組み込み拡張(`dt`/`DT`、`ip`/`IP`)は同じ値に対して `prefix'...'`
@@ -704,6 +708,57 @@ const v = CBOR.fromCDN("ilbs<<'Hello ', 'world'>>");
 console.log(v.toCDN({ appStrings: false }));
 // (_ 'Hello ','world')
 ```
+
+### `t1`/`b1`/`ilbs`/`ilts` 記法を出力する
+
+パース側はすでに `t1`/`b1`/`ilbs`/`ilts` 記法を受理しますが、`toCDN()` /
+`CBOR.format()` はデフォルトではこれらを自ら出力しません。保持した連結
+(`preserveConcatenation`)は従来どおり `+` で、不定長文字列は従来どおり
+`(_ ...)` streamstring 形式でレンダリングされます。`modernConcat` と
+`modernStreamSyntax` を `true` にすると draft-26 の記法での出力を選択でき
+ます。どちらもデフォルトは `false`(従来構文)で、`appStrings` が `false`
+の場合は従来構文にフォールバックします。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+CBOR.format('"a" + "b"', {
+  indent: 2,
+  preserveConcatenation: true,
+  modernConcat: true,
+});
+// t1<<"a", "b">>
+
+CBOR.format('(_ "a", "b")', { modernStreamSyntax: true });
+// ilts<<"a","b">>
+```
+
+`modernConcat` は `...` による省略連結(§4.2)にも適用され、
+`"a" + ... + "b"` は `t1<<"a", ..., "b">>` としてレンダリングされます。
+通常の連結と異なり、これは `preserveConcatenation` の値に関わらず適用され
+ます — 省略連結にはそもそも1つのリテラルに畳み込んだ状態が存在しないため
+です。
+
+> [!NOTE]
+> どちらのオプションも `t1`/`b1`/`ilbs`/`ilts` のソースを従来記法に
+> **変換**するものではありません。`t1<<...>>`(や `ilbs<<...>>` など)
+> からパースされた値は、`appStrings` が `false` でなく、
+> `encodingIndicators` が `'auto'`(どちらもデフォルト)であり、かつ
+> ソースが単一行、または `indent` 指定時であれば、`modernConcat` /
+> `modernStreamSyntax` の値に関わらずそのままの記法で出力されます。
+> `encodingIndicators: 'always'`/`'never'` や `appStrings: false` を指定
+> した場合は、他の application-string 値と同様に正規化されます(例:
+> `encodingIndicators: 'always'` では `t1<<"a", "b">>` が `"ab"_i` に
+> なります)。また、複数行のソースは `indent` 未指定(1行出力)の場合、
+> そのレイアウトを再現できないため正規化されます:
+> ```ts
+> CBOR.format('t1<<\n  "a",\n  "b"\n>>');
+> // '"ab"' — indent未指定のため正規化される
+> CBOR.format('t1<<\n  "a",\n  "b"\n>>', { indent: 2 });
+> // 't1<<\n  "a",\n  "b"\n>>' — そのまま保持される
+> ```
+> 両オプションが影響するのは `+` チェーンや `(_ ...)` チャンク列から
+> 再構築された値の出力のみです。
 
 > [!NOTE]
 > `t1` / `b1` という識別子は draft-26 で暫定(provisional)と明記されて

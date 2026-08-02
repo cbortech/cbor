@@ -148,6 +148,13 @@ const LAYOUT_OPTION_IDS = [
   'opt-comments',
   'opt-blank-lines',
   'opt-concat',
+  // `modernConcat` only changes anything for a plain (non-elision) preserved
+  // concatenation, which — like `opt-concat` itself — is a layout feature
+  // gated behind `indent`. `opt-stream-ilbs-ilts` is deliberately *not*
+  // here: `modernStreamSyntax` applies to indefinite-length strings
+  // unconditionally, with no `indent` dependency (see
+  // `CborIndefiniteTextString`/`CborIndefiniteByteString`).
+  'opt-concat-t1b1',
 ] as const;
 
 /**
@@ -265,6 +272,13 @@ export function readFormatOptions(): FromCDNOptions & ToCDNOptions {
     options.preserveAppSequence = true;
   if (!(document.getElementById('opt-app-strings') as HTMLInputElement).checked)
     options.appStrings = false;
+  if ((document.getElementById('opt-concat-t1b1') as HTMLInputElement).checked)
+    options.modernConcat = true;
+  if (
+    (document.getElementById('opt-stream-ilbs-ilts') as HTMLInputElement)
+      .checked
+  )
+    options.modernStreamSyntax = true;
   return options;
 }
 

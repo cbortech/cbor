@@ -169,6 +169,37 @@ describe('CborIndefiniteByteString.toCDN()', () => {
   });
 });
 
+describe('CborIndefiniteByteString.toCDN() — modernStreamSyntax: true', () => {
+  const node = new CborIndefiniteByteString([
+    new CborByteString(new Uint8Array([0x01, 0x02])),
+    new CborByteString(new Uint8Array([0x03, 0x04, 0x05])),
+  ]);
+
+  test('renders as ilbs<<...>> instead of (_ ...)', () => {
+    expect(toCDN(node, { modernStreamSyntax: true })).toBe(
+      "ilbs<<h'0102',h'030405'>>"
+    );
+  });
+
+  test('collapses to one line even with indent (loose app-sequence rule)', () => {
+    expect(toCDN(node, { modernStreamSyntax: true, indent: 2 })).toBe(
+      "ilbs<<h'0102', h'030405'>>"
+    );
+  });
+
+  test('empty chunks', () => {
+    expect(
+      toCDN(new CborIndefiniteByteString([]), { modernStreamSyntax: true })
+    ).toBe('ilbs<<>>');
+  });
+
+  test('falls back to (_ ...) when appStrings is false', () => {
+    expect(
+      toCDN(node, { modernStreamSyntax: true, appStrings: false })
+    ).toBe("(_ h'0102',h'030405')");
+  });
+});
+
 // ─── Text strings ─────────────────────────────────────────────────────────────
 
 describe('CborTextString.toCDN()', () => {
@@ -220,6 +251,42 @@ describe('CborIndefiniteTextString.toCDN()', () => {
     expect(toCDN(node, { indent: 2 })).toBe(
       '[\n  (_ \n    "a",\n    "b"\n  )\n]'
     );
+  });
+});
+
+describe('CborIndefiniteTextString.toCDN() — modernStreamSyntax: true', () => {
+  const node = new CborIndefiniteTextString([
+    new CborTextString('strea'),
+    new CborTextString('ming'),
+  ]);
+
+  test('renders as ilts<<...>> instead of (_ ...)', () => {
+    expect(toCDN(node, { modernStreamSyntax: true })).toBe(
+      'ilts<<"strea","ming">>'
+    );
+  });
+
+  test('collapses to one line even with indent (loose app-sequence rule)', () => {
+    expect(toCDN(node, { modernStreamSyntax: true, indent: 2 })).toBe(
+      'ilts<<"strea", "ming">>'
+    );
+  });
+
+  test('empty chunks', () => {
+    expect(
+      toCDN(new CborIndefiniteTextString([]), { modernStreamSyntax: true })
+    ).toBe('ilts<<>>');
+  });
+
+  test('falls back to (_ ...) when appStrings is false', () => {
+    expect(
+      toCDN(node, { modernStreamSyntax: true, appStrings: false })
+    ).toBe('(_ "strea","ming")');
+  });
+
+  test('round-trips through the parser', () => {
+    const rendered = toCDN(node, { modernStreamSyntax: true });
+    expect(parseCDN(rendered).toJS()).toBe('streaming');
   });
 });
 

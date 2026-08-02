@@ -25,6 +25,7 @@ import {
   convertCommentText,
   danglingCommentsByGap,
   joinConcatParts,
+  joinAppSeqParts,
   type ByteCommentSyntax,
 } from '../cdn/serialize-utils';
 
@@ -223,7 +224,18 @@ export class CborEllipsis extends CborTag {
       }
       // Otherwise (text elision, or bytes elision mixed with something
       // else): frag + ... + frag, single-line unless a comment needs the
-      // extra room — see `joinElisionParts`.
+      // extra room — see `joinElisionParts`. Under `modernConcat`, the same
+      // fragments become one flat `t1<<frag, ..., frag>>` / `b1<<...>>`
+      // argument list instead (`...` renders as the literal ellipsis
+      // argument concat.ts's own grammar accepts) — unlike the plain
+      // (non-elision) concatenation case, this isn't gated on
+      // `preserveConcatenation`: an elision chain has no "collapsed single
+      // literal" state to fall back to in the first place (the `...` denotes
+      // genuinely unknown content, so it always renders as multiple parts —
+      // see `preserveConcat` only ever affecting *how much* of a fragment's
+      // own internal boundary is shown, e.g. `_renderFragment` vs a fused
+      // fragment's own plain `_toCDN()`, never *whether* the top-level chain
+      // itself is shown as multiple parts).
       const items = this.content.items;
       const parts = items.map((item) =>
         preserveConcat
@@ -240,6 +252,26 @@ export class CborEllipsis extends CborTag {
         .map((item, i) =>
           boundaryComments(items[i]!, item, preserveComments, style)
         );
+      if (options?.modernConcat) {
+        // A group already collapsed to the compact `h'xx...yy'` form (via
+        // `_compactHexElided`) never reaches here — only a byte fragment
+        // that survives *uncollapsed* (mixed with a text fragment, or with
+        // an ellipsis this function doesn't know is byte-typed) counts
+        // toward "every real fragment is byte-typed" for prefix selection.
+        const isByteOnly = items.every(
+          (item) =>
+            item instanceof CborByteString ||
+            (item instanceof CborEllipsis && item.content instanceof CborSimple)
+        );
+        return joinAppSeqParts(
+          isByteOnly ? 'b1' : 't1',
+          parts,
+          '',
+          resolveIndent(options),
+          depth,
+          gapComments
+        );
+      }
       return joinElisionParts(
         parts,
         gapComments,
@@ -301,6 +333,10 @@ export class CborEllipsis extends CborTag {
       typeof options?.preserveComments === 'string'
         ? options.preserveComments
         : undefined;
+    // `options?.appStrings === false` already returned via `super._toCDN`
+    // before any caller reaches `_renderFragment` — see this class's own
+    // `_toCDN` — so `modernConcat` alone is sufficient here.
+    const useT1B1 = !!options?.modernConcat;
     if (
       item instanceof CborByteString &&
       item.ednParts !== undefined &&
@@ -329,7 +365,15 @@ export class CborEllipsis extends CborTag {
             style
           ) ?? [])
         : [];
-      return joinElisionParts(literals, internalGaps, indentStr, depth);
+      // Rendered directly here (rather than delegating to `item._toCDN()`,
+      // which already knows how to expand its own `ednParts` under
+      // `modernConcat` — see `CborByteString.ts`) because that expansion is
+      // gated behind multi-line `indent` there, while an elision fragment's
+      // own part boundaries must show regardless of indent, same as the
+      // legacy `+` case just below.
+      return useT1B1
+        ? joinAppSeqParts('b1', literals, '', indentStr, depth, internalGaps)
+        : joinElisionParts(literals, internalGaps, indentStr, depth);
     }
     if (
       item instanceof CborTextString &&
@@ -352,7 +396,9 @@ export class CborEllipsis extends CborTag {
             style
           ) ?? [])
         : [];
-      return joinElisionParts(literals, internalGaps, indentStr, depth);
+      return useT1B1
+        ? joinAppSeqParts('t1', literals, '', indentStr, depth, internalGaps)
+        : joinElisionParts(literals, internalGaps, indentStr, depth);
     }
     return item._toCDN(options, depth);
   }
@@ -567,6 +613,18 @@ export class CborEllipsis extends CborTag {
         .join('');
       return `h'${hex}'`;
     });
+    // `groups.length === 1` (nothing to concatenate — this method can also
+    // be reached via `preserveByteString` alone, with no real `+` boundary
+    // at all) has nothing for `modernConcat` to change: both branches
+    // collapse to the one rendered literal, so only switch notation when
+    // there's an actual boundary to show.
+    if (
+      options?.preserveConcatenation &&
+      options?.modernConcat &&
+      rendered.length > 1
+    ) {
+      return joinAppSeqParts('b1', rendered, '', indentStr, depth, gapComments);
+    }
     return joinElisionParts(rendered, gapComments, indentStr, depth);
   }
 }

@@ -12,6 +12,7 @@ import {
   resolveEiSuffix,
   resolveIndent,
   joinConcatParts,
+  joinAppSeqParts,
   canonicalEncodingWidth,
   stripByteLiteralComments,
   danglingCommentsByGap,
@@ -149,7 +150,6 @@ export class CborByteString extends CborItem {
           ? source
           : serializeBytes(part.bytes, encoding, options?.sqstr);
       });
-      literals[literals.length - 1] += suffix;
       const midComments = options?.preserveComments
         ? danglingCommentsByGap(
             this.comments?.dangling,
@@ -159,6 +159,10 @@ export class CborByteString extends CborItem {
               : undefined
           )
         : undefined;
+      if (options?.modernConcat && options?.appStrings !== false) {
+        return joinAppSeqParts('b1', literals, suffix, indentStr, _depth, midComments);
+      }
+      literals[literals.length - 1] += suffix;
       return joinConcatParts(literals, indentStr, _depth, midComments);
     }
     const preservedWhole = options?.preserveByteString

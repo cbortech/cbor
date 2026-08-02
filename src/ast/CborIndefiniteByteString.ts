@@ -69,27 +69,37 @@ export class CborIndefiniteByteString extends CborItem {
       }
       return new CborByteString(merged)._toCDN(options, depth);
     }
-    if (this.chunks.length === 0) return "''_";
+    // `ilbs<<...>>` (draft-26 §3.5) replaces the legacy `(_ ...)` marker
+    // notation; falls back to it when `appStrings` disables app-string
+    // notation entirely.
+    const useIlbs =
+      !!options?.modernStreamSyntax && options?.appStrings !== false;
+    if (!useIlbs && this.chunks.length === 0) return "''_";
     return serializeContainer({
       node: this,
       options,
       depth,
-      openChar: '(',
-      closeChar: ')',
+      openChar: useIlbs ? 'ilbs<<' : '(',
+      closeChar: useIlbs ? '>>' : ')',
       count: this.chunks.length,
       indefiniteLength: true,
+      indefiniteMarker: !useIlbs,
       encodingWidth: undefined,
       hasEntryComments: () => this.chunks.some(hasPreservedComments),
       renderEntry: (i) => this.chunks[i]._toCDN(options, depth + 1),
-      // Unlike CborEmbeddedCBOR (`<<...>>`), an indefinite-length string
-      // group follows the same strict rule as CborArray/CborMap, gated
-      // behind inlineLeafContainers: entryIsLeaf is trivially always true
-      // (chunks can never be containers), but its presence is what signals
-      // "strict" to serializeContainer's probe — so a chunk that renders as
-      // a prefixed literal (`h'...'`) always disqualifies inlining here,
-      // same as it would in `[h'...']`.
-      entryIsLeaf: () => true,
-      entryIsMultiWordText: (i) => this.chunks[i]._isMultiWordText(options),
+      // Unlike CborEmbeddedCBOR (`<<...>>`), the legacy `(_ ...)` group
+      // follows the same strict rule as CborArray/CborMap, gated behind
+      // inlineLeafContainers: entryIsLeaf is trivially always true (chunks
+      // can never be containers), but its presence is what signals "strict"
+      // to serializeContainer's probe — so a chunk that renders as a
+      // prefixed literal (`h'...'`) always disqualifies inlining here, same
+      // as it would in `[h'...']`. `ilbs<<...>>` is itself an
+      // application-sequence form, so it always collapses like
+      // CborEmbeddedCBOR instead (loose rule, entryIsLeaf omitted).
+      entryIsLeaf: useIlbs ? undefined : () => true,
+      alwaysInlineLeaf: useIlbs,
+      entryIsMultiWordText: (i) =>
+        this.chunks[i]._isMultiWordText(options, !useIlbs),
       entryLeadingNode: (i) => this.chunks[i],
       entryTrailing: (i, style) =>
         formatTrailingComments(this.chunks[i], style),
