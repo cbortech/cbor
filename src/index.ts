@@ -57,7 +57,7 @@ export { cri } from './extensions/cri';
 export { t1, b1 } from './extensions/concat';
 export { ilbs, ilts } from './extensions/ilstrings';
 
-// The default set of bundled application-oriented extensions, for use with
+// The default set of bundled app-extensions, for use with
 // the `builtinExtensions` option (e.g. to build a filtered subset).
 export { BUILTIN_EXTENSIONS } from './extensions/builtins';
 

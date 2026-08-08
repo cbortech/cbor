@@ -1,6 +1,6 @@
 /**
  * `t1'...'` / `t1<<...>>` and `b1'...'` / `b1<<...>>` string-concatenation
- * app-extensions (§3.4 of draft-ietf-cbor-edn-literals-26).
+ * app-extensions (§3.5 of draft-ietf-cbor-edn-literals-27).
  *
  * Builds a single (text or byte) string by joining the bytes of the (text or
  * byte) string arguments from left to right:

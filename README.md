@@ -392,15 +392,15 @@ CBOR.format("h'68' + b64'aQ'", {
 //   b64'aQ'
 ```
 
-To render the preserved concatenation using draft-26's `t1<<...>>` /
+To render the preserved concatenation using draft-27's `t1<<...>>` /
 `b1<<...>>` notation instead of `+`, see `modernConcat` in
 [String Concatenation and Indefinite-Length Strings](#string-concatenation-and-indefinite-length-strings).
 
-### Preserve application-string/-sequence notation
+### Preserve app-string/-sequence notation
 
 Some built-in extensions (`dt`/`DT`, `ip`/`IP`) support `prefix'...'`
-(application string), `` prefix`...` `` (backtick application string),
-`prefix<<...>>` (application sequence), and a raw tag literal (`N(...)`)
+(app-string), `` prefix`...` `` (backtick app-string),
+`prefix<<...>>` (app-sequence), and a raw tag literal (`N(...)`)
 notation for the same value, and by default regenerate `prefix'...'` from
 the resolved value on every `CBOR.format()` call — so
 `` DT`1969-07-21T02:56:16Z` ``, `DT<<'1969-07-21T02:56:16Z'>>`, and even the
@@ -687,8 +687,8 @@ console.log(text);
 
 ## String Concatenation and Indefinite-Length Strings
 
-The `t1` / `b1` / `ilbs` / `ilts` application extensions from
-draft-ietf-cbor-edn-literals-26 (§3.4 / §3.5) are enabled by default.
+The `t1` / `b1` / `ilbs` / `ilts` app-extensions from
+draft-ietf-cbor-edn-literals-27 (§3.5 / §3.6) are enabled by default.
 
 `t1<<...>>` and `b1<<...>>` join (text or byte) string arguments from left to
 right into a single text string (`t1`) or byte string (`b1`). Arguments may
@@ -749,34 +749,36 @@ happens regardless of `preserveConcatenation`, since an elision chain has no
 single-literal collapsed form to fall back to in the first place.
 
 > [!NOTE]
-> Neither option *converts* `t1`/`b1`/`ilbs`/`ilts` source back to the
+> Neither option _converts_ `t1`/`b1`/`ilbs`/`ilts` source back to the
 > legacy notation: a value parsed from `t1<<...>>` (or `ilbs<<...>>`, etc.)
 > keeps that exact spelling on output regardless of `modernConcat` /
 > `modernStreamSyntax` — as long as `appStrings` is not `false`,
 > `encodingIndicators` is `'auto'` (both defaults), and the source is either
 > single-line or being rendered with `indent` enabled. `encodingIndicators:
-> 'always'`/`'never'` or `appStrings: false` still normalize it like any
-> other application-string value (e.g. `t1<<"a", "b">>` becomes `"ab"_i`
+'always'`/`'never'` or `appStrings: false` still normalize it like any
+> other app-string value (e.g. `t1<<"a", "b">>` becomes `"ab"_i`
 > under `encodingIndicators: 'always'`), and a multi-line source falls back
 > to normalized output in single-line mode (that layout can't be reproduced
 > without `indent`):
+>
 > ```ts
 > CBOR.format('t1<<\n  "a",\n  "b"\n>>');
 > // '"ab"' — falls back: multi-line source, no `indent`
 > CBOR.format('t1<<\n  "a",\n  "b"\n>>', { indent: 2 });
 > // 't1<<\n  "a",\n  "b"\n>>' — kept verbatim
 > ```
+>
 > Both options only affect how a value reconstructed from a `+` chain or a
-> `(_ ...)` chunk list is *newly* rendered.
+> `(_ ...)` chunk list is _newly_ rendered.
 
 > [!NOTE]
-> The identifiers `t1` and `b1` are explicitly provisional in draft-26 and
+> The identifiers `t1` and `b1` are explicitly provisional in draft-27 and
 > may be renamed by the CBOR working group.
 
 ## float
 
 Interprets a hex bit-pattern as an IEEE 754 floating-point value
-(draft-ietf-cbor-edn-literals-26 §3.7). Enabled by default.
+(draft-ietf-cbor-edn-literals-27 §3.8). Enabled by default.
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -801,7 +803,7 @@ default. Import what you need and pass it through the `extensions` option.
 Byte-string literals using [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648)
 Base32 encoding. These prefixes are described in §8 of
 [RFC 8949](https://www.rfc-editor.org/rfc/rfc8949) and also mentioned in
-[draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/).
+[draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/27/).
 
 - `b32` — §6 Base32 (`A–Z 2–7` alphabet)
 - `h32` — §7 Base32Hex (`0–9 A–V` alphabet)
@@ -839,13 +841,13 @@ console.log(v2.toCDN({ appStrings: false }));
 
 ---
 
-Additional application extensions are published as separate packages. Install
+Additional app-extensions are published as separate packages. Install
 the ones you need and pass them through the `extensions` option.
 
 ### hash
 
-`hash` is an application extension defined in §3.3 of
-[draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/).
+`hash` is an app-extension defined in §3.4 of
+[draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/27/).
 It represents cryptographic hash values in the form `hash'algorithm:value'`.
 Because it requires an external cryptographic library, it is provided separately
 as [@cbortech/hash-extension](https://www.npmjs.com/package/@cbortech/hash-extension).
@@ -870,7 +872,7 @@ const digest = cbor.parse(
 
 ### uuid
 
-`uuid` is a library-specific application extension, provided separately as
+`uuid` is a library-specific app-extension, provided separately as
 [@cbortech/uuid-extension](https://www.npmjs.com/package/@cbortech/uuid-extension).
 
 ```bash
@@ -889,7 +891,7 @@ const id = cbor.parse("uuid'550e8400-e29b-41d4-a716-446655440000'");
 
 ### set / map
 
-`SET` and `MAP` are library-specific application extensions for tagged Set and
+`SET` and `MAP` are library-specific app-extensions for tagged Set and
 Map values. They are provided together as
 [@cbortech/set-map-extensions](https://www.npmjs.com/package/@cbortech/set-map-extensions).
 `SET<<[...]>>` produces CBOR tag 258 over an array, and `MAP<<{...}>>` produces
@@ -1150,6 +1152,7 @@ types).
 - CDN (CBOR-EDN)
   - [draft-ietf-cbor-edn-literals-25](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/)
   - [draft-ietf-cbor-edn-literals-26](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/26/)
+  - [draft-ietf-cbor-edn-literals-27](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/27/)
 - CDDL
   - [RFC 8610](https://www.rfc-editor.org/rfc/rfc8610)
   - [RFC 9682](https://www.rfc-editor.org/rfc/rfc9682)

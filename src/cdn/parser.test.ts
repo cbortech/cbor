@@ -123,7 +123,7 @@ describe('parseCDN — floats', () => {
   });
 
   // ── positive sign ─────────────────────────────────────────────────────────
-  // Per draft-ietf-cbor-edn-literals-25 §2.4: 0, +0, -0 are all uint (00).
+  // Per draft-ietf-cbor-edn-literals-27 §2.2: 0, +0, -0 are all uint (00).
 
   test('+0 → uint 0 (same as 0)', () => {
     const n = parseCDN('+0') as CborUint;
@@ -2987,7 +2987,7 @@ describe('parseCDN — builtinExtensions option', () => {
     );
   });
 
-  test('false: disables every bundled application extension', () => {
+  test('false: disables every bundled app-extension', () => {
     expect(
       parseCDN("dt'2026-01-01T00:00:00Z'", { builtinExtensions: false })
     ).toBeInstanceOf(CborUnresolvedAppExt);

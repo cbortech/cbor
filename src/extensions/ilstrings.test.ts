@@ -1,6 +1,6 @@
 /**
  * Tests for the `ilbs` / `ilts` indefinite-length string app-extensions
- * (§3.5 of draft-ietf-cbor-edn-literals-26).
+ * (§3.6 of draft-ietf-cbor-edn-literals-27).
  *
  * Covers:
  *  - Spec §3.5 examples (including per-argument encoding indicators)

@@ -194,9 +194,9 @@ describe('CborIndefiniteByteString.toCDN() — modernStreamSyntax: true', () => 
   });
 
   test('falls back to (_ ...) when appStrings is false', () => {
-    expect(
-      toCDN(node, { modernStreamSyntax: true, appStrings: false })
-    ).toBe("(_ h'0102',h'030405')");
+    expect(toCDN(node, { modernStreamSyntax: true, appStrings: false })).toBe(
+      "(_ h'0102',h'030405')"
+    );
   });
 });
 
@@ -279,9 +279,9 @@ describe('CborIndefiniteTextString.toCDN() — modernStreamSyntax: true', () => 
   });
 
   test('falls back to (_ ...) when appStrings is false', () => {
-    expect(
-      toCDN(node, { modernStreamSyntax: true, appStrings: false })
-    ).toBe('(_ "strea","ming")');
+    expect(toCDN(node, { modernStreamSyntax: true, appStrings: false })).toBe(
+      '(_ "strea","ming")'
+    );
   });
 
   test('round-trips through the parser', () => {

@@ -1,5 +1,5 @@
 /**
- * §4.2 of draft-ietf-cbor-edn-literals-25 — Ellipsis (Elision) tag.
+ * §5.2 of draft-ietf-cbor-edn-literals-27 — Ellipsis (Elision) tag.
  *
  * Two forms:
  *   888(null)          — subtree elision:    a whole data item replaced by ...

@@ -1,6 +1,6 @@
 /**
  * `ilbs'...'` / `ilbs<<...>>` and `ilts'...'` / `ilts<<...>>` app-extensions
- * (§3.5 of draft-ietf-cbor-edn-literals-26) — build indefinite-length
+ * (§3.6 of draft-ietf-cbor-edn-literals-27) — build indefinite-length
  * encoded strings.
  *
  * Semantically identical to `b1` / `t1` at the data model level, but instead

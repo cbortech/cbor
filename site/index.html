@@ -85,6 +85,13 @@
           target="_blank"
           rel="noopener"
           >draft-26</a
+        >
+        /
+        <a
+          href="https://datatracker.ietf.org/doc/html/draft-ietf-cbor-edn-literals-27"
+          target="_blank"
+          rel="noopener"
+          >draft-27</a
         >, and
         <a
           href="https://www.rfc-editor.org/rfc/rfc8610"
@@ -147,8 +154,8 @@
           >'s <code>.plus</code>, <code>.cat</code>, and <code>.feature</code>.
         </li>
         <li>
-          <strong>Extensible</strong> — application-oriented extensions for
-          dates, IP addresses, string concatenation, and more, plus optional
+          <strong>Extensible</strong> — app-extensions for dates, IP addresses,
+          string concatenation, and more, plus optional
           <a
             href="https://www.npmjs.com/package/@cbortech/hash-extension"
             target="_blank"
@@ -520,9 +527,9 @@
             />
             Use t1/b1 concatenation
             <span class="opt-hint" role="tooltip" id="hint-opt-concat-t1b1"
-              >Render preserved + concatenation as t1&lt;&lt;"a",
-              "b"&gt;&gt; / b1&lt;&lt;…&gt;&gt; application-sequence notation
-              (draft-ietf-cbor-edn-literals-26 §3.4) instead of "a" + "b". No
+              >Render preserved + concatenation as t1&lt;&lt;"a", "b"&gt;&gt; /
+              b1&lt;&lt;…&gt;&gt; app-sequence notation
+              (draft-ietf-cbor-edn-literals-27 §3.5) instead of "a" + "b". No
               effect unless Concatenation (below) is on</span
             >
           </label>
@@ -534,10 +541,10 @@
             />
             Use ilbs/ilts streaming
             <span class="opt-hint" role="tooltip" id="hint-opt-stream-ilbs-ilts"
-              >Render indefinite-length strings as ilts&lt;&lt;"a",
-              "b"&gt;&gt; / ilbs&lt;&lt;…&gt;&gt; application-sequence notation
-              (draft-ietf-cbor-edn-literals-26 §3.5) instead of the legacy
-              (_ "a", "b") streamstring form</span
+              >Render indefinite-length strings as ilts&lt;&lt;"a", "b"&gt;&gt;
+              / ilbs&lt;&lt;…&gt;&gt; app-sequence notation
+              (draft-ietf-cbor-edn-literals-27 §3.6) instead of the legacy (_
+              "a", "b") streamstring form</span
             >
           </label>
           <label class="check">
@@ -689,7 +696,7 @@
             />
             App strings
             <span class="opt-hint" role="tooltip" id="hint-opt-app-strings"
-              >Use application-string notation for known tags (e.g.
+              >Use app-string notation for known tags (e.g.
               DT'2023-01-01T12:00:00Z', ip'192.0.2.42') instead of raw tag
               notation like 1(1672574400)</span
             >

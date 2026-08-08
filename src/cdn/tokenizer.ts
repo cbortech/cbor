@@ -893,7 +893,7 @@ export class Tokenizer {
 
   /**
    * Read raw text-string content between N-backtick delimiters
-   * (§2.5.4 of draft-ietf-cbor-edn-literals-26).
+   * (§2.3.3 of draft-ietf-cbor-edn-literals-27).
    *
    * - The opening delimiter is the maximal run of consecutive backticks (N ≥ 1).
    * - No escape sequences are processed — content is taken verbatim.
@@ -1758,7 +1758,7 @@ export class Tokenizer {
     }
 
     // Byte-string prefixes or app-string extensions.
-    // App-prefix grammar (§3 of draft-ietf-cbor-edn-literals-25):
+    // App-prefix grammar (§6.1 of draft-ietf-cbor-edn-literals-27):
     //   app-prefix = lcalpha *lcldh / ucalpha *ucldh
     //   lcldh = lcalpha / DIGIT / "-"
     //   ucldh = ucalpha / DIGIT / "-"

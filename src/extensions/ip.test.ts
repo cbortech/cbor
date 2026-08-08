@@ -530,7 +530,7 @@ describe('ip — preserveAppSequence', () => {
     // DT<<b64'...'>> resolves to a plain epoch number, so there is nothing
     // byte-string-like in its *structural* content — the byte-string
     // literal only shows up in the DT node's own appSeqSourceFeatures, from
-    // when it was itself parsed as an application sequence.
+    // when it was itself parsed as an app-sequence.
     expect(
       CBOR.format("52([DT<<b64'MTk2OS0wNy0yMVQwMjo1NjoxNlo='>>])", {
         preserveAll: true,

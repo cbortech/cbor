@@ -1109,9 +1109,9 @@ describe('CBOR.format()', () => {
   });
 
   test('modernConcat: true has no effect without preserveConcatenation', () => {
-    expect(
-      CBOR.format('"a" + "b"', { indent: 2, modernConcat: true })
-    ).toBe('"ab"');
+    expect(CBOR.format('"a" + "b"', { indent: 2, modernConcat: true })).toBe(
+      '"ab"'
+    );
   });
 
   test('modernConcat: true round-trips through the parser', () => {

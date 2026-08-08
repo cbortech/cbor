@@ -867,7 +867,7 @@ describe('CborEllipsis — toCDN with modernConcat', () => {
     );
   });
 
-  test('a lone h\'xx...yy\' literal (no real boundary) is not wrapped', () => {
+  test("a lone h'xx...yy' literal (no real boundary) is not wrapped", () => {
     // Nothing to concatenate — modernConcat only changes how a real `+`
     // boundary is spelled, not the compact elided-literal form itself.
     expect(CBOR.format("h'AB...CD'", opts)).toBe("h'ab...cd'");

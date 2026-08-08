@@ -94,7 +94,7 @@ export class CborIndefiniteByteString extends CborItem {
       // to serializeContainer's probe — so a chunk that renders as a
       // prefixed literal (`h'...'`) always disqualifies inlining here, same
       // as it would in `[h'...']`. `ilbs<<...>>` is itself an
-      // application-sequence form, so it always collapses like
+      // app-sequence form, so it always collapses like
       // CborEmbeddedCBOR instead (loose rule, entryIsLeaf omitted).
       entryIsLeaf: useIlbs ? undefined : () => true,
       alwaysInlineLeaf: useIlbs,

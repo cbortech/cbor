@@ -234,9 +234,18 @@ function formatTextString(
       }
     }
     if (options?.modernConcat && options?.appStrings !== false) {
-      const literals = parts.map(({ text, source }) => source ?? escapeString(text));
+      const literals = parts.map(
+        ({ text, source }) => source ?? escapeString(text)
+      );
       const midComments = parts.map((p) => p.commentsAfter ?? []);
-      return joinAppSeqParts('t1', literals, suffix, indentStr, depth, midComments);
+      return joinAppSeqParts(
+        't1',
+        literals,
+        suffix,
+        indentStr,
+        depth,
+        midComments
+      );
     }
     return emitParts(parts, suffix, indentStr, depth);
   }

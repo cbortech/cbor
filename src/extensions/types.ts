@@ -16,7 +16,7 @@ import type { EncodingWidth } from '../cbor/encode';
 
 /**
  * Plugin that extends EDN parsing, CBOR decoding, and `fromJS()` for specific
- * application-string prefixes or CBOR tag numbers.
+ * app-string prefixes or CBOR tag numbers.
  *
  * Pass instances via `FromCDNOptions.extensions`, `FromCBOROptions.extensions`,
  * or `FromJSOptions.extensions`.
@@ -76,7 +76,7 @@ export interface CborExtension {
   ): CborItem;
 
   /**
-   * Controls how the CDN parser preserves the original application-string
+   * Controls how the CDN parser preserves the original app-string
    * / -sequence / raw-tag source text — `prefix'...'`, `` prefix`...` ``,
    * `prefix<<...>>`, or a raw tag literal `N(...)` resolved via `parseTag`
    * — for round-tripping through `toCDN()`.

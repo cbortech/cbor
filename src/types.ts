@@ -60,7 +60,7 @@ export interface ToJSOptions {
    * - `'object'`: always `Record<string, unknown>` — non-string keys are
    *   converted via `String()`. Duplicate keys are overwritten (last wins).
    * - `'entries'`: always `MapEntries` (a typed `Array` subclass) — preserves all
-   *   entries including duplicate keys (§2.6.3 of draft-ietf-cbor-edn-literals-25).
+   *   entries including duplicate keys (§2.4.2 of draft-ietf-cbor-edn-literals-27).
    *   `fromJS()` recognises `MapEntries` instances and converts them back to `CborMap`.
    * @default 'auto'
    */
@@ -194,7 +194,7 @@ export interface FromCBOROptions {
   extensions?: CborExtension[];
 
   /**
-   * Override the default set of bundled application-oriented extensions
+   * Override the default set of bundled app-extensions
    * (`dt`, `ip`, `cri`, `t1`, `b1`, `ilbs`, `ilts`, `float`).
    *
    * - omitted (default): use the standard bundled set.
@@ -202,13 +202,13 @@ export interface FromCBOROptions {
    * - `false`: disable all of them.
    *
    * `bignum` (tags 2/3) and embedded-CBOR (tag 24) support are core RFC 8949
-   * representation features, not application-oriented extensions, and are
-   * always active regardless of this option.
+   * representation features, not app-extensions, and are always active
+   * regardless of this option.
    *
-   * `dt`, `ip`, `t1`, and `b1` are mandatory-to-implement per §2.1 of
-   * draft-ietf-cbor-edn-literals-26; disabling them produces a decoder that
+   * `dt`, `ip`, `t1`, and `b1` are mandatory-to-implement per §3 of
+   * draft-ietf-cbor-edn-literals-27; disabling them produces a decoder that
    * no longer conforms to that recommendation. This is intended for
-   * allowlisting scenarios (see §7 Security considerations of the same
+   * allowlisting scenarios (see §8 Security considerations of the same
    * draft) where an application wants explicit control over which
    * extensions it accepts.
    */
@@ -290,7 +290,7 @@ export interface FromHexDumpOptions {
   extensions?: CborExtension[];
 
   /**
-   * Override the default set of bundled application-oriented extensions.
+   * Override the default set of bundled app-extensions.
    * Mirrors `FromCBOROptions.builtinExtensions`.
    */
   builtinExtensions?: CborExtension[] | false;
@@ -377,7 +377,7 @@ export interface FromCDNOptions {
   extensions?: CborExtension[];
 
   /**
-   * Override the default set of bundled application-oriented extensions
+   * Override the default set of bundled app-extensions
    * (`dt`, `ip`, `cri`, `t1`, `b1`, `ilbs`, `ilts`, `float`).
    *
    * - omitted (default): use the standard bundled set.
@@ -385,10 +385,10 @@ export interface FromCDNOptions {
    * - `false`: disable all of them; app-string literals using their
    *   prefixes then fall through to `unresolvedExtension` handling.
    *
-   * `dt`, `ip`, `t1`, and `b1` are mandatory-to-implement per §2.1 of
-   * draft-ietf-cbor-edn-literals-26; disabling them produces a parser that
+   * `dt`, `ip`, `t1`, and `b1` are mandatory-to-implement per §3 of
+   * draft-ietf-cbor-edn-literals-27; disabling them produces a parser that
    * no longer conforms to that recommendation. This is intended for
-   * allowlisting scenarios (see §7 Security considerations of the same
+   * allowlisting scenarios (see §8 Security considerations of the same
    * draft) where an application wants explicit control over which
    * extensions it accepts from untrusted CDN input.
    *
@@ -400,8 +400,8 @@ export interface FromCDNOptions {
   builtinExtensions?: CborExtension[] | false;
 
   /**
-   * How to handle unrecognised application-extension identifiers
-   * (§4.1 of draft-ietf-cbor-edn-literals-25).
+   * How to handle unrecognised app-extension identifiers
+   * (§5.1 of draft-ietf-cbor-edn-literals-27).
    *
    * - `'cpa999'`: wrap the literal in a `CPA999` tag
    *   (`CborUnresolvedAppExt`) instead of failing. The resulting node
@@ -514,10 +514,10 @@ export interface FromJSOptions {
   extensions?: CborExtension[];
 
   /**
-   * Override the default set of bundled application-oriented extensions.
+   * Override the default set of bundled app-extensions.
    * Mirrors `FromCDNOptions.builtinExtensions`. Only affects builtins that
-   * implement `fromJS()` / `parseTag()` (none of the bundled application
-   * extensions implement `fromJS()` by default — use `dt_as_Date` via
+   * implement `fromJS()` / `parseTag()` (none of the bundled app-extensions
+   * implement `fromJS()` by default — use `dt_as_Date` via
    * `extensions` for `Date` round-tripping).
    */
   builtinExtensions?: CborExtension[] | false;
@@ -787,7 +787,7 @@ export interface ToCDNOptions {
   sqstr?: 'printable-string' | 'string' | 'none';
 
   /**
-   * Whether to use application-string / app-sequence notation for built-in
+   * Whether to use app-string / app-sequence notation for built-in
    * extensions (e.g. `dt'...'`, `DT'...'`, `ip'...'`, `IP'...'`).
    * - `true`: emit extension notation (`DT'2023-01-01T12:00:00Z'`)
    * - `false`: emit raw CBOR notation (`1(-14159024)`, `52(h'c000022a')`)
@@ -796,8 +796,8 @@ export interface ToCDNOptions {
   appStrings?: boolean;
 
   /**
-   * For built-in extensions that support application-string notation
-   * (`prefix'...'` or `` prefix`...` ``), application-sequence notation
+   * For built-in extensions that support app-string notation
+   * (`prefix'...'` or `` prefix`...` ``), app-sequence notation
    * (`prefix<<...>>`), and/or a raw tag literal (`N(...)`), re-emit a value
    * using its exact original spelling instead of normalizing it to the
    * regenerated `prefix'...'` form.
@@ -819,7 +819,7 @@ export interface ToCDNOptions {
    * spellings are kept.
    *
    * An explicit `preserveComments` setting is still applied to comments
-   * inside a preserved application-sequence spelling: marker styles are
+   * inside a preserved app-sequence spelling: marker styles are
    * normalised without changing the notation family, and `false` removes
    * the comments while retaining the surrounding source spelling.
    *
@@ -914,8 +914,8 @@ export interface ToCDNOptions {
    * concatenation, and only takes effect when `indent` enables
    * pretty-printing (single-line output joins the parts into one literal).
    *
-   * Also applies within an elision (`...`, §4.2 of
-   * draft-ietf-cbor-edn-literals-25): a `+`-joined fragment on either side of
+   * Also applies within an elision (`...`, §5.2 of
+   * draft-ietf-cbor-edn-literals-27): a `+`-joined fragment on either side of
    * an ellipsis keeps its own part boundaries too (e.g. `'test' +
    * h'1234...abcd' + ...` stays exactly as written instead of merging
    * `'test'` into the byte fragment before it), and byte-string elision
@@ -933,8 +933,8 @@ export interface ToCDNOptions {
 
   /**
    * Render preserved `+` string concatenation (see `preserveConcatenation`)
-   * or an elision chain (`...`, §4.2) using `t1<<...>>` / `b1<<...>>`
-   * application-sequence notation (draft-ietf-cbor-edn-literals-26 §3.4)
+   * or an elision chain (`...`, §5.2) using `t1<<...>>` / `b1<<...>>`
+   * app-sequence notation (draft-ietf-cbor-edn-literals-27 §3.5)
    * instead of the legacy `+` operator.
    *
    * - `false` (default): `"a" + "b"` / `'test' + h'1234...abcd' + ...`.
@@ -970,7 +970,7 @@ export interface ToCDNOptions {
 
   /**
    * Render an indefinite-length string using `ilts<<...>>` / `ilbs<<...>>`
-   * application-sequence notation (draft-ietf-cbor-edn-literals-26 §3.5)
+   * app-sequence notation (draft-ietf-cbor-edn-literals-27 §3.6)
    * instead of the legacy `(_ "a", "b")` streamstring form.
    *
    * - `false` (default): `(_ "a", "b")`.
@@ -1107,13 +1107,13 @@ export interface ValidateOptions {
   extensions?: CborExtension[];
 
   /**
-   * Override the default set of bundled application-oriented extensions.
+   * Override the default set of bundled app-extensions.
    * Mirrors `FromCBOROptions.builtinExtensions`.
    */
   builtinExtensions?: CborExtension[] | false;
 
   /**
-   * How to handle unrecognised application-extension identifiers.
+   * How to handle unrecognised app-extension identifiers.
    * Only applies when `type` is `'cdn'`; mirrors `FromCDNOptions.unresolvedExtension`.
    * @default 'cpa999'
    */

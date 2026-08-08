@@ -160,7 +160,14 @@ export class CborByteString extends CborItem {
           )
         : undefined;
       if (options?.modernConcat && options?.appStrings !== false) {
-        return joinAppSeqParts('b1', literals, suffix, indentStr, _depth, midComments);
+        return joinAppSeqParts(
+          'b1',
+          literals,
+          suffix,
+          indentStr,
+          _depth,
+          midComments
+        );
       }
       literals[literals.length - 1] += suffix;
       return joinConcatParts(literals, indentStr, _depth, midComments);

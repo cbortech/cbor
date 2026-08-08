@@ -1,6 +1,6 @@
 /**
  * Tests for the `t1` / `b1` string-concatenation app-extensions
- * (§3.4 of draft-ietf-cbor-edn-literals-26).
+ * (§3.5 of draft-ietf-cbor-edn-literals-27).
  *
  * Covers:
  *  - Spec §3.4 equivalence examples (text and byte)

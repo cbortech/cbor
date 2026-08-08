@@ -17,8 +17,8 @@ import { decodeCBOR } from '../cbor/decoder';
 import { fromJS } from '../js/fromJS';
 import { Tag } from '../tag';
 
-// ─── dt / DT extension (§3.1) ─────────────────────────────────────────────────
-// Table 4 from draft-ietf-cbor-edn-literals-25 §3.1
+// ─── dt / DT extension (§3.2) ─────────────────────────────────────────────────
+// Table 3 from draft-ietf-cbor-edn-literals-27 §3.2
 
 describe('dt — dt app-string', () => {
   test("dt'1969-07-21T02:56:16Z' → CborEpochDtExtNint(-14159024n)", () => {
@@ -156,7 +156,7 @@ describe('dt — preserveNumberFormat', () => {
 
   test('appStrings default still prefers DT notation over raw tag spelling', () => {
     // appStrings takes precedence over preserveNumberFormat by design: it
-    // controls whether known tags use application-string notation at all,
+    // controls whether known tags use app-string notation at all,
     // independently of how any underlying integer/float literal is spelled.
     expect(CBOR.format('0x1(0xff)', { preserveNumberFormat: true })).toBe(
       "DT'1970-01-01T00:04:15Z'"

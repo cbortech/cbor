@@ -2076,7 +2076,7 @@ class CDNParser {
         if (ewv !== undefined) result.encodingWidth = ewv;
       }
     } else if (result instanceof CborTag) {
-      // Per draft-ietf-cbor-edn-literals-25 §2.3.1, the EI applies to
+      // Per draft-ietf-cbor-edn-literals-27 §4.1, the EI applies to
       // the tag number, not to the content (e.g. 1_1(4711) → 2-byte tag).
       if (result.encodingWidth === undefined) {
         const ewv = this._validateEncodingFit(result.tag, ew, tok);

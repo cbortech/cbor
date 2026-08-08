@@ -33,10 +33,10 @@ const VECTORS_DIR = resolve(
  *   Our implementation matches the RFC 9164 §2.3 definition; the test vector
  *   appears to contain an error.
  *
- * b64'Zm9v # \'\r': draft-ietf-cbor-edn-literals-25 §5.3.2 defines an
+ * b64'Zm9v # \'\r': draft-ietf-cbor-edn-literals-27 §6.3.2 defines an
  *   integrated parser grammar for base64 content where `#` introduces a line
  *   comment, making `# '\r` a comment that is stripped before decoding.
- *   Accepting `Zm9v` is therefore correct per draft-25.  The test vector is
+ *   Accepting `Zm9v` is therefore correct per draft-27.  The test vector is
  *   sourced from cbor-edn which referenced draft-16, where this comment
  *   grammar was not yet specified.
  *

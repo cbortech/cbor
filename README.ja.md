@@ -385,15 +385,15 @@ CBOR.format("h'68' + b64'aQ'", {
 //   b64'aQ'
 ```
 
-保持した連結を `+` ではなく draft-26 の `t1<<...>>` / `b1<<...>>` 記法で
+保持した連結を `+` ではなく draft-27 の `t1<<...>>` / `b1<<...>>` 記法で
 出力するには、[文字列連結と不定長文字列](#文字列連結と不定長文字列) の
 `modernConcat` を参照してください。
 
-### application-string / -sequence 記法を保持する
+### app-string / -sequence 記法を保持する
 
 一部の組み込み拡張(`dt`/`DT`、`ip`/`IP`)は同じ値に対して `prefix'...'`
-(application string)、`` prefix`...` ``(backtick application string)、
-`prefix<<...>>`(application sequence)、生のタグリテラル(`N(...)`)の
+(app-string)、`` prefix`...` ``(backtick app-string)、
+`prefix<<...>>`(app-sequence)、生のタグリテラル(`N(...)`)の
 いずれの記法もサポートしていますが、デフォルトでは `CBOR.format()` を呼ぶ
 たびに解決済みの値から `prefix'...'` を再生成します。そのため
 `` DT`1969-07-21T02:56:16Z` `` も `DT<<'1969-07-21T02:56:16Z'>>` も、生の
@@ -676,7 +676,7 @@ console.log(text);
 
 ## 文字列連結と不定長文字列
 
-draft-ietf-cbor-edn-literals-26(§3.4 / §3.5)の application extension
+draft-ietf-cbor-edn-literals-27(§3.5 / §3.6)の app-extension
 `t1` / `b1` / `ilbs` / `ilts` は、デフォルトで有効です。
 
 `t1<<...>>` と `b1<<...>>` は、(テキストまたはバイト)文字列の引数を左から
@@ -747,27 +747,29 @@ CBOR.format('(_ "a", "b")', { modernStreamSyntax: true });
 > ソースが単一行、または `indent` 指定時であれば、`modernConcat` /
 > `modernStreamSyntax` の値に関わらずそのままの記法で出力されます。
 > `encodingIndicators: 'always'`/`'never'` や `appStrings: false` を指定
-> した場合は、他の application-string 値と同様に正規化されます(例:
+> した場合は、他の app-string 値と同様に正規化されます(例:
 > `encodingIndicators: 'always'` では `t1<<"a", "b">>` が `"ab"_i` に
 > なります)。また、複数行のソースは `indent` 未指定(1行出力)の場合、
 > そのレイアウトを再現できないため正規化されます:
+>
 > ```ts
 > CBOR.format('t1<<\n  "a",\n  "b"\n>>');
 > // '"ab"' — indent未指定のため正規化される
 > CBOR.format('t1<<\n  "a",\n  "b"\n>>', { indent: 2 });
 > // 't1<<\n  "a",\n  "b"\n>>' — そのまま保持される
 > ```
+>
 > 両オプションが影響するのは `+` チェーンや `(_ ...)` チャンク列から
 > 再構築された値の出力のみです。
 
 > [!NOTE]
-> `t1` / `b1` という識別子は draft-26 で暫定(provisional)と明記されて
+> `t1` / `b1` という識別子は draft-27 でも暫定(provisional)と明記されて
 > おり、CBOR ワーキンググループにより改名される可能性があります。
 
 ## float
 
 16 進数のビットパターンを IEEE 754 浮動小数点値として解釈します
-(draft-ietf-cbor-edn-literals-26 §3.7)。デフォルトで有効です。
+(draft-ietf-cbor-edn-literals-27 §3.8)。デフォルトで有効です。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -791,7 +793,7 @@ extension があります。必要なものを `import` し、
 ### b32 / h32
 
 [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648) の Base32 エンコードによるバイト列リテラルです。
-[RFC 8949](https://www.rfc-editor.org/rfc/rfc8949) §8 に記載があり、[draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/) でも触れられています。
+[RFC 8949](https://www.rfc-editor.org/rfc/rfc8949) §8 に記載があり、[draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/27/) でも触れられています。
 
 - `b32` — §6 Base32（`A–Z 2–7` アルファベット）
 - `h32` — §7 Base32Hex（`0–9 A–V` アルファベット）
@@ -831,12 +833,12 @@ console.log(v2.toCDN({ appStrings: false }));
 
 ---
 
-追加の application extension は別パッケージとして公開されています。必要なものを
+追加の app-extension は別パッケージとして公開されています。必要なものを
 インストールし、`extensions` オプションに渡して使います。
 
 ### hash
 
-`hash` は [draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/) §3.3 で定義された標準の application extension です。
+`hash` は [draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/27/) §3.4 で定義された標準の app-extension です。
 ハッシュアルゴリズムと値を `hash'algorithm:value'` の形式で表現します。
 実装には外部の暗号ライブラリが必要なため、[@cbortech/hash-extension](https://www.npmjs.com/package/@cbortech/hash-extension) として
 別パッケージで提供しています。
@@ -861,7 +863,7 @@ const digest = cbor.parse(
 
 ### uuid
 
-`uuid` はこのライブラリ独自の application extension です。
+`uuid` はこのライブラリ独自の app-extension です。
 [@cbortech/uuid-extension](https://www.npmjs.com/package/@cbortech/uuid-extension) として別パッケージで提供しています。
 
 ```bash
@@ -881,7 +883,7 @@ const id = cbor.parse("uuid'550e8400-e29b-41d4-a716-446655440000'");
 ### set / map
 
 `SET` と `MAP` は、タグ付きの Set / Map 値を扱うための、このライブラリ独自の
-application extension です。
+app-extension です。
 [@cbortech/set-map-extensions](https://www.npmjs.com/package/@cbortech/set-map-extensions)
 としてまとめて別パッケージで提供しています。`SET<<[...]>>` は配列に CBOR tag
 258 を付けた値、`MAP<<{...}>>` は map に CBOR tag 259 を付けた値を生成します。
@@ -1141,6 +1143,7 @@ CDDL コンパイラは `@cbortech/cbor/cddl`
 - CDN (CBOR-EDN)
   - [draft-ietf-cbor-edn-literals-25](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/)
   - [draft-ietf-cbor-edn-literals-26](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/26/)
+  - [draft-ietf-cbor-edn-literals-27](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/27/)
 - CDDL
   - [RFC 8610](https://www.rfc-editor.org/rfc/rfc8610)
   - [RFC 9682](https://www.rfc-editor.org/rfc/rfc9682)

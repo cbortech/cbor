@@ -74,8 +74,8 @@ export function joinConcatParts(
 }
 
 /**
- * Serialize string parts as a `t1<<...>>` / `b1<<...>>` application-sequence
- * (draft-ietf-cbor-edn-literals-26 §3.4) — the `modernConcat` replacement
+ * Serialize string parts as a `t1<<...>>` / `b1<<...>>` app-sequence
+ * (draft-ietf-cbor-edn-literals-27 §3.5) — the `modernConcat` replacement
  * for `joinConcatParts`'s `+`-joining. Unlike a `+` chain, this
  * notation has its own closing delimiter, so (matching how `<<...>>`/
  * `CborEmbeddedCBOR` places its own encoding-width indicator, and unlike
@@ -83,7 +83,7 @@ export function joinConcatParts(
  * `>>` rather than onto the last literal — it describes the one merged value
  * `t1<<...>>` denotes as a whole, not any individual argument.
  *
- * Always single-line (an application-sequence is loose/collapsible, like
+ * Always single-line (an app-sequence is loose/collapsible, like
  * every other `<<...>>` form), except when there's a mid-chain comment to
  * preserve — nothing else forces it multi-line, since (unlike a real `+`
  * chain) there's no risk of an unbounded single line growing unreadable that

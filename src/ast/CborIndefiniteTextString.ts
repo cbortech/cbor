@@ -78,7 +78,7 @@ export class CborIndefiniteTextString extends CborItem {
       // inlineLeafContainers: entryIsLeaf is trivially always true (chunks
       // can never be containers), but its presence is what signals "strict"
       // to serializeContainer's probe. `ilts<<...>>` is itself an
-      // application-sequence form, so it always collapses like
+      // app-sequence form, so it always collapses like
       // CborEmbeddedCBOR instead (loose rule, entryIsLeaf omitted).
       entryIsLeaf: useIlts ? undefined : () => true,
       alwaysInlineLeaf: useIlts,

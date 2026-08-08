@@ -1,6 +1,6 @@
 /**
- * Core decode support for the CPA888 ellipsis (elision) tag (§4.2 of
- * draft-ietf-cbor-edn-literals-26).
+ * Core decode support for the CPA888 ellipsis (elision) tag (§5.2 of
+ * draft-ietf-cbor-edn-literals-27).
  *
  * Intercepts tag 888 during fromCBOR() and integer-tagged EDN parsing so
  * that elided items decode back to CborEllipsis and round-trip as `...`

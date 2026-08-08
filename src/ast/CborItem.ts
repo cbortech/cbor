@@ -107,7 +107,7 @@ export abstract class CborItem {
   blankLineBefore?: boolean;
 
   /**
-   * Original application-string/-sequence source text — `prefix'...'`,
+   * Original app-string/-sequence source text — `prefix'...'`,
    * `` prefix`...` ``, or `prefix<<...>>` — set by the parser when the
    * resolving extension declares `preserveAppSeqSource: 'optional'`. A
    * subclass's own `_toCDN()` override may check this (gated behind
@@ -122,7 +122,7 @@ export abstract class CborItem {
    * Comments contained within `appSeqSource`, with `start`/`end` offsets
    * relative to that string. These spans allow comment markers to be
    * converted (or comments to be removed) without regenerating and thereby
-   * losing the original application-string/-sequence notation.
+   * losing the original app-string/-sequence notation.
    */
   appSeqComments?: CborComment[];
 
