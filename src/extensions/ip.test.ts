@@ -830,7 +830,7 @@ function hexBytes(s: string): Uint8Array {
 }
 
 describe('ip — non-canonical inner encoding falls back to generic tag notation', () => {
-  // Per §2.3.1: IP'...'_N encodes only the tag number's width.
+  // Per §4.1: IP'...'_N encodes only the tag number's width.
   // When the inner byte string has a non-canonical length header, _toCDN() falls back
   // to CborTag._toCDN() so the inner EI is preserved.
 

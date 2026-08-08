@@ -17,7 +17,7 @@ import {
 import { bytesToSpacedHexUpper } from '../utils/hex';
 
 /**
- * CBOR Sequence Literal (§2.5.6) — `<<item, item, ...>>`.
+ * CBOR Sequence Literal (§2.3.4) — `<<item, item, ...>>`.
  *
  * Encodes as a definite-length byte string whose value is the concatenation
  * of the CBOR encodings of the contained items.

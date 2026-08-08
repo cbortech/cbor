@@ -715,7 +715,7 @@ console.log(v.toCDN({ appStrings: false }));
 `CBOR.format()` はデフォルトではこれらを自ら出力しません。保持した連結
 (`preserveConcatenation`)は従来どおり `+` で、不定長文字列は従来どおり
 `(_ ...)` streamstring 形式でレンダリングされます。`modernConcat` と
-`modernStreamSyntax` を `true` にすると draft-26 の記法での出力を選択でき
+`modernStreamSyntax` を `true` にすると draft-27 の記法での出力を選択でき
 ます。どちらもデフォルトは `false`(従来構文)で、`appStrings` が `false`
 の場合は従来構文にフォールバックします。
 
@@ -733,7 +733,7 @@ CBOR.format('(_ "a", "b")', { modernStreamSyntax: true });
 // ilts<<"a","b">>
 ```
 
-`modernConcat` は `...` による省略連結(§4.2)にも適用され、
+`modernConcat` は `...` による省略連結(§5.2)にも適用され、
 `"a" + ... + "b"` は `t1<<"a", ..., "b">>` としてレンダリングされます。
 通常の連結と異なり、これは `preserveConcatenation` の値に関わらず適用され
 ます — 省略連結にはそもそも1つのリテラルに畳み込んだ状態が存在しないため
@@ -1151,7 +1151,7 @@ CDDL コンパイラは `@cbortech/cbor/cddl`
 
 補足:
 
-- CDN は draft-26 に準拠しつつ、draft-25 の `(_ ...)` streamstring 構文と
+- CDN は draft-27 に準拠しつつ、draft-25 の `(_ ...)` streamstring 構文と
   `+` による文字列連結構文も引き続きサポートしています。
 - CDDL は RFC 8610 のすべての control operator と、RFC 9165 の `.plus`、
   `.cat`、`.feature` をサポートしています。

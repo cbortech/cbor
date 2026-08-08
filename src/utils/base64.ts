@@ -2,7 +2,7 @@
  * Decode base64 text (classic or URL-safe alphabet, padding optional) into
  * bytes, with strict RFC 4648 validation.
  *
- * Used by the CDN parser (b64'…' literals, §5.3.4) and the CDDL tokenizer
+ * Used by the CDN parser (b64'…' literals, §6.2.2) and the CDDL tokenizer
  * (b64'…' byte strings, RFC 8610 §3.1).
  *
  * Recoverable deviations (padding-count mismatches, non-zero trailing bits)
@@ -18,7 +18,7 @@ export function base64ToBytes(
   const data = eqIdx >= 0 ? b64.slice(0, eqIdx) : b64;
   const pad = eqIdx >= 0 ? b64.slice(eqIdx) : '';
 
-  // draft-25 b64dig = ALPHA / DIGIT / "-" / "_" / "+" / "/"
+  // draft-27 b64dig = ALPHA / DIGIT / "-" / "_" / "+" / "/"
   // Classic (+/) and URL-safe (-_) position-62/63 chars are both valid in the
   // same literal. Reject anything outside this set as a hard error.
   if (/[^A-Za-z0-9+/\-_]/.test(data)) {
@@ -48,13 +48,13 @@ export function base64ToBytes(
   }
 
   // Partial padding: some '=' present but fewer than the full required amount.
-  // draft-25 accommodates NO padding; any '=' present must be the full set.
+  // draft-27 accommodates NO padding; any '=' present must be the full set.
   if (pad.length > 0 && pad.length < expectedPad) {
     const msg = `base64 has ${pad.length} '=' character${pad.length > 1 ? 's' : ''} but needs exactly ${expectedPad} — use full padding or no padding at all`;
     if (onRecoverableError) onRecoverableError(msg);
     else throw new SyntaxError(msg);
   }
-  // Zero '=': draft-25 allows omitting padding entirely — always accepted.
+  // Zero '=': draft-27 allows omitting padding entirely — always accepted.
 
   // Non-zero trailing bits in the last data character (RFC 4648 §3.5).
   // Normalize URL-safe chars first so the lookup is against the classic table.

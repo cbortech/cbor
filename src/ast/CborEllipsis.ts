@@ -214,7 +214,7 @@ export class CborEllipsis extends CborTag {
       if (!preserveConcat || this.realBoundary === undefined) {
         // Bytes elision where every fragment is a plain byte string: re-emit
         // the compact `h'xx...yy'` literal — the actual CDN grammar for this
-        // (§4.2) — instead of expanding it into `h'xx' + ... + h'yy'`. Always
+        // (§5.2) — instead of expanding it into `h'xx' + ... + h'yy'`. Always
         // hex, regardless of `bstrEncoding`/`sqstr`: `h'...'` is the only
         // elidable literal form: there is no elided base64 or sqstr spelling.
         // Also the fallback when `preserveConcatenation` is set but there is

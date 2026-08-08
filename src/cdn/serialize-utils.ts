@@ -868,7 +868,7 @@ const BRACKET_CLOSERS = new Set(['RPAREN', 'RBRACKET', 'RBRACE', 'GT_GT']);
 
 // Token types that can appear as any part — the chain's own first value,
 // or any later one joined by `+` — of a `+`-concatenation chain: a
-// text-string/byte-string literal (§5.1), or `ELLIPSIS` (`...`), CDN's
+// text-string/byte-string literal (draft-25 §5.1), or `ELLIPSIS` (`...`), CDN's
 // elision-chain notation (src/cdn/parser.ts's own `+`-chain grammar
 // accepts it both as the chain's *own* first value — `... + "b"`, an
 // unknown prefix concatenated with a known suffix — and as any later
@@ -1068,7 +1068,7 @@ function isMultiWordTokenRange(
   // part's own spelling rather than merging into one literal, so it's
   // never caught by the single-literal check below; it has to be
   // recognized as its own shape. A chain's *element type* is fixed by its
-  // first part (§5.1): a text-leading chain (`TSTR`/`RAWSTRING`/bare
+  // first part (draft-25 §5.1): a text-leading chain (`TSTR`/`RAWSTRING`/bare
   // `SQSTR` first — the same three types the single-literal switch below
   // checks by decoded word count rather than always-strict) decodes and
   // merges every part — including any prefixed byte-string-shaped parts,
@@ -1218,12 +1218,12 @@ function decodeStringishTokenText(token: Token): string | null {
  * `b32`/`h32` objects by reference — never guessed later from the prefix
  * string, since a user extension can register under any prefix, including
  * one a built-in also uses; see `CborByteString.ednCommentSyntax`).
- *   - `'full'`: `#`, `//`, `/* *\/`, and `/ /` (§5.2.1/§5.3.3) — `h'...'`
+ *   - `'full'`: `#`, `//`, `/* *\/`, and `/ /` (§6.2.1/§6.3.3) — `h'...'`
  *     and its backtick form, and the built-in `b32'...'`/`h32'...'`
  *     extensions, which share hex's comment syntax (`utils/strip-comments.ts`).
  *   - `'hash-only'`: only `#` line comments — standard base64 (`b64'...'`),
  *     where `/` is valid data (e.g. `//8=` decodes to 0xFFFF), never a
- *     comment marker (see Tokenizer._readByteContent, §5.2.2).
+ *     comment marker (see Tokenizer._readByteContent, §6.2.2).
  */
 export type ByteCommentSyntax = 'full' | 'hash-only';
 

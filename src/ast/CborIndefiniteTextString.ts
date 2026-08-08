@@ -55,7 +55,7 @@ export class CborIndefiniteTextString extends CborItem {
       const merged = this.chunks.map((c) => c.value).join('');
       return new CborTextString(merged)._toCDN(options, depth);
     }
-    // `ilts<<...>>` (draft-26 §3.5) replaces the legacy `(_ ...)` marker
+    // `ilts<<...>>` (draft-27 §3.6) replaces the legacy `(_ ...)` marker
     // notation; falls back to it when `appStrings` disables app-string
     // notation entirely.
     const useIlts =

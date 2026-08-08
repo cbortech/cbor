@@ -318,7 +318,7 @@ export class CborTaggedEpochDtExt extends CborTag {
         this.appSeqInnerEnd,
         this.appSeqComments
       );
-    // Per §2.3.1, DT'...'_N encodes only the tag number's width.
+    // Per §4.1, DT'...'_N encodes only the tag number's width.
     // If the inner content has non-canonical encoding, fall back to generic tag
     // notation so the inner EI (e.g. dt'...'_3) is not silently discarded.
     const c = this.content as

@@ -725,7 +725,7 @@ Parsing already accepts `t1`/`b1`/`ilbs`/`ilts` notation, but by default
 `toCDN()`/`CBOR.format()` never emit it on their own: a preserved
 concatenation (`preserveConcatenation`) still renders as `+`, and an
 indefinite-length string still renders as the legacy `(_ ...)` streamstring
-form. `modernConcat` and `modernStreamSyntax` opt into emitting the draft-26
+form. `modernConcat` and `modernStreamSyntax` opt into emitting the draft-27
 notation instead — both default to `false` (the legacy syntax), and both fall
 back to it when `appStrings` is `false`.
 
@@ -743,7 +743,7 @@ CBOR.format('(_ "a", "b")', { modernStreamSyntax: true });
 // ilts<<"a","b">>
 ```
 
-`modernConcat` also applies within a `...` elision chain (§4.2), rendering
+`modernConcat` also applies within a `...` elision chain (§5.2), rendering
 `"a" + ... + "b"` as `t1<<"a", ..., "b">>` — unlike plain concatenation, this
 happens regardless of `preserveConcatenation`, since an elision chain has no
 single-literal collapsed form to fall back to in the first place.
@@ -1160,7 +1160,7 @@ types).
 
 Implementation notes:
 
-- CDN follows draft-26 while retaining draft-25's `(_ ...)` streamstring syntax
+- CDN follows draft-27 while retaining draft-25's `(_ ...)` streamstring syntax
   and `+` string-concatenation syntax.
 - CDDL implements every RFC 8610 control operator, plus RFC 9165's `.plus`,
   `.cat`, and `.feature`.

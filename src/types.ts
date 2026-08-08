@@ -664,7 +664,7 @@ export interface ToCDNOptions {
    * This preserves the spelling and interior layout of non-concatenated
    * `h'...'`, `b64'...'`, `b32'...'`, `h32'...'`, raw-backtick byte strings,
    * and single-quoted byte strings — including a `h'xx...yy'`-family elided
-   * literal (§4.2), whose spelling is kept independently of
+   * literal (§5.2), whose spelling is kept independently of
    * `preserveConcatenation` when it has no `+` of its own (see that
    * option). Byte strings produced by `+` concatenation are normalised as
    * usual; combine with `preserveConcatenation` to keep both the part

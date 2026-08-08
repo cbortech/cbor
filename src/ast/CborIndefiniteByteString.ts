@@ -69,7 +69,7 @@ export class CborIndefiniteByteString extends CborItem {
       }
       return new CborByteString(merged)._toCDN(options, depth);
     }
-    // `ilbs<<...>>` (draft-26 §3.5) replaces the legacy `(_ ...)` marker
+    // `ilbs<<...>>` (draft-27 §3.6) replaces the legacy `(_ ...)` marker
     // notation; falls back to it when `appStrings` disables app-string
     // notation entirely.
     const useIlbs =

@@ -140,7 +140,7 @@ function structuralAppSeqSourceFeatures(
       item.ednPartSources?.filter((source) => source !== undefined).length ?? 0;
     // A part with no preserved raw source is ambiguous by itself — it could
     // be an unpreservable double-quoted literal (textString) or a
-    // byte-string literal decoded to text per §5.1 (byteString); only
+    // byte-string literal decoded to text per draft-25 §5.1 (byteString); only
     // ednPartIsByteString distinguishes them.
     const byteStringPartCount = hasParts
       ? item.ednParts!.reduce((count, _text, i) => {
@@ -1267,7 +1267,7 @@ class CDNParser {
         this.t.consume();
         parts.push({
           text: this._decodeUtf8(this._decodeBytesToken(next), next),
-          // §5.1: this part is a byte-string literal decoded to text, not a
+          // draft-25 §5.1: this part is a byte-string literal decoded to text, not a
           // double-quoted literal — appSeqSourceFeatures must attribute it
           // to `byteString`, not the unpreservable `textString`, since both
           // leave `source` undefined here.
@@ -1534,7 +1534,7 @@ class CDNParser {
           end: next.endOffset,
         });
       } else if (next.type === 'TSTR' || next.type === 'RAWSTRING') {
-        // §5.1: when a byte string leads, the right-hand side must also be a
+        // draft-25 §5.1: when a byte string leads, the right-hand side must also be a
         // byte string.  Text strings are only allowed on the right of a
         // text-leading concatenation.  In non-strict mode we UTF-8 encode
         // the text and continue; in strict mode this is a hard error.
@@ -1927,7 +1927,7 @@ class CDNParser {
 
     const first = chunks[0];
     // All chunks must be the same type — mixing byte and text strings is
-    // a SyntaxError per draft §2.5.4.
+    // a SyntaxError per draft §4.3.
     if (first instanceof CborByteString) {
       const byteChunks = chunks.map((c, i) => {
         if (c instanceof CborByteString) return c;

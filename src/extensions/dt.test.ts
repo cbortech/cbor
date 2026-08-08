@@ -339,7 +339,7 @@ describe('dt — preserveAppSequence', () => {
     // double-quoted literal would have. preserveTextString: false must not
     // veto <<...>> notation just because of that: there is no actual
     // double-quoted string in this concatenation, only a byte string merged
-    // into text per §5.1.
+    // into text per draft-25 §5.1.
     expect(
       CBOR.format("DT<<`1969-` + '07-21T02:56:16Z'>>", {
         preserveAll: true,
@@ -882,7 +882,7 @@ describe('dt_as_Date — round-trip', () => {
 // ─── DT: non-canonical inner encoding falls back to generic tag notation ──────
 
 describe('dt — non-canonical inner encoding falls back to generic tag notation', () => {
-  // Per §2.3.1: DT'...'_N encodes only the tag number's width.
+  // Per §4.1: DT'...'_N encodes only the tag number's width.
   // When the inner content uses a non-canonical encoding that cannot be
   // expressed in app-string notation, _toCDN() falls back to CborTag._toCDN()
   // so the inner EI is preserved in generic tag notation.

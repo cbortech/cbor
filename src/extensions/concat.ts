@@ -10,14 +10,14 @@
  *
  * Arguments may include ellipses (`...`); the result is then an ellipsis
  * data item — tag CPA888 wrapping an array of joined string spans
- * alternating with `888(null)` markers (§4.2).  Adjacent ellipses collapse
+ * alternating with `888(null)` markers (§5.2).  Adjacent ellipses collapse
  * into one, and nested ellipsis arguments are flattened.
  *
- * `t1` and `b1` are mandatory-to-implement in draft-26 and are included in
+ * `t1` and `b1` are mandatory-to-implement in draft-27 and are included in
  * the default extension set.
  *
  * NOTE: the identifiers "t1" and "b1" are explicitly provisional in
- * draft-26 (§3.4) and may be renamed by the CBOR WG.
+ * draft-27 (§3.5) and may be renamed by the CBOR WG.
  */
 
 import type { CborExtension } from './types';
@@ -53,7 +53,7 @@ function concatBytes(parts: Uint8Array[]): Uint8Array {
 /**
  * Flatten one argument into byte spans and ellipsis markers.
  * Nested ellipsis items (e.g. from `h'aa...bb'` arguments) are expanded so
- * that the equivalences of §3.4 hold.
+ * that the equivalences of §3.5 hold.
  */
 function flattenArg(prefix: string, item: CborItem, parts: Part[]): void {
   if (item instanceof CborAppSeqResult) {
@@ -114,7 +114,7 @@ function concatenate(
 
   const isText = prefix === 't1';
 
-  // Consolidate adjacent byte spans; collapse adjacent ellipses (§3.4).
+  // Consolidate adjacent byte spans; collapse adjacent ellipses (§3.5).
   const fragments: CborItem[] = [];
   let hasEllipsis = false;
   const pending: Uint8Array[] = [];
@@ -160,7 +160,7 @@ function makeExtension(prefix: 't1' | 'b1'): CborExtension {
     preserveAppSeqSource: true,
 
     // prefix'...' / prefix`...` is shorthand for a sequence with exactly
-    // that one text string (§2.1).
+    // that one text string (§3).
     parseAppString(_prefix, content, onError) {
       return concatenate(prefix, [new CborTextString(content)], onError);
     },
