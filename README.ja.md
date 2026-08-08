@@ -820,7 +820,6 @@ console.log(v2.toCDN({ appStrings: false }));
 ```ts
 import { CBOR, same } from '@cbortech/cbor';
 
-// すべての要素が同じバイト列かを検証し、最初の要素を返す
 const v = CBOR.fromCDN("same<<h'0102', h'0102'>>", { extensions: [same] });
 console.log(v.toCDN({ appStrings: false }));
 // h'0102'
@@ -1140,9 +1139,10 @@ CDDL コンパイラは `@cbortech/cbor/cddl`
 
 - CBOR
   - [RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)
+- CBOR Sequences
+  - [RFC 8742](https://www.rfc-editor.org/rfc/rfc8742)
 - CDN (CBOR-EDN)
   - [draft-ietf-cbor-edn-literals-25](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/)
-  - [draft-ietf-cbor-edn-literals-26](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/26/)
   - [draft-ietf-cbor-edn-literals-27](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/27/)
 - CDDL
   - [RFC 8610](https://www.rfc-editor.org/rfc/rfc8610)

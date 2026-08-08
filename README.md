@@ -1149,6 +1149,8 @@ types).
 
 - CBOR
   - [RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)
+- CBOR Sequences
+  - [RFC 8742](https://www.rfc-editor.org/rfc/rfc8742)
 - CDN (CBOR-EDN)
   - [draft-ietf-cbor-edn-literals-25](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/)
   - [draft-ietf-cbor-edn-literals-26](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/26/)
