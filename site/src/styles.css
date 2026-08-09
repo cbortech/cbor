@@ -452,9 +452,11 @@ select.ctl {
   padding: 2px 4px;
 }
 
-/* Per-option help bubble, shown on hover or keyboard focus. The text is a
-   real element tied to its control via aria-describedby, so screen readers
-   announce it even while it is visually hidden. */
+/* Per-option help bubble, shown on hover only (not on focus — a checkbox or
+   select stays focused after a click until something else is clicked, which
+   made the bubble linger long after the click that triggered it). The text
+   is still a real element tied to its control via aria-describedby, so
+   screen readers announce it regardless of whether it's visually shown. */
 #format-popover label,
 #cddl-format-popover label {
   position: relative;
@@ -466,9 +468,9 @@ select.ctl {
   width: 100%;
   z-index: 11;
   background: var(--bg-panel);
-  border: 1px solid var(--border);
+  border-style: solid;
+  border-color: var(--border);
   border-radius: 6px;
-  padding: 6px 8px;
   font-size: 0.78rem;
   line-height: 1.4;
   color: var(--fg);
@@ -476,17 +478,46 @@ select.ctl {
   /* Hide visually with opacity only (not visibility/display) so the element
      stays in the accessibility tree for aria-describedby at all times;
      pointer-events: none keeps the invisible bubble from intercepting
-     clicks. */
+     clicks. Also collapsed to zero vertical footprint (max-height, plus the
+     top/bottom padding and border-width that would otherwise keep the box a
+     few px tall on their own) while hidden: an absolutely-positioned bubble
+     still occupies its full box even at opacity: 0, and below the last row
+     in a #format-popover column there's nothing else to contain it — left
+     at its natural height, it stuck out past the popover's own bottom edge
+     and inflated its scrollHeight enough to trigger a scrollbar (see
+     .format-popover) even when every option was already fully visible. */
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.12s;
+  max-height: 0;
+  padding: 0 8px;
+  border-width: 0 1px;
+  overflow: hidden;
+  transition:
+    opacity 0.12s,
+    max-height 0s 0.47s,
+    padding 0s 0.47s,
+    border-width 0s 0.47s;
 }
 #format-popover label:hover .opt-hint,
-#format-popover label:focus-within .opt-hint,
-#cddl-format-popover label:hover .opt-hint,
-#cddl-format-popover label:focus-within .opt-hint {
+#cddl-format-popover label:hover .opt-hint {
   opacity: 1;
+  max-height: none;
+  padding: 6px 8px;
+  border-width: 1px;
+  overflow: visible;
   transition-delay: 0.35s;
+}
+
+/* A row close enough to its popover's bottom edge has its hint opened
+   downward straight into (and clipped by) the popover's own overflow-y:
+   auto edge. Which rows qualify isn't fixed — it depends on how many rows
+   are above/below in the current layout (single- vs two-column,
+   #format-popover vs #cddl-format-popover, however either list is
+   reordered later), so wireHintFlip() in toolbar.ts measures on every
+   hover and toggles this class rather than targeting specific rows here. */
+.opt-hint.flip-up {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 
 .ext-popover {
@@ -518,42 +549,37 @@ select.ctl {
   color: var(--fg-dim);
   cursor: default;
 }
-.preserve-submenu {
-  position: relative;
-}
-.submenu-btn {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: none;
-  border: none;
-  padding: 2px 0;
-  margin: 0;
-  font: inherit;
+/* Same dimming for a value-select row (e.g. `comments`) disabled via
+   LAYOUT_OPTION_IDS — those don't carry the .check class, only checkboxes
+   do. */
+.popover label:has(select:disabled) {
   color: var(--fg-dim);
-  cursor: pointer;
-  user-select: none;
 }
-.submenu-btn:hover,
-.submenu-btn[aria-expanded='true'] {
-  color: var(--fg);
+
+/* Two side-by-side option groups ("Format" / "Preserve") instead of a single
+   tall column — keeps the popover usable in short browser windows, where a
+   nested submenu popover used to need scroll room below it. Wraps to a
+   single column on narrow viewports since there's no room for two.
+   `.pane` (the popover's positioned containing block) clips overflow and has
+   a bounded height (70vh, min 420px), while the popover itself sits 44px
+   from its top — without a height cap the wrapped content can still run
+   past the pane's bottom edge and get clipped there, taking the Preserve
+   column's checkboxes with it. Cap the height to what's left inside the
+   pane below that 44px offset (with a 10px bottom margin) and scroll
+   internally instead. */
+.format-popover {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 28px;
+  max-height: calc(100% - 54px);
+  overflow-y: auto;
 }
-.submenu-btn::after {
-  content: '▸';
-  font-size: 0.75em;
-}
-.submenu-btn[aria-expanded='true']::after {
-  content: '▾';
-}
-.preserve-popover {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  left: auto;
+.popover-column {
   display: grid;
+  align-content: start;
   gap: 8px;
-  min-width: 260px;
+  min-width: 240px;
 }
 
 .mode-tabs {

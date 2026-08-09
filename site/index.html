@@ -297,7 +297,7 @@
         />
         <div id="cddl-format-popover" class="popover" hidden>
           <label
-            >Indent
+            ><code>indent</code>
             <select
               id="cddl-opt-indent"
               aria-describedby="hint-cddl-opt-indent"
@@ -319,7 +319,7 @@
               aria-describedby="hint-cddl-opt-comments"
               checked
             />
-            Keep comments
+            <code>preserveComments</code>
             <span class="opt-hint" role="tooltip" id="hint-cddl-opt-comments"
               >Keep ; comments from the input and emit them in the formatted
               output</span
@@ -410,290 +410,313 @@
           accept=".cdn,.edn,.diag,.json,.jsonc,.jsonl,.ndjson,.jsonseq,application/cdn,application/cbor-diagnostic,application/json,application/json-seq,application/jsonl,application/x-ndjson,text/plain"
           hidden
         />
-        <div id="format-popover" class="popover" hidden>
-          <label
-            >Indent
-            <select id="opt-indent" aria-describedby="hint-opt-indent">
-              <option value="2" selected>2 spaces</option>
-              <option value="4">4 spaces</option>
-              <option value="tab">Tab</option>
-              <option value="">Compact</option>
-            </select>
-            <span class="opt-hint" role="tooltip" id="hint-opt-indent"
-              >Pretty-print indentation; Compact emits single-line output and
-              ignores the comment / split / inline / concatenation options</span
-            >
-          </label>
-          <label
-            >Commas
-            <select id="opt-commas" aria-describedby="hint-opt-commas">
-              <option value="comma" selected>Comma</option>
-              <option value="trailing">Trailing</option>
-              <option value="none">None</option>
-            </select>
-            <span class="opt-hint" role="tooltip" id="hint-opt-commas"
-              >Separators between array/map elements: commas, commas with a
-              trailing comma after the last element, or spaces only</span
-            >
-          </label>
-          <label
-            >Integers
-            <select id="opt-int" aria-describedby="hint-opt-int">
-              <option value="decimal" selected>Decimal</option>
-              <option value="hex">Hex</option>
-              <option value="octal">Octal</option>
-              <option value="binary">Binary</option>
-            </select>
-            <span class="opt-hint" role="tooltip" id="hint-opt-int"
-              >Numeric notation for integers: decimal (42), hex (0x2a), octal
-              (0o52), or binary (0b101010)</span
-            >
-          </label>
-          <label
-            >Floats
-            <select id="opt-float" aria-describedby="hint-opt-float">
-              <option value="decimal" selected>Decimal</option>
-              <option value="hex">Hex (C99)</option>
-            </select>
-            <span class="opt-hint" role="tooltip" id="hint-opt-float"
-              >Notation for floating-point values: decimal (1.5) or C99-style
-              hex (0x1.8p+0)</span
-            >
-          </label>
-          <label
-            >Byte strings
-            <select id="opt-bstr" aria-describedby="hint-opt-bstr">
-              <option value="hex" selected>Hex</option>
-              <option value="base64">Base64</option>
-              <option value="base64url">Base64url</option>
-            </select>
-            <span class="opt-hint" role="tooltip" id="hint-opt-bstr"
-              >Encoding for byte string literals: h'…' hex, b64'…' base64, or
-              b64'…' with the base64url alphabet</span
-            >
-          </label>
-          <label
-            >Enc. indicators
-            <select id="opt-enc-ind" aria-describedby="hint-opt-enc-ind">
-              <option value="auto" selected>Auto</option>
-              <option value="always">Always</option>
-              <option value="never">Never</option>
-            </select>
-            <span class="opt-hint" role="tooltip" id="hint-opt-enc-ind"
-              >When to append encoding-width indicators (_0…_7, _i): only for
-              non-canonical encodings (Auto), on every item (Always), or
-              never</span
-            >
-          </label>
-          <label class="check">
-            <input
-              type="checkbox"
-              id="opt-split-newline"
-              aria-describedby="hint-opt-split-newline"
-              checked
-            />
-            Split at newlines
-            <span class="opt-hint" role="tooltip" id="hint-opt-split-newline"
-              >Split text strings at newline characters using string
-              concatenation ("line1\n" + "line2")</span
-            >
-          </label>
-          <label class="check">
-            <input
-              type="checkbox"
-              id="opt-split-cdn"
-              aria-describedby="hint-opt-split-cdn"
-              checked
-            />
-            Format CDN strings
-            <span class="opt-hint" role="tooltip" id="hint-opt-split-cdn"
-              >Re-format text strings whose content parses as CDN (a JSON
-              superset) by splitting them with concatenation and structure-aware
-              indentation</span
-            >
-          </label>
-          <label class="check">
-            <input
-              type="checkbox"
-              id="opt-concat-t1b1"
-              aria-describedby="hint-opt-concat-t1b1"
-            />
-            Use t1/b1 concatenation
-            <span class="opt-hint" role="tooltip" id="hint-opt-concat-t1b1"
-              >Render preserved + concatenation as t1&lt;&lt;"a", "b"&gt;&gt; /
-              b1&lt;&lt;…&gt;&gt; app-sequence notation
-              (draft-ietf-cbor-edn-literals-27 §3.5) instead of "a" + "b". No
-              effect unless Concatenation (below) is on</span
-            >
-          </label>
-          <label class="check">
-            <input
-              type="checkbox"
-              id="opt-stream-ilbs-ilts"
-              aria-describedby="hint-opt-stream-ilbs-ilts"
-            />
-            Use ilbs/ilts streaming
-            <span class="opt-hint" role="tooltip" id="hint-opt-stream-ilbs-ilts"
-              >Render indefinite-length strings as ilts&lt;&lt;"a", "b"&gt;&gt;
-              / ilbs&lt;&lt;…&gt;&gt; app-sequence notation
-              (draft-ietf-cbor-edn-literals-27 §3.6) instead of the legacy (_
-              "a", "b") streamstring form</span
-            >
-          </label>
-          <label class="check">
-            <input
-              type="checkbox"
-              id="opt-inline-leaf"
-              aria-describedby="hint-opt-inline-leaf"
-              checked
-            />
-            Inline leaf containers
-            <span class="opt-hint" role="tooltip" id="hint-opt-inline-leaf"
-              >Keep arrays, maps, and (_ ...) chunks on one line when they
-              contain no nested array/map and every entry fits on a single
-              line</span
-            >
-          </label>
-          <label class="check">
-            <input
-              type="checkbox"
-              id="opt-preserve-all"
-              aria-describedby="hint-opt-preserve-all"
-              checked
-            />
-            <strong>Preserve everything</strong>
-            <span class="opt-hint" role="tooltip" id="hint-opt-preserve-all"
-              >Turn all options in the "Individual preserve options" submenu on
-              or off at once</span
-            >
-          </label>
-          <div class="preserve-submenu">
-            <button
-              type="button"
-              id="preserve-opts-btn"
-              class="submenu-btn"
-              aria-haspopup="true"
-              aria-expanded="false"
-              aria-controls="preserve-popover"
-            >
-              Individual preserve options
-            </button>
-            <div id="preserve-popover" class="popover preserve-popover" hidden>
-              <label class="check">
-                <input
-                  type="checkbox"
-                  id="opt-comments"
-                  aria-describedby="hint-opt-comments"
-                  checked
-                />
-                Comments
-                <span class="opt-hint" role="tooltip" id="hint-opt-comments"
-                  >Keep comments from the input and emit them in the formatted
-                  output</span
-                >
-              </label>
-              <label class="check">
-                <input
-                  type="checkbox"
-                  id="opt-blank-lines"
-                  aria-describedby="hint-opt-blank-lines"
-                  checked
-                />
-                Blank lines
-                <span class="opt-hint" role="tooltip" id="hint-opt-blank-lines"
-                  >Keep a blank line between array/map entries (or (_ ...)
-                  chunks) that had one in the input</span
-                >
-              </label>
-              <label class="check">
-                <input
-                  type="checkbox"
-                  id="opt-concat"
-                  aria-describedby="hint-opt-concat"
-                  checked
-                />
-                Concatenation
-                <span class="opt-hint" role="tooltip" id="hint-opt-concat"
-                  >Keep + string concatenation boundaries from the input ("a" +
-                  "b") instead of joining the parts into one literal</span
-                >
-              </label>
-              <label class="check">
-                <input
-                  type="checkbox"
-                  id="opt-byte-string"
-                  aria-describedby="hint-opt-byte-string"
-                  checked
-                />
-                Byte string spelling
-                <span class="opt-hint" role="tooltip" id="hint-opt-byte-string"
-                  >Keep non-concatenated byte string literals (h'…', b64'…',
-                  b32'…', h32'…', '…') in their original source form instead of
-                  re-encoding them via the Byte strings option above</span
-                >
-              </label>
-              <label class="check">
-                <input
-                  type="checkbox"
-                  id="opt-raw-string"
-                  aria-describedby="hint-opt-raw-string"
-                  checked
-                />
-                Raw strings
-                <span class="opt-hint" role="tooltip" id="hint-opt-raw-string"
-                  >Keep raw backtick text strings in their original source form
-                  instead of converting them to double-quoted strings</span
-                >
-              </label>
-              <label class="check">
-                <input
-                  type="checkbox"
-                  id="opt-number-format"
-                  aria-describedby="hint-opt-number-format"
-                  checked
-                />
-                Number spelling
-                <span
-                  class="opt-hint"
-                  role="tooltip"
-                  id="hint-opt-number-format"
-                  >Keep integer/float literals in their original source spelling
-                  (0xff, 0o377, 1.50, 1.5_1) instead of normalizing them via the
-                  Integers/Floats/Enc. indicators options above</span
-                >
-              </label>
-              <label class="check">
-                <input
-                  type="checkbox"
-                  id="opt-app-sequence"
-                  aria-describedby="hint-opt-app-sequence"
-                  checked
-                />
-                App-string/-sequence notation
-                <span class="opt-hint" role="tooltip" id="hint-opt-app-sequence"
-                  >For values written as prefix`...` or
-                  prefix&lt;&lt;...&gt;&gt; (e.g. DT`...` or
-                  DT&lt;&lt;'...'&gt;&gt;), or a non-canonically spelled
-                  prefix'...', keep that exact notation instead of normalizing
-                  it. No effect when App strings is off</span
-                >
-              </label>
-            </div>
+        <div id="format-popover" class="popover format-popover" hidden>
+          <div class="popover-column">
+            <div class="popover-section-title">Format</div>
+            <label
+              ><code>indent</code>
+              <select id="opt-indent" aria-describedby="hint-opt-indent">
+                <option value="2" selected>2 spaces</option>
+                <option value="4">4 spaces</option>
+                <option value="tab">Tab</option>
+                <option value="">Compact</option>
+              </select>
+              <span class="opt-hint" role="tooltip" id="hint-opt-indent"
+                >Pretty-print indentation; Compact emits single-line output and
+                ignores the comment / split / inline / concatenation
+                options</span
+              >
+            </label>
+            <label class="check">
+              <input
+                type="checkbox"
+                id="opt-inline-leaf"
+                aria-describedby="hint-opt-inline-leaf"
+                checked
+              />
+              <code>inlineLeafContainers</code>
+              <span class="opt-hint" role="tooltip" id="hint-opt-inline-leaf"
+                >Keep arrays, maps, and (_ ...) chunks on one line when they
+                contain no nested array/map and every entry fits on a single
+                line</span
+              >
+            </label>
+            <label
+              ><code>commas</code>
+              <select id="opt-commas" aria-describedby="hint-opt-commas">
+                <option value="comma" selected>comma</option>
+                <option value="trailing">trailing</option>
+                <option value="none">none</option>
+              </select>
+              <span class="opt-hint" role="tooltip" id="hint-opt-commas"
+                >Separators between array/map elements: commas, commas with a
+                trailing comma after the last element, or spaces only</span
+              >
+            </label>
+            <label
+              ><code>comments</code>
+              <select
+                id="opt-comments-style"
+                aria-describedby="hint-opt-comments-style"
+              >
+                <option value="strip" selected>strip</option>
+                <option value="c-style">c-style</option>
+                <option value="cdn-style">cdn-style</option>
+              </select>
+              <span class="opt-hint" role="tooltip" id="hint-opt-comments-style"
+                >Style to normalize comments to — emit none (strip), // line /
+                block comments (c-style), or # and / … / (cdn-style). Only
+                consulted when preserveComments (right) isn't true</span
+              >
+            </label>
+            <label
+              ><code>encodingIndicators</code>
+              <select id="opt-enc-ind" aria-describedby="hint-opt-enc-ind">
+                <option value="auto" selected>auto</option>
+                <option value="always">always</option>
+                <option value="never">never</option>
+              </select>
+              <span class="opt-hint" role="tooltip" id="hint-opt-enc-ind"
+                >When to append encoding-width indicators (_0…_7, _i): only for
+                non-canonical encodings (auto), on every item (always), or
+                never</span
+              >
+            </label>
+            <label
+              ><code>intFormat</code>
+              <select id="opt-int" aria-describedby="hint-opt-int">
+                <option value="decimal" selected>decimal</option>
+                <option value="hex">hex</option>
+                <option value="octal">octal</option>
+                <option value="binary">binary</option>
+              </select>
+              <span class="opt-hint" role="tooltip" id="hint-opt-int"
+                >Numeric notation for integers: decimal (42), hex (0x2a), octal
+                (0o52), or binary (0b101010)</span
+              >
+            </label>
+            <label
+              ><code>floatFormat</code>
+              <select id="opt-float" aria-describedby="hint-opt-float">
+                <option value="decimal" selected>decimal</option>
+                <option value="hex">hex</option>
+              </select>
+              <span class="opt-hint" role="tooltip" id="hint-opt-float"
+                >Notation for floating-point values: decimal (1.5) or C99-style
+                hex (0x1.8p+0)</span
+              >
+            </label>
+            <label
+              ><code>bstrEncoding</code>
+              <select id="opt-bstr" aria-describedby="hint-opt-bstr">
+                <option value="hex" selected>hex</option>
+                <option value="base64">base64</option>
+                <option value="base64url">base64url</option>
+              </select>
+              <span class="opt-hint" role="tooltip" id="hint-opt-bstr"
+                >Encoding for byte string literals: h'…' hex, b64'…' base64, or
+                b64'…' with the base64url alphabet</span
+              >
+            </label>
+            <label
+              ><code>sqstr</code>
+              <select id="opt-sqstr" aria-describedby="hint-opt-sqstr">
+                <option value="printable-string" selected>
+                  printable-string
+                </option>
+                <option value="string">string</option>
+                <option value="none">none</option>
+              </select>
+              <span class="opt-hint" role="tooltip" id="hint-opt-sqstr"
+                >Whether to prefer single-quoted '…' form for byte strings: when
+                the bytes are valid UTF-8 with no control characters
+                (printable-string), whenever they're valid UTF-8 (string), or
+                never — always fall back to bstrEncoding above (none)</span
+              >
+            </label>
+            <label class="check">
+              <input
+                type="checkbox"
+                id="opt-split-newline"
+                aria-describedby="hint-opt-split-newline"
+                checked
+              />
+              <code>splitNewline</code>
+              <span class="opt-hint" role="tooltip" id="hint-opt-split-newline"
+                >Split text strings at newline characters using string
+                concatenation ("line1\n" + "line2")</span
+              >
+            </label>
+            <label class="check">
+              <input
+                type="checkbox"
+                id="opt-split-cdn"
+                aria-describedby="hint-opt-split-cdn"
+                checked
+              />
+              <code>splitCdn</code>
+              <span class="opt-hint" role="tooltip" id="hint-opt-split-cdn"
+                >Re-format text strings whose content parses as CDN (a JSON
+                superset) by splitting them with concatenation and
+                structure-aware indentation</span
+              >
+            </label>
+            <label class="check">
+              <input
+                type="checkbox"
+                id="opt-app-strings"
+                aria-describedby="hint-opt-app-strings"
+                checked
+              />
+              <code>appPrefix</code>
+              <span class="opt-hint" role="tooltip" id="hint-opt-app-strings"
+                >Use app-prefix notation (app-string, e.g.
+                DT'2023-01-01T12:00:00Z', ip'192.0.2.42'; or app-sequence) for
+                known tags instead of raw tag notation like 1(1672574400)</span
+              >
+            </label>
+            <label class="check">
+              <input
+                type="checkbox"
+                id="opt-concat-t1b1"
+                aria-describedby="hint-opt-concat-t1b1"
+              />
+              <code>modernConcat</code>
+              <span class="opt-hint" role="tooltip" id="hint-opt-concat-t1b1"
+                >Render preserved + concatenation as t1&lt;&lt;"a", "b"&gt;&gt;
+                / b1&lt;&lt;…&gt;&gt; app-sequence notation
+                (draft-ietf-cbor-edn-literals-27 §3.5) instead of "a" + "b". No
+                effect unless preserveConcatenation (right) is on</span
+              >
+            </label>
+            <label class="check">
+              <input
+                type="checkbox"
+                id="opt-stream-ilbs-ilts"
+                aria-describedby="hint-opt-stream-ilbs-ilts"
+              />
+              <code>modernStreamSyntax</code>
+              <span
+                class="opt-hint"
+                role="tooltip"
+                id="hint-opt-stream-ilbs-ilts"
+                >Render indefinite-length strings as ilts&lt;&lt;"a",
+                "b"&gt;&gt; / ilbs&lt;&lt;…&gt;&gt; app-sequence notation
+                (draft-ietf-cbor-edn-literals-27 §3.6) instead of the legacy (_
+                "a", "b") streamstring form</span
+              >
+            </label>
           </div>
-          <label class="check">
-            <input
-              type="checkbox"
-              id="opt-app-strings"
-              aria-describedby="hint-opt-app-strings"
-              checked
-            />
-            App prefix
-            <span class="opt-hint" role="tooltip" id="hint-opt-app-strings"
-              >Use app-prefix notation (app-string, e.g.
-              DT'2023-01-01T12:00:00Z', ip'192.0.2.42'; or app-sequence) for
-              known tags instead of raw tag notation like 1(1672574400)</span
-            >
-          </label>
+          <div class="popover-column">
+            <div class="popover-section-title">Preserve</div>
+            <label class="check">
+              <input
+                type="checkbox"
+                id="opt-preserve-all"
+                aria-describedby="hint-opt-preserve-all"
+                checked
+              />
+              <strong><code>preserveAll</code></strong>
+              <span class="opt-hint" role="tooltip" id="hint-opt-preserve-all"
+                >Turn every option below on or off at once</span
+              >
+            </label>
+            <label class="check">
+              <input
+                type="checkbox"
+                id="opt-blank-lines"
+                aria-describedby="hint-opt-blank-lines"
+                checked
+              />
+              <code>preserveBlankLines</code>
+              <span class="opt-hint" role="tooltip" id="hint-opt-blank-lines"
+                >Keep a blank line between array/map entries (or (_ ...) chunks)
+                that had one in the input</span
+              >
+            </label>
+            <label class="check">
+              <input
+                type="checkbox"
+                id="opt-comments"
+                aria-describedby="hint-opt-comments"
+                checked
+              />
+              <code>preserveComments</code>
+              <span class="opt-hint" role="tooltip" id="hint-opt-comments"
+                >Keep comments from the input and emit them in the formatted
+                output</span
+              >
+            </label>
+            <label class="check">
+              <input
+                type="checkbox"
+                id="opt-number-format"
+                aria-describedby="hint-opt-number-format"
+                checked
+              />
+              <code>preserveNumberFormat</code>
+              <span class="opt-hint" role="tooltip" id="hint-opt-number-format"
+                >Keep integer/float literals in their original source spelling
+                (0xff, 0o377, 1.50, 1.5_1) instead of normalizing them via
+                encodingIndicators/intFormat/floatFormat (left)</span
+              >
+            </label>
+            <label class="check">
+              <input
+                type="checkbox"
+                id="opt-byte-string"
+                aria-describedby="hint-opt-byte-string"
+                checked
+              />
+              <code>preserveByteString</code>
+              <span class="opt-hint" role="tooltip" id="hint-opt-byte-string"
+                >Keep non-concatenated byte string literals (h'…', b64'…',
+                b32'…', h32'…', '…') in their original source form instead of
+                re-encoding them via bstrEncoding (left)</span
+              >
+            </label>
+            <label class="check">
+              <input
+                type="checkbox"
+                id="opt-raw-string"
+                aria-describedby="hint-opt-raw-string"
+                checked
+              />
+              <code>preserveRawString</code>
+              <span class="opt-hint" role="tooltip" id="hint-opt-raw-string"
+                >Keep raw backtick text strings in their original source form
+                instead of converting them to double-quoted strings</span
+              >
+            </label>
+            <label class="check">
+              <input
+                type="checkbox"
+                id="opt-concat"
+                aria-describedby="hint-opt-concat"
+                checked
+              />
+              <code>preserveConcatenation</code>
+              <span class="opt-hint" role="tooltip" id="hint-opt-concat"
+                >Keep + string concatenation boundaries from the input ("a" +
+                "b") instead of joining the parts into one literal</span
+              >
+            </label>
+            <label class="check">
+              <input
+                type="checkbox"
+                id="opt-app-sequence"
+                aria-describedby="hint-opt-app-sequence"
+                checked
+              />
+              <code>preserveAppPrefix</code>
+              <span class="opt-hint" role="tooltip" id="hint-opt-app-sequence"
+                >For values written as prefix`...` or prefix&lt;&lt;...&gt;&gt;
+                (e.g. DT`...` or DT&lt;&lt;'...'&gt;&gt;), or a non-canonically
+                spelled prefix'...', keep that exact notation instead of
+                normalizing it. No effect when appPrefix (left) is off</span
+              >
+            </label>
+          </div>
         </div>
         <div id="editor" class="editor-host"></div>
       </section>

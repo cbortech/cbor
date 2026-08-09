@@ -283,49 +283,29 @@ describe('playground', () => {
       byId<HTMLSelectElement>('opt-indent').value = '2'; // restore
     });
 
-    test('individual preserve options open in their own submenu popover', () => {
+    test('individual preserve options sit directly in format-popover, not a nested submenu', () => {
+      // Regression: these used to live inside their own "Individual preserve
+      // options" submenu popover (a separate hideable element that needed
+      // vertical room to open below the button). They're now plain checkboxes
+      // in format-popover's own "Preserve" column, so no submenu element
+      // exists at all.
+      expect(byId('preserve-popover')).toBeNull();
+      expect(byId('preserve-opts-btn')).toBeNull();
+
       byId('format-opts-btn').click();
-      const preserveBtn = byId<HTMLButtonElement>('preserve-opts-btn');
-      const preservePopover = byId('preserve-popover');
+      const formatPopover = byId('format-popover');
+      expect(formatPopover.hidden).toBe(false);
+      expect(formatPopover.contains(byId('opt-comments'))).toBe(true);
+      expect(formatPopover.contains(byId('opt-preserve-all'))).toBe(true);
 
-      // Starts closed; the individual checkboxes live inside it.
-      expect(preservePopover.hidden).toBe(true);
-      expect(preserveBtn.getAttribute('aria-expanded')).toBe('false');
-      expect(preservePopover.contains(byId('opt-comments'))).toBe(true);
-
-      preserveBtn.click();
-      expect(preservePopover.hidden).toBe(false);
-      expect(preserveBtn.getAttribute('aria-expanded')).toBe('true');
-
-      // Clicking a checkbox inside the submenu doesn't close it or the
-      // parent format-popover.
+      // Clicking a preserve checkbox doesn't close format-popover.
       byId('opt-comments').click();
-      expect(preservePopover.hidden).toBe(false);
-      expect(byId('format-popover').hidden).toBe(false);
+      expect(formatPopover.hidden).toBe(false);
       byId('opt-comments').click(); // restore
 
-      // Clicking fully outside closes both.
+      // Clicking fully outside closes it.
       byId('editor').click();
-      expect(preservePopover.hidden).toBe(true);
-      expect(byId('format-popover').hidden).toBe(true);
-    });
-
-    test('closing format-popover also force-closes the preserve submenu', () => {
-      byId('format-opts-btn').click();
-      byId<HTMLButtonElement>('preserve-opts-btn').click();
-      expect(byId('preserve-popover').hidden).toBe(false);
-
-      // Toggling format-popover closed stops propagation before it can
-      // reach the submenu's own document-level close listener, so
-      // initFormatPopover() force-closes it explicitly instead.
-      byId('format-opts-btn').click();
-      expect(byId('format-popover').hidden).toBe(true);
-      expect(byId('preserve-popover').hidden).toBe(true);
-      expect(
-        byId<HTMLButtonElement>('preserve-opts-btn').getAttribute(
-          'aria-expanded'
-        )
-      ).toBe('false');
+      expect(formatPopover.hidden).toBe(true);
     });
 
     test('Preserve everything toggles all "Keep …" checkboxes together', () => {
