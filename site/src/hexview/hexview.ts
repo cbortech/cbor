@@ -95,10 +95,12 @@ export class HexView {
     // already spans more than intended. Keeping cells adjacent avoids the
     // problem entirely; each row keeps its own overflow-x (needed so a row
     // wider than the shared 50%-capped column can show any of its content
-    // at all), but its scrollbar is hidden (.hex-bytes) and driven by one
-    // shared, visible .hex-scroll-track instead — see
-    // driveHorizontalScrollFrom for why that's one-way (track → rows), not
-    // rows syncing each other.
+    // at all), but overflow-x: hidden (.hex-bytes — not auto) means that's
+    // only ever reachable programmatically, via the one shared, visible
+    // .hex-scroll-track appended below — see driveHorizontalScrollFrom for
+    // why that's one-way (track → rows), not rows syncing each other.
+    const rowsScroll = document.createElement('div');
+    rowsScroll.className = 'hex-rows-scroll';
     const table = document.createElement('div');
     table.className = 'hex-table';
     const bytesCells: HTMLElement[] = [];
@@ -144,21 +146,26 @@ export class HexView {
         byteEnd: row.byteEnd,
       });
     }
+    rowsScroll.appendChild(table);
+    this.container.appendChild(rowsScroll);
+
     // The one visible, shared horizontal scrollbar for the whole bytes
-    // column — a grid child of its own, placed in column 1 so it lines up
-    // under every .hex-bytes cell (same shared, 50%-capped track — see
-    // .hex-table), and sticky to the pane's bottom edge so it's reachable
-    // without scrolling all the way down through however many rows there
-    // are. Its own scroll range is the widest row's content, set below
-    // once the cells are actually laid out (scrollWidth needs that).
+    // column — a sibling of rowsScroll, *outside* the vertically-scrolling
+    // area entirely (see the #hexview rule in styles.css for why: a
+    // position: sticky bar sharing that scroll region used to render on
+    // top of whatever row was currently in view, hiding it, since sticky
+    // only relocates where an element paints — its normal-flow space is
+    // still reserved way down at the actual end of the row list, nowhere
+    // near where it visually sticks — and scrollIntoView() doesn't know to
+    // avoid that covered area either). Its own scroll range is the widest
+    // row's content, set below once the cells are actually laid out
+    // (scrollWidth needs that).
     const scrollTrack = document.createElement('div');
     scrollTrack.className = 'hex-scroll-track';
     const scrollTrackInner = document.createElement('div');
     scrollTrackInner.className = 'hex-scroll-track-inner';
     scrollTrack.appendChild(scrollTrackInner);
-    table.appendChild(scrollTrack);
-
-    this.container.appendChild(table);
+    this.container.appendChild(scrollTrack);
 
     const maxScrollWidth = bytesCells.reduce(
       (max, cell) => Math.max(max, cell.scrollWidth),

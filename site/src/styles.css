@@ -690,6 +690,41 @@ select.ctl {
     sans-serif;
 }
 
+/* #hexview itself lays out top-to-bottom: the vertically-scrolling rows
+   area, then the shared horizontal scrollbar as a normal, always-present
+   sibling *outside* that scrolling area — not layered on top of it via
+   position: sticky. A sticky bar shares the rows' own scroll region, so at
+   most scroll positions it visually sits *over* whatever row happens to be
+   there (its normal-flow space is reserved down at the very end of a long
+   row list, far from where it actually renders once stuck), hiding part of
+   that row; scrollIntoView() has no idea that region is covered, either,
+   so a freshly-selected row can end up landing right behind it. Keeping it
+   out of the scrolling area entirely sidesteps both problems — nothing
+   ever renders under it, so there's nothing for it to hide. renderPlain /
+   renderEmpty don't add a second child here, so they fall back to
+   #hexview's own overflow (from .bytes-view) exactly as before; only
+   renderAnnotated's two children (.hex-rows-scroll, .hex-scroll-track)
+   exercise this flex layout at all. */
+/* display: flex would defeat the hidden attribute (mode-tab switching in
+   main.ts — hexviewEl.hidden = mode !== 'annotated' && mode !== 'plain'),
+   same as .pane[hidden] / #bytes-edit-wrap[hidden] above: #hexview's own
+   ID-selector specificity otherwise beats the [hidden] UA rule, so it
+   stayed visible (and, still flexed, pushed the JS/Edit tab's content down
+   to sit half inside its own now-empty box) under whichever tab was
+   actually selected. */
+#hexview[hidden] {
+  display: none;
+}
+#hexview {
+  display: flex;
+  flex-direction: column;
+}
+.hex-rows-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
 .hex-table {
   display: grid;
   /* fit-content(50%) is max-content (i.e. size to content, as normal),
@@ -731,27 +766,41 @@ select.ctl {
   white-space: nowrap;
   padding-right: 2ch;
   cursor: pointer;
-  overflow-x: auto;
-  /* Still a real scroll container (driveHorizontalScrollFrom sets its
-     scrollLeft directly), just with its own scrollbar UI hidden — .hex-
-     scroll-track below is the one visible scrollbar for the whole column. */
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.hex-bytes::-webkit-scrollbar {
-  display: none;
+  /* hidden, not auto: still a real scroll container that
+     driveHorizontalScrollFrom (hexview.ts) can set scrollLeft on
+     programmatically, but overflow: auto would *also* respond to the user
+     scrolling a row directly (trackpad, Shift+wheel) even with its own
+     scrollbar UI hidden — that bypasses the shared track entirely and
+     desyncs just that one row from every other. hidden blocks that
+     interaction path outright, leaving the shared .hex-scroll-track below
+     as the only way to scroll any of it. */
+  overflow-x: hidden;
 }
 /* The shared scrollbar itself — see driveHorizontalScrollFrom (hexview.ts)
    for why one authoritative source, not every row's scrollbar syncing the
    others, and renderAnnotated for how its scroll range (.hex-scroll-track-
-   inner's width) is set to the widest row's content. grid-column: 1 keeps
-   it in the same (shared, 50%-capped) track as every .hex-bytes cell, so
-   its visible width always matches theirs; sticky keeps it reachable
-   without scrolling all the way down through however many rows there are. */
+   inner's width) is set to the widest row's content. width: max-content;
+   max-width: 50% mirrors .hex-table's own column sizing (same "size to
+   content, capped at 50%" shape, same underlying widest-row measurement)
+   so its visible width lines up with the bytes column above it despite
+   being a separate element outside the grid — see the #hexview comment for
+   why it isn't part of that grid (or sticky-positioned within the
+   scrolling rows area) in the first place. Deliberately two properties,
+   not the single-value shorthand width: fit-content(50%): as a flex item
+   (this is a direct child of #hexview's column flex layout), that
+   shorthand didn't actually apply here — it silently fell back to the
+   flex default of stretching to the full container width (align-items:
+   stretch, since an unapplied width leaves the item's cross size at auto)
+   instead of being capped, so the track ended up twice as wide as the
+   bytes column and couldn't scroll the longest row all the way to its own
+   end. width: max-content (a plain keyword, not a function) reliably sets
+   the item's width to its own content's size, and the separate max-width:
+   50% then reliably caps that — both are well inside ordinary property
+   support, unlike combining them through fit-content(). */
 .hex-scroll-track {
-  grid-column: 1;
-  position: sticky;
-  bottom: 0;
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: 50%;
   height: 14px;
   overflow-x: auto;
   overflow-y: hidden;
