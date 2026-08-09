@@ -5,3 +5,9 @@ Binary `.cbor` fixture files in this directory are copied from
 and are used as-is for integration testing.
 
 Licensed under the BSD 2-Clause License — see [LICENSE](LICENSE).
+
+To refresh these files from upstream:
+
+```sh
+npm run fetch-test-vectors -- cbor-test-vectors
+```

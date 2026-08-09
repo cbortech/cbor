@@ -14,6 +14,8 @@ import {
   convertCommentText,
   resolveIndent,
   splitLeadingComments,
+  shouldEmitComments,
+  resolveCommentStyle,
 } from '../cdn/serialize-utils';
 import { CborWriter } from '../cbor/encode';
 import { bytesToSpacedHexUpper } from '../utils/hex';
@@ -39,7 +41,7 @@ export interface AppSeqEncodingEdit {
  * Original literal features used by the sole item inside a preserved
  * `prefix<<item>>` source. They let serialization honour an explicitly
  * disabled sibling `preserve*` option instead of replaying that literal
- * verbatim through `preserveAppSequence`.
+ * verbatim through `preserveAppPrefix`.
  */
 export interface AppSeqSourceFeatures {
   byteString?: boolean;
@@ -53,17 +55,53 @@ export interface AppSeqSourceFeatures {
  * `ToCDNOptions.preserveAll` — except the deprecated `preserveTextString`,
  * which no longer participates in `preserveAll`. An option the caller
  * explicitly set (including to `false`) is left untouched.
+ *
+ * `preserveComments` is only filled in with `true` (verbatim) when
+ * `comments` is *also* left unset — an explicit `comments` with no
+ * `preserveComments` should still normalize comments to that style under
+ * `preserveAll`, not be overridden by the verbatim fill-in (see
+ * `ToCDNOptions.preserveComments`).
+ *
+ * Assumes `preserveAppPrefix` has already been resolved from the
+ * deprecated `preserveAppSequence` alias by the caller (see `toCDN()`); like
+ * `preserveTextString`, the deprecated name itself no longer participates
+ * directly. (`appStrings`/`appPrefix` aren't part of the `preserve*` family
+ * and don't participate in `preserveAll` at all.)
  */
 function expandPreserveAll(options: ToCDNOptions): ToCDNOptions {
   return {
     ...options,
-    preserveComments: options.preserveComments ?? true,
+    preserveComments:
+      options.comments !== undefined
+        ? options.preserveComments
+        : (options.preserveComments ?? true),
     preserveByteString: options.preserveByteString ?? true,
     preserveRawString: options.preserveRawString ?? true,
     preserveConcatenation: options.preserveConcatenation ?? true,
     preserveNumberFormat: options.preserveNumberFormat ?? true,
-    preserveAppSequence: options.preserveAppSequence ?? true,
+    preserveAppPrefix: options.preserveAppPrefix ?? true,
     preserveBlankLines: options.preserveBlankLines ?? true,
+  };
+}
+
+/**
+ * Resolve deprecated `ToCDNOptions` aliases — `preserveAppSequence` into
+ * `preserveAppPrefix`, and `appStrings` into `appPrefix` — for whichever
+ * canonical name was left unset by the caller. Each canonical name always
+ * wins over its deprecated alias when both are explicitly set.
+ */
+function resolveDeprecatedAppPrefixAliases(
+  options: ToCDNOptions
+): ToCDNOptions {
+  if (
+    options.preserveAppSequence === undefined &&
+    options.appStrings === undefined
+  )
+    return options;
+  return {
+    ...options,
+    preserveAppPrefix: options.preserveAppPrefix ?? options.preserveAppSequence,
+    appPrefix: options.appPrefix ?? options.appStrings,
   };
 }
 
@@ -107,11 +145,11 @@ export abstract class CborItem {
   blankLineBefore?: boolean;
 
   /**
-   * Original application-string/-sequence source text — `prefix'...'`,
+   * Original app-string/-sequence source text — `prefix'...'`,
    * `` prefix`...` ``, or `prefix<<...>>` — set by the parser when the
    * resolving extension declares `preserveAppSeqSource: 'optional'`. A
    * subclass's own `_toCDN()` override may check this (gated behind
-   * `ToCDNOptions.preserveAppSequence`) to round-trip the exact original
+   * `ToCDNOptions.preserveAppPrefix`) to round-trip the exact original
    * spelling instead of always regenerating `prefix'...'` notation from the
    * resolved value. Left `undefined` for nodes not parsed from one of these
    * forms.
@@ -122,7 +160,7 @@ export abstract class CborItem {
    * Comments contained within `appSeqSource`, with `start`/`end` offsets
    * relative to that string. These spans allow comment markers to be
    * converted (or comments to be removed) without regenerating and thereby
-   * losing the original application-string/-sequence notation.
+   * losing the original app-string/-sequence notation.
    */
   appSeqComments?: CborComment[];
 
@@ -195,6 +233,52 @@ export abstract class CborItem {
     return false;
   }
 
+  /**
+   * @internal
+   * True when this node's own text content (a text string, or a byte
+   * string that would render as bare sqstr text) has two or more words —
+   * `inlineLeafContainers` never collapses a container whose entries hold
+   * such a string onto the container's own line, even though the entry
+   * itself has no nested array/map, since a multi-word string reads better
+   * with room of its own. See `isMultiWordText()`/`isMultiWordByteString()`
+   * in `cdn/serialize-utils.ts`. Takes `options` because whether a byte
+   * string even renders as text (`'...'`) rather than a prefixed literal
+   * (`h'...'`, `b64'...'`, ...) depends on the `sqstr` option.
+   *
+   * This method deliberately does *not* also cover the "is this (or does
+   * it wrap) a prefixed literal" question — a prefixed literal has no word
+   * count to check, but still disqualifies under the strict rule (and, per
+   * `strict`, is an ordinary leaf under the loose one). That's handled
+   * generically elsewhere instead, from the *actual rendered text* rather
+   * than predicted from this node's type: `isPrefixedLiteralText` for a
+   * bare entry (`serializeContainer` checks it against the already
+   * rendered `s`), or `isMultiWordRenderedLiteral` for `CborTag`, which
+   * overrides this method entirely to tokenize its own `_toCDN()` output
+   * instead of delegating here — necessary because a `CborTag` subclass
+   * (`CborTaggedIpExt`, `CborTaggedEpochDtExt`, ...) may override `_toCDN()`
+   * to render something that doesn't look like generic `tagNum(content)`
+   * notation at all, which a semantic prediction from `this.content` alone
+   * could never know about.
+   *
+   * `strict` (default `true`) is passed down by whichever container's own
+   * `_toCDN` directly holds this entry: `true` for the strict rule
+   * (`CborArray`/`CborMap`, and `CborIndefiniteTextString`/
+   * `CborIndefiniteByteString` too — all four provide `entryIsLeaf`),
+   * `false` only for `CborEmbeddedCBOR` (`<<...>>`), the one container
+   * whose collapse isn't gated behind `inlineLeafContainers` at all and
+   * the only one that omits `entryIsLeaf`. This base implementation and
+   * `CborTextString`/`CborByteString`'s overrides ignore `strict` (a text
+   * string's, or byte string's own sqstr-text, word count is unaffected by
+   * it either way) — only `CborTag` (and, transitively, `CborAppSeqResult`
+   * delegating to its inner value) actually consult it.
+   */
+  _isMultiWordText(
+    _options: ToCDNOptions | undefined,
+    _strict = true
+  ): boolean {
+    return false;
+  }
+
   // ─── Public template methods ────────────────────────────────────────────────
 
   /** Serialize this node to CBOR binary. */
@@ -208,14 +292,15 @@ export abstract class CborItem {
   /** Serialize this node to a CDN text string. */
   toCDN(options?: ToCDNOptions): string {
     let merged = this._defaults ? { ...this._defaults, ...options } : options;
+    if (merged) merged = resolveDeprecatedAppPrefixAliases(merged);
     if (merged?.preserveAll) merged = expandPreserveAll(merged);
     const body = this._toCDN(merged, 0);
-    const pv = merged?.preserveComments;
     // Single-line output strips comments: `#`/`//` comments need a newline
     // to terminate, so they cannot be emitted without breaking the guarantee
     // that single-line output contains no newlines.
-    if (!pv || resolveIndent(merged) === null) return body;
-    const style = typeof pv === 'string' ? pv : undefined;
+    if (!shouldEmitComments(merged) || resolveIndent(merged) === null)
+      return body;
+    const style = resolveCommentStyle(merged);
     const { ownLines, inlinePrefix } = splitLeadingComments(this, '', style);
     const trailing = this.comments?.trailing ?? [];
     const bodyWithTrailing =
@@ -265,7 +350,10 @@ export abstract class CborItem {
    * // FF        -- "break"
    */
   toHexDump(options?: ToHexDumpOptions): string {
-    const merged = this._defaults ? { ...this._defaults, ...options } : options;
+    let merged: (ToHexDumpOptions & ToCDNOptions) | undefined = this._defaults
+      ? { ...this._defaults, ...options }
+      : options;
+    if (merged) merged = resolveDeprecatedAppPrefixAliases(merged);
     const raw = merged?.indent ?? 3;
     const indentStr = typeof raw === 'string' ? raw : ' '.repeat(raw);
     const marker = (merged?.commentStyle ?? '--') + ' ';

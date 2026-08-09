@@ -2,7 +2,7 @@
  * Tests for the `float'...'` app-string extension.
  *
  * Covers:
- *  - Spec §3.7 example: [float'fe00', float'fe00'_2, float'47110815']
+ *  - Spec §3.8 example: [float'fe00', float'fe00'_2, float'47110815']
  *  - Natural encoding (no EI): float16 / float32 / float64 stored as-is
  *  - Bit-exact widening with NaN payload preservation:
  *      float16 → float32  (_2)
@@ -27,9 +27,9 @@ function hex(b: Uint8Array): string {
     .join('');
 }
 
-// ─── Spec §3.7 examples ───────────────────────────────────────────────────────
+// ─── Spec §3.8 examples ───────────────────────────────────────────────────────
 
-describe('float — spec §3.7 examples (draft-ietf-cbor-edn-literals)', () => {
+describe('float — spec §3.8 examples (draft-ietf-cbor-edn-literals)', () => {
   // 🔧 "[float'fe00', float'fe00'_2, float'47110815']" -tpretty ➔
   //    83             # array(3)
   //       F9 FE00     # primitive(65024)      ← float16 NaN, natural width

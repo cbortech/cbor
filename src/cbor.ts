@@ -20,6 +20,7 @@ import { CBOR_OMIT } from './types';
 import { decodeCBOR } from './cbor/decoder';
 import { parseCDN } from './cdn/parser';
 import { CdnSyntaxError } from './cdn/errors';
+import { shouldEmitComments } from './cdn/serialize-utils';
 import { CddlMismatchError } from './cddl/errors';
 import { compile as compileCDDL, CddlSchema } from './cddl/schema';
 import type { ValidateOptions as CddlValidateOptions } from './cddl/validator';
@@ -471,7 +472,7 @@ export class CBOR {
     // Resolve up front so invalid CDDL source text throws even when the
     // sequence turns out to be empty.
     const cddlSchema = resolveCddl(options?.cddl);
-    const preserve = !!options?.preserveComments;
+    const preserve = shouldEmitComments(options) || !!options?.preserveAll;
     let offset = 0;
     let isFirst = true;
     while (true) {

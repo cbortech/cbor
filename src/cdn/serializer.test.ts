@@ -1,4 +1,5 @@
 import { describe, test, expect } from 'vitest';
+import type { ToCDNOptions, FromCDNOptions } from '../types';
 import { toCDN } from './serializer';
 import { parseCDN } from './parser';
 import { CborUint } from '../ast/CborUint';
@@ -168,6 +169,37 @@ describe('CborIndefiniteByteString.toCDN()', () => {
   });
 });
 
+describe('CborIndefiniteByteString.toCDN() — modernStreamSyntax: true', () => {
+  const node = new CborIndefiniteByteString([
+    new CborByteString(new Uint8Array([0x01, 0x02])),
+    new CborByteString(new Uint8Array([0x03, 0x04, 0x05])),
+  ]);
+
+  test('renders as ilbs<<...>> instead of (_ ...)', () => {
+    expect(toCDN(node, { modernStreamSyntax: true })).toBe(
+      "ilbs<<h'0102',h'030405'>>"
+    );
+  });
+
+  test('collapses to one line even with indent (loose app-sequence rule)', () => {
+    expect(toCDN(node, { modernStreamSyntax: true, indent: 2 })).toBe(
+      "ilbs<<h'0102', h'030405'>>"
+    );
+  });
+
+  test('empty chunks', () => {
+    expect(
+      toCDN(new CborIndefiniteByteString([]), { modernStreamSyntax: true })
+    ).toBe('ilbs<<>>');
+  });
+
+  test('falls back to (_ ...) when appPrefix is false', () => {
+    expect(toCDN(node, { modernStreamSyntax: true, appPrefix: false })).toBe(
+      "(_ h'0102',h'030405')"
+    );
+  });
+});
+
 // ─── Text strings ─────────────────────────────────────────────────────────────
 
 describe('CborTextString.toCDN()', () => {
@@ -219,6 +251,42 @@ describe('CborIndefiniteTextString.toCDN()', () => {
     expect(toCDN(node, { indent: 2 })).toBe(
       '[\n  (_ \n    "a",\n    "b"\n  )\n]'
     );
+  });
+});
+
+describe('CborIndefiniteTextString.toCDN() — modernStreamSyntax: true', () => {
+  const node = new CborIndefiniteTextString([
+    new CborTextString('strea'),
+    new CborTextString('ming'),
+  ]);
+
+  test('renders as ilts<<...>> instead of (_ ...)', () => {
+    expect(toCDN(node, { modernStreamSyntax: true })).toBe(
+      'ilts<<"strea","ming">>'
+    );
+  });
+
+  test('collapses to one line even with indent (loose app-sequence rule)', () => {
+    expect(toCDN(node, { modernStreamSyntax: true, indent: 2 })).toBe(
+      'ilts<<"strea", "ming">>'
+    );
+  });
+
+  test('empty chunks', () => {
+    expect(
+      toCDN(new CborIndefiniteTextString([]), { modernStreamSyntax: true })
+    ).toBe('ilts<<>>');
+  });
+
+  test('falls back to (_ ...) when appPrefix is false', () => {
+    expect(toCDN(node, { modernStreamSyntax: true, appPrefix: false })).toBe(
+      '(_ "strea","ming")'
+    );
+  });
+
+  test('round-trips through the parser', () => {
+    const rendered = toCDN(node, { modernStreamSyntax: true });
+    expect(parseCDN(rendered).toJS()).toBe('streaming');
   });
 });
 
@@ -399,6 +467,160 @@ describe('toCDN() — inlineLeafContainers', () => {
   });
 });
 
+describe('toCDN() — inlineLeafContainers with multi-word text/byte strings', () => {
+  const opts = { indent: 2, inlineLeafContainers: true };
+
+  test('single-word string entries stay single-line', () => {
+    const node = new CborArray([
+      new CborTextString('hello'),
+      new CborTextString('world'),
+    ]);
+    expect(toCDN(node, opts)).toBe('["hello", "world"]');
+  });
+
+  test('a multi-word string entry forces the array multi-line', () => {
+    const node = new CborArray([
+      new CborTextString('Hello, World!'),
+      new CborTextString('This is the CBOR library.'),
+    ]);
+    expect(toCDN(node, opts)).toBe(
+      '[\n  "Hello, World!",\n  "This is the CBOR library."\n]'
+    );
+  });
+
+  test('a multi-word map key or value forces the map multi-line', () => {
+    const keyNode = new CborMap([
+      [new CborTextString('two words'), new CborUint(1n)],
+    ]);
+    expect(toCDN(keyNode, opts)).toBe('{\n  "two words": 1\n}');
+
+    const valueNode = new CborMap([
+      [new CborTextString('a'), new CborTextString('two words')],
+    ]);
+    expect(toCDN(valueNode, opts)).toBe('{\n  "a": "two words"\n}');
+  });
+
+  test('a tag wrapping a multi-word string still disqualifies its parent', () => {
+    const node = new CborArray([
+      new CborTag(100n, new CborTextString('two words')),
+    ]);
+    expect(toCDN(node, opts)).toBe('[\n  100("two words")\n]');
+  });
+
+  test('an embedded CBOR entry with multi-word text still breaks despite the loose rule', () => {
+    const node = new CborEmbeddedCBOR([
+      new CborTextString('two words'),
+      new CborUint(1n),
+    ]);
+    expect(toCDN(node, opts)).toBe('<<\n  "two words",\n  1\n>>');
+  });
+
+  test('an indefinite-length text string chunk with multi-word text still breaks', () => {
+    const node = new CborIndefiniteTextString([
+      new CborTextString('two words'),
+      new CborTextString('b'),
+    ]);
+    expect(toCDN(node, opts)).toBe('(_ \n  "two words",\n  "b"\n)');
+  });
+
+  test('punctuation counts as a word boundary', () => {
+    // "well-known" splits into two word-like segments (letters separated by `-`).
+    const node = new CborArray([new CborTextString('well-known')]);
+    expect(toCDN(node, opts)).toBe('[\n  "well-known"\n]');
+  });
+
+  test('a decimal point between digits does not count as a word boundary', () => {
+    // Intl.Segmenter's UAX #29 word-break rules keep "3.14" as one numeric
+    // word (unlike a generic letters/digits regex, which would split on `.`).
+    const node = new CborArray([new CborTextString('3.14')]);
+    expect(toCDN(node, opts)).toBe('["3.14"]');
+  });
+
+  test('space-less scripts (e.g. Japanese) still split on their own word boundaries', () => {
+    // No ASCII whitespace/punctuation at all — Intl.Segmenter's dictionary
+    // segmentation for Japanese still finds four word-like segments.
+    const node = new CborArray([new CborTextString('これはテストです')]);
+    expect(toCDN(node, opts)).toBe('[\n  "これはテストです"\n]');
+  });
+
+  test('no effect without inlineLeafContainers', () => {
+    const node = new CborArray([
+      new CborTextString('Hello, World!'),
+      new CborTextString('This is the CBOR library.'),
+    ]);
+    expect(toCDN(node, { indent: 2 })).toBe(
+      '[\n  "Hello, World!",\n  "This is the CBOR library."\n]'
+    );
+  });
+
+  const encoder = new TextEncoder();
+
+  test('single-word sqstr byte string entries stay single-line', () => {
+    const node = new CborArray([
+      new CborByteString(encoder.encode('hello')),
+      new CborByteString(encoder.encode('world')),
+    ]);
+    expect(toCDN(node, opts)).toBe("['hello', 'world']");
+  });
+
+  test('a multi-word sqstr byte string entry forces the array multi-line', () => {
+    const node = new CborArray([
+      new CborByteString(encoder.encode('This is a test.')),
+    ]);
+    expect(toCDN(node, opts)).toBe("[\n  'This is a test.'\n]");
+  });
+
+  test('a prefixed byte-string literal always counts as multi-word, even a short one', () => {
+    // Bytes 0x00 0x01 aren't printable, so this renders as h'0001' rather
+    // than a bare sqstr — a hex dump has no natural word boundaries, so it
+    // always disqualifies inlining regardless of length.
+    const node = new CborArray([new CborByteString(new Uint8Array([0, 1]))]);
+    expect(toCDN(node, opts)).toBe("[\n  h'0001'\n]");
+  });
+
+  test('the sqstr option changes which byte strings count as text', () => {
+    // Printable ASCII bytes would normally render as a bare sqstr (single
+    // word, stays inline) — but sqstr: 'none' forces hex rendering instead,
+    // which always counts as multi-word.
+    const node = new CborArray([new CborByteString(encoder.encode('hi'))]);
+    expect(toCDN(node, { ...opts, sqstr: 'none' })).toBe("[\n  h'6869'\n]");
+  });
+
+  test('a trivial CborByteString subclass with multi-word bytes still disqualifies', () => {
+    // A subclass that doesn't override _toCDN() at all renders exactly
+    // like the base class — the multi-word check must judge it by its
+    // actual content/rendering, not by whether it's a subclass at all.
+    class DerivedByteString extends CborByteString {}
+    const node = new CborArray([
+      new DerivedByteString(encoder.encode('two words')),
+    ]);
+    expect(toCDN(node, opts)).toBe("[\n  'two words'\n]");
+  });
+
+  test('a tag wrapping a prefixed byte-string literal still disqualifies its parent array', () => {
+    // The array is a strict frame, and CborTag forwards that rule straight
+    // through to its content — h'00' still counts as multi-word here, same
+    // as if the tag weren't there. Contrast with the loose-rule case in
+    // "CborEmbeddedCBOR.toCDN() — inlineLeafContainers (loose rule)" below,
+    // where the same tagged byte string stays inline instead.
+    const node = new CborArray([
+      new CborTag(100n, new CborByteString(new Uint8Array([0]))),
+    ]);
+    expect(toCDN(node, opts)).toBe("[\n  100(h'00')\n]");
+  });
+
+  test('an indefinite-length byte string chunk with a prefixed literal still disqualifies (strict rule)', () => {
+    // Indefinite-length string groups follow the same strict rule as
+    // CborArray/CborMap — unlike `<<...>>`, a prefixed byte-string literal
+    // here always disqualifies inlining, same as it would in `[h'...']`.
+    const node = new CborIndefiniteByteString([
+      new CborByteString(new Uint8Array([0, 1])),
+      new CborByteString(new Uint8Array([2, 3])),
+    ]);
+    expect(toCDN(node, opts)).toBe("(_ \n  h'0001',\n  h'0203'\n)");
+  });
+});
+
 describe('CborEmbeddedCBOR.toCDN() — inlineLeafContainers (loose rule)', () => {
   const opts = { indent: 2, inlineLeafContainers: true };
 
@@ -437,6 +659,73 @@ describe('CborEmbeddedCBOR.toCDN() — inlineLeafContainers (loose rule)', () =>
     expect(toCDN(node, { ...opts, splitNewline: true })).toBe(
       '<<\n  "a\\n" +\n    "b"\n>>'
     );
+  });
+
+  test('a prefixed byte-string literal entry stays inline under the loose rule', () => {
+    // Unlike a multi-word text string (which always disqualifies inlining,
+    // loose rule or not — see "an embedded CBOR entry with multi-word text
+    // still breaks despite the loose rule" above), a prefixed byte-string
+    // literal only always counts as multi-word under the strict rule
+    // (CborArray/CborMap). The loose rule treats it as an ordinary leaf
+    // instead: h'0000' has no nested array/map, so it stays inline.
+    const node = new CborEmbeddedCBOR([
+      new CborByteString(new Uint8Array([0, 0])),
+    ]);
+    expect(toCDN(node, opts)).toBe("<<h'0000'>>");
+  });
+
+  test('a tag wrapping a prefixed byte-string literal is transparent to the loose rule', () => {
+    // CborTag just forwards the strict/loose rule it was given to its
+    // content — it doesn't decide independently — so the byte string here
+    // is still governed by CborEmbeddedCBOR's loose rule and stays inline,
+    // same as if the tag weren't there.
+    const node = new CborEmbeddedCBOR([
+      new CborTag(100n, new CborByteString(new Uint8Array([0, 0]))),
+    ]);
+    expect(toCDN(node, opts)).toBe("<<100(h'0000')>>");
+  });
+});
+
+describe('CborEmbeddedCBOR.toCDN() — <<...>> always collapses regardless of inlineLeafContainers', () => {
+  // <<...>>'s one-line collapse isn't gated behind inlineLeafContainers at
+  // all: there's no structural reason to ever spread a flat encoded-item
+  // sequence one item per line just because indent is set and the option
+  // is off. Indefinite-length string groups do NOT get this treatment —
+  // see the contrast test below — they follow the same option-gated
+  // strict rule as CborArray/CborMap instead.
+  const opts = { indent: 2 };
+
+  test('<<...>> collapses without inlineLeafContainers', () => {
+    const node = new CborEmbeddedCBOR([
+      new CborByteString(new Uint8Array([0, 0])),
+    ]);
+    expect(toCDN(node, opts)).toBe("<<h'0000'>>");
+  });
+
+  test('a multi-word text entry still forces <<...>> multi-line without inlineLeafContainers', () => {
+    const node = new CborEmbeddedCBOR([new CborTextString('two words')]);
+    expect(toCDN(node, opts)).toBe('<<\n  "two words"\n>>');
+  });
+
+  test('contrast: an indefinite-length string group does NOT collapse without inlineLeafContainers', () => {
+    // Unlike <<...>>, this follows CborArray/CborMap's option-gated rule —
+    // spreads one entry per line by default, same as `[_ "a", "b"]` would.
+    const textNode = new CborIndefiniteTextString([
+      new CborTextString('a'),
+      new CborTextString('b'),
+    ]);
+    expect(toCDN(textNode, opts)).toBe('(_ \n  "a",\n  "b"\n)');
+
+    const byteNode = new CborIndefiniteByteString([
+      new CborByteString(new Uint8Array([0, 1])),
+      new CborByteString(new Uint8Array([2, 3])),
+    ]);
+    expect(toCDN(byteNode, opts)).toBe("(_ \n  h'0001',\n  h'0203'\n)");
+  });
+
+  test('a strict array/map is unaffected — still one entry per line without inlineLeafContainers', () => {
+    const node = new CborArray([new CborUint(1n), new CborUint(2n)]);
+    expect(toCDN(node, opts)).toBe('[\n  1,\n  2\n]');
   });
 });
 
@@ -504,6 +793,48 @@ describe('CborMap.toCDN() — multi-line', () => {
   });
 });
 
+describe('CborMap.toCDN() — inlineLeafContainers renders each key/value exactly once', () => {
+  // entryIsMultiWordText's isPrefixedLiteralText check needs each side's
+  // own rendering separately (the combined "key: value" string can't be
+  // split unambiguously — see the comment in CborMap.ts), and renderEntry
+  // needs the exact same strings right after. A per-index cache shares them
+  // so a custom key/value's _toCDN() is never called twice for the same
+  // render, matching serializeContainer's own single-render invariant.
+  const opts = { indent: 2, inlineLeafContainers: true };
+
+  function countingTextString(value: string, counts: number[], slot: number) {
+    class Counting extends CborTextString {
+      override _toCDN(o: ToCDNOptions | undefined, d: number): string {
+        counts[slot]++;
+        return super._toCDN(o, d);
+      }
+    }
+    return new Counting(value);
+  }
+
+  test('a single-word entry that stays inline is rendered once per side', () => {
+    const counts = [0, 0];
+    const node = new CborMap([
+      [countingTextString('a', counts, 0), countingTextString('b', counts, 1)],
+    ]);
+    expect(toCDN(node, opts)).toBe('{"a": "b"}');
+    expect(counts).toEqual([1, 1]);
+  });
+
+  test('entries are still rendered once per side when the probe breaks partway and falls back to multi-line', () => {
+    const counts = [0, 0, 0, 0];
+    const node = new CborMap([
+      [countingTextString('a', counts, 0), countingTextString('b', counts, 1)],
+      [
+        countingTextString('c', counts, 2),
+        countingTextString('two words', counts, 3),
+      ],
+    ]);
+    expect(toCDN(node, opts)).toBe('{\n  "a": "b",\n  "c": "two words"\n}');
+    expect(counts).toEqual([1, 1, 1, 1]);
+  });
+});
+
 describe('CborMap.toCDN() — commas option', () => {
   const node = () =>
     new CborMap([
@@ -551,6 +882,62 @@ describe('CborTag.toCDN()', () => {
       new CborByteString(new Uint8Array([1, 2, 3, 4]))
     );
     expect(toCDN(node)).toBe("23(h'01020304')");
+  });
+});
+
+describe('CborTag.toCDN() — inlineLeafContainers _isMultiWordText fallback', () => {
+  // _isMultiWordText's prefixed-literal fallback (added to detect e.g.
+  // 100(dt'...') and, with preserveByteString, 100(h'68')) renders
+  // `this.content` to check its shape, and the real _toCDN() call right
+  // after (via the array's renderEntry) renders it again — a deliberate,
+  // uncached double-render (see CborTag.ts). An earlier version cached
+  // this on the instance, which was wrong two ways, both regression-tested
+  // below: the cache ignored depth (breaking preserveConcatenation's
+  // depth-dependent continuation-line indentation) and never expired
+  // (returning a stale render after the same `options` object was mutated
+  // and reused for a second `toCDN()` call).
+  const opts = { indent: 2, inlineLeafContainers: true };
+
+  test('a tagged entry that stays inline renders its content more than once (accepted cost)', () => {
+    let renderCount = 0;
+    class Counting extends CborTextString {
+      override _toCDN(o: ToCDNOptions | undefined, d: number): string {
+        renderCount++;
+        return super._toCDN(o, d);
+      }
+    }
+    const node = new CborArray([new CborTag(100n, new Counting('word'))]);
+    expect(toCDN(node, opts)).toBe('[100("word")]');
+    expect(renderCount).toBe(2);
+  });
+
+  test('a tagged entry with no options passed at all does not throw', () => {
+    // Regression guard: a naive cache-hit check of
+    // `cache?.options === options` is trivially true when both are
+    // `undefined`, even on a cache miss — this only matters if caching is
+    // reintroduced; asserted here so that regression can't creep back in
+    // silently.
+    const node = new CborArray([new CborTag(100n, new CborTextString('word'))]);
+    expect(node.toCDN()).toBe('[100("word")]');
+  });
+
+  test("preserveConcatenation indents a wrapped entry's continuation line by its actual depth", () => {
+    // Regression guard: a render cached at a fixed depth (e.g. 0) for the
+    // _isMultiWordText probe must not leak into the real, depth-correct
+    // render — preserveConcatenation's continuation-line indentation
+    // genuinely depends on depth even for leaf (non-container) content.
+    const node = parseCDN('[100("a" + "b")]');
+    expect(toCDN(node, { ...opts, preserveConcatenation: true })).toBe(
+      '[\n  100("a" +\n    "b")\n]'
+    );
+  });
+
+  test('mutating the same options object between two toCDN() calls is not masked by a stale cache', () => {
+    const node = parseCDN('100("a" + "b")');
+    const mutableOpts: ToCDNOptions = { indent: 2, inlineLeafContainers: true };
+    expect(toCDN(node, mutableOpts)).toBe('100("ab")');
+    mutableOpts.preserveConcatenation = true;
+    expect(toCDN(node, mutableOpts)).toBe('100("a" +\n  "b")');
   });
 });
 
@@ -846,6 +1233,26 @@ function fmt(
   });
 }
 
+/** Like `fmt`, but drives the split `comments` option instead of the
+ *  deprecated `preserveComments: 'c-style'/'cdn-style'` shorthand. */
+function fmtFormat(
+  src: string,
+  comments: 'strip' | 'c-style' | 'cdn-style',
+  indent = 2
+): string {
+  return parseCDN(src, { preserveComments: true }).toCDN({
+    comments,
+    indent,
+  });
+}
+
+/** Mirrors `CBOR.format()`: parses and re-serializes with the same shared
+ *  options object, the way a caller relying on `comments` alone (with
+ *  no explicit `preserveComments`) to trigger capture-on-parse would. */
+function format(src: string, options: FromCDNOptions & ToCDNOptions): string {
+  return parseCDN(src, options).toCDN(options);
+}
+
 describe("preserveComments: 'c-style'", () => {
   test('# line → //', () =>
     expect(fmt('[\n  # comment\n  1\n]', 'c-style')).toBe(
@@ -912,6 +1319,87 @@ describe('preserveComments: true (preserve markers as-is)', () => {
   test('mixed markers are kept unchanged', () => {
     const src = '[\n  # hash\n  1,\n  2 // line\n]';
     expect(fmt(src, true)).toBe(src);
+  });
+});
+
+describe('comments (split from preserveComments)', () => {
+  test("'c-style' matches the deprecated preserveComments: 'c-style' shorthand", () => {
+    const src = '[\n  # comment\n  1\n]';
+    expect(fmtFormat(src, 'c-style')).toBe(fmt(src, 'c-style'));
+  });
+
+  test("'cdn-style' matches the deprecated preserveComments: 'cdn-style' shorthand", () => {
+    const src = '[\n  // comment\n  1\n]';
+    expect(fmtFormat(src, 'cdn-style')).toBe(fmt(src, 'cdn-style'));
+  });
+
+  test("'strip' explicitly removes comments, same as preserveComments: false", () => {
+    const src = '[\n  # comment\n  1\n]';
+    expect(fmtFormat(src, 'strip')).toBe(fmt(src, false));
+    expect(fmtFormat(src, 'strip')).toBe('[\n  1\n]');
+  });
+
+  test('comments alone (preserveComments left unset) still normalizes', () => {
+    const src = '{ "a": 1 } # trailing';
+    expect(
+      parseCDN(src, { preserveComments: true }).toCDN({
+        comments: 'c-style',
+        indent: 2,
+      })
+    ).toBe('{\n  "a": 1\n} // trailing');
+  });
+
+  test('preserveComments: true wins over comments when both are set', () => {
+    const src = '{ "a": 1 } # trailing';
+    const parsed = parseCDN(src, { preserveComments: true });
+    expect(
+      parsed.toCDN({
+        preserveComments: true,
+        comments: 'strip',
+        indent: 2,
+      })
+    ).toBe('{\n  "a": 1\n} # trailing');
+  });
+
+  test('format() shared options: comments alone captures on the parse side too', () => {
+    const src = '{ "a": 1 } # trailing';
+    expect(format(src, { comments: 'c-style', indent: 2 })).toBe(
+      '{\n  "a": 1\n} // trailing'
+    );
+  });
+
+  test('neither preserveComments nor comments set: comments are dropped', () => {
+    const src = '{ "a": 1 } # trailing';
+    expect(format(src, { indent: 2 })).toBe('{\n  "a": 1\n}');
+  });
+
+  describe('preserveAll interaction', () => {
+    test('preserveAll alone keeps comments verbatim', () => {
+      const src = '{\n  # hash\n  "a": 1 // line\n}';
+      expect(format(src, { preserveAll: true, indent: 2 })).toBe(src);
+    });
+
+    test('preserveAll + explicit comments normalizes instead of verbatim', () => {
+      const src = '{\n  # hash\n  "a": 1\n}';
+      expect(
+        format(src, {
+          preserveAll: true,
+          comments: 'c-style',
+          indent: 2,
+        })
+      ).toBe('{\n  // hash\n  "a": 1\n}');
+    });
+
+    test('preserveAll + explicit preserveComments: false still strips', () => {
+      const src = '{\n  # hash\n  "a": 1\n}';
+      expect(
+        format(src, {
+          preserveAll: true,
+          preserveComments: false,
+          indent: 2,
+        })
+      ).toBe('{\n  "a": 1\n}');
+    });
   });
 });
 

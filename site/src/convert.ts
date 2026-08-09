@@ -6,7 +6,12 @@
  * §2) are supported.  CBOR Sequence output (RFC 8742) is produced automatically
  * when the input contains more than one item.
  */
-import { CBOR, type ParseWarning, type ToCDNOptions } from '@cbortech/cbor';
+import {
+  CBOR,
+  type FromCDNOptions,
+  type ParseWarning,
+  type ToCDNOptions,
+} from '@cbortech/cbor';
 import type { CborItem } from '@cbortech/cbor/ast';
 import { buildRangeMap, type NodeRange } from './mapping/lockstep';
 import { buildRows, type HexRow } from './hexview/build-rows';
@@ -42,6 +47,18 @@ export interface ConversionErr {
 }
 
 export type Conversion = ConversionOk | ConversionEmpty | ConversionErr;
+
+/**
+ * Append every element of `source` onto `target` in place.
+ *
+ * Not `target.push(...source)`: spreading a large array as call arguments
+ * can exceed the engine's argument-count limit. `buildRows`/`buildRangeMap`
+ * return one entry per byte/node of a whole document, so a large pasted
+ * CBOR document can make this happen.
+ */
+function pushAll<T>(target: T[], source: readonly T[]): void {
+  for (const item of source) target.push(item);
+}
 
 export function convertCdn(text: string): Conversion {
   if (text.trim() === '') return { ok: true, empty: true };
@@ -91,8 +108,8 @@ export function convertCdn(text: string): Conversion {
     const ranges: NodeRange[] = [];
     const pairCount = Math.min(cdnAsts.length, binAsts.length);
     for (let i = 0; i < pairCount; i++) {
-      rows.push(...buildRows(binAsts[i]!, bytes));
-      ranges.push(...buildRangeMap(cdnAsts[i]!, binAsts[i]!));
+      pushAll(rows, buildRows(binAsts[i]!, bytes));
+      pushAll(ranges, buildRangeMap(cdnAsts[i]!, binAsts[i]!));
     }
 
     return {
@@ -111,6 +128,47 @@ export function convertCdn(text: string): Conversion {
   } catch (error) {
     return { ok: false, error };
   }
+}
+
+const BLANK_LINE_RE = /\r?\n[ \t]*\r?\n/;
+
+/**
+ * Whether `indent` turns on pretty-printing, mirroring the library's own
+ * `resolveIndent()` (unexported): `undefined`, `0`, and `''` all mean
+ * compact/single-line output.
+ */
+function hasPrettyIndent(indent: ToCDNOptions['indent']): boolean {
+  if (indent === undefined) return false;
+  return (typeof indent === 'number' ? ' '.repeat(indent) : indent) !== '';
+}
+
+/**
+ * Reformat CDN text (a single item or a CBOR Sequence per draft-ietf-cbor-edn-literals
+ * §2). Each item is re-serialized independently; when `preserveBlankLines` is
+ * set *and* pretty-printing is active, a blank line between two items in the
+ * source is kept in the output (plain `.join('\n')` would otherwise collapse
+ * it, since blank lines between sequence items are outside any single item's
+ * own AST). In compact mode `preserveBlankLines` has no effect, matching how
+ * the option behaves for blank lines inside a single item's containers.
+ */
+export function formatCdnText(
+  text: string,
+  options: FromCDNOptions & ToCDNOptions
+): string {
+  const preserveBlankLines =
+    !!options.preserveBlankLines && hasPrettyIndent(options.indent);
+  const items = [...CBOR.fromCDNSeq(text, options)];
+  let cdn = '';
+  let prevEnd: number | null = null;
+  for (const item of items) {
+    if (prevEnd !== null) {
+      const between = text.slice(prevEnd, item.start!);
+      cdn += preserveBlankLines && BLANK_LINE_RE.test(between) ? '\n\n' : '\n';
+    }
+    cdn += item.toCDN(options);
+    prevEnd = item.end!;
+  }
+  return cdn;
 }
 
 /**

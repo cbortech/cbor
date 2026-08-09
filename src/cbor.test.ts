@@ -1,6 +1,8 @@
 import { describe, test, expect, vi } from 'vitest';
 import { CBOR } from './cbor';
 import { b32, h32 } from './extensions/b32';
+import { same } from './extensions/same';
+import { t1 } from './extensions/concat';
 import { CborUint } from './ast/CborUint';
 import { CborNint } from './ast/CborNint';
 import { CborTextString } from './ast/CborTextString';
@@ -1078,6 +1080,49 @@ describe('CBOR.format()', () => {
     );
   });
 
+  test('modernConcat: true renders preserved concatenation as t1<<>>/b1<<>>', () => {
+    expect(
+      CBOR.format('"a" + "b"', {
+        indent: 2,
+        preserveConcatenation: true,
+        modernConcat: true,
+      })
+    ).toBe('t1<<"a", "b">>');
+    expect(
+      CBOR.format("h'01' + h'02'", {
+        indent: 2,
+        preserveConcatenation: true,
+        modernConcat: true,
+      })
+    ).toBe("b1<<h'01', h'02'>>");
+  });
+
+  test('modernConcat: true falls back to + when appPrefix is false', () => {
+    expect(
+      CBOR.format('"a" + "b"', {
+        indent: 2,
+        preserveConcatenation: true,
+        modernConcat: true,
+        appPrefix: false,
+      })
+    ).toBe('"a" +\n  "b"');
+  });
+
+  test('modernConcat: true has no effect without preserveConcatenation', () => {
+    expect(CBOR.format('"a" + "b"', { indent: 2, modernConcat: true })).toBe(
+      '"ab"'
+    );
+  });
+
+  test('modernConcat: true round-trips through the parser', () => {
+    const rendered = CBOR.format('"a" + "b"', {
+      indent: 2,
+      preserveConcatenation: true,
+      modernConcat: true,
+    });
+    expect(CBOR.fromCDN(rendered).toJS()).toBe('ab');
+  });
+
   test('preserves a comment between concatenated text string parts', () => {
     expect(
       CBOR.format('"a" + /* c */ "b"', {
@@ -1298,6 +1343,934 @@ describe('CBOR.format()', () => {
         splitNewline: true,
       })
     ).toBe('{\n  "edn": "[\\n" +\n      "1," +\n      "2\\n" +\n    "]"\n}');
+  });
+
+  test('splitCdn respects inlineLeafContainers for the embedded CDN structure', () => {
+    // Same rule as the real AST: a leaf array/map stays on one line, but a
+    // container whose entries are themselves arrays/maps still breaks.
+    expect(
+      CBOR.format('"[1, 2, 3]"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[1, 2, 3]"');
+    expect(CBOR.format('"[1, 2, 3]"', { indent: 2, splitCdn: true })).toBe(
+      '"[" +\n    "1, " +\n    "2, " +\n    "3" +\n  "]"'
+    );
+    expect(
+      CBOR.format('"[[1, 2], [3, 4]]"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[" +\n    "[1, 2], " +\n    "[3, 4]" +\n  "]"');
+    expect(
+      CBOR.format('"<<1, 2>>"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"<<1, 2>>"');
+  });
+
+  test('splitCdn + inlineLeafContainers: a multi-word string entry still forces a break', () => {
+    // Same rule as the real AST's entryIsMultiWordText: a single-word
+    // string entry stays inline, but two or more words disqualifies the
+    // enclosing frame from collapsing, even though it has no nested
+    // array/map of its own.
+    expect(
+      CBOR.format('"[\\"hello\\", \\"world\\"]"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[\\"hello\\", \\"world\\"]"');
+    expect(
+      CBOR.format('"[\\"Hello, World!\\", \\"This is the CBOR library.\\"]"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe(
+      '"[" +\n    "\\"Hello, World!\\", " +\n    "\\"This is the CBOR library.\\"" +\n  "]"'
+    );
+    // A multi-word object key/value disqualifies the object too.
+    expect(
+      CBOR.format('"{\\"two words\\": 1}"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"{" +\n    "\\"two words\\": 1" +\n  "}"');
+    // A tag wrapping a multi-word string still disqualifies its parent —
+    // the tag's own parens stay tight, but the array around it breaks.
+    expect(
+      CBOR.format('"[100(\\"two words\\")]"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[" +\n    "100(\\"two words\\")" +\n  "]"');
+  });
+
+  test('splitCdn + inlineLeafContainers: a `+`-concatenation chain inside the embedded CDN is checked by its combined content', () => {
+    // Mirrors the real-AST test above (`ilts<<"one " + "word">>`): the
+    // token-scan mirror used for splitCdn checked each TSTR in a
+    // concatenation chain individually too, missing a case like this where
+    // "one " and "word" are each one word alone but two words combined.
+    expect(
+      CBOR.format('"[\\"one \\" + \\"word\\"]"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[" +\n    "\\"one \\" + \\"word\\"" +\n  "]"');
+    // Combines into one word, stays inline.
+    expect(
+      CBOR.format('"[\\"a\\" + \\"b\\"]"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[\\"a\\" + \\"b\\"]"');
+  });
+
+  test('inlineLeafContainers: any app-string extension literal counts as a prefixed literal', () => {
+    // Not just h'...'/b64'...' — any app-string extension's own rendering
+    // (ip'...', dt'...', ...) has no natural word boundary either, so it
+    // disqualifies a strict array/map from collapsing just the same,
+    // without ip.ts/dt.ts needing any inlineLeafContainers-specific code of
+    // their own (see isPrefixedLiteralText).
+    expect(
+      CBOR.format("[ip'192.0.2.42']", { indent: 2, inlineLeafContainers: true })
+    ).toBe("[\n  ip'192.0.2.42'\n]");
+    expect(
+      CBOR.format("[dt'1969-07-21T02:56:16Z']", {
+        indent: 2,
+        inlineLeafContainers: true,
+      })
+    ).toBe("[\n  dt'1969-07-21T02:56:16Z'\n]");
+    // The loose rule (<<...>>) still treats it as an ordinary leaf, same as
+    // a prefixed byte-string literal.
+    expect(
+      CBOR.format("<<dt'1969-07-21T02:56:16Z'>>", {
+        indent: 2,
+        inlineLeafContainers: true,
+      })
+    ).toBe("<<dt'1969-07-21T02:56:16Z'>>");
+    // A map value (not just an array entry, and not just the first/key
+    // position) is checked too.
+    expect(
+      CBOR.format('{"a": ip\'192.0.2.42\'}', {
+        indent: 2,
+        inlineLeafContainers: true,
+      })
+    ).toBe('{\n  "a": ip\'192.0.2.42\'\n}');
+    // The same rule applies inside a splitCdn-reflowed embedded CDN string.
+    expect(
+      CBOR.format('"[ip\'192.0.2.42\']"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[" +\n    "ip\'192.0.2.42\'" +\n  "]"');
+    expect(
+      CBOR.format('"<<dt\'1969-07-21T02:56:16Z\'>>"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"<<dt\'1969-07-21T02:56:16Z\'>>"');
+  });
+
+  test('inlineLeafContainers: a prefixed literal disqualifies even wrapped in an unrelated tag', () => {
+    // CborTag's own rendering ("100(dt'...')") no longer starts with a
+    // letter, so isPrefixedLiteralText alone can't see the prefix through
+    // the tag's digits/parens — CborTag._isMultiWordText instead tokenizes
+    // its own _toCDN() output (isMultiWordRenderedLiteral), peeling the
+    // generic tagNum(...) wrapping to see what's inside.
+    expect(
+      CBOR.format("[100(dt'1969-07-21T02:56:16Z')]", {
+        indent: 2,
+        inlineLeafContainers: true,
+      })
+    ).toBe("[\n  100(dt'1969-07-21T02:56:16Z')\n]");
+    // A byte string whose *preserved* source spelling is a prefixed literal
+    // even though its raw bytes would decode as printable, single-word
+    // sqstr text (0x68 = "h") — tokenizing the actual rendered output finds
+    // the real h'68' spelling directly, unaffected by what the bytes alone
+    // would have predicted.
+    const node = CBOR.fromCDN("[100(h'68')]");
+    expect(
+      node.toCDN({
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveByteString: true,
+      })
+    ).toBe("[\n  100(h'68')\n]");
+    // The loose rule (<<...>>) still exempts it, tag or not.
+    expect(
+      CBOR.format("<<100(dt'1969-07-21T02:56:16Z')>>", {
+        indent: 2,
+        inlineLeafContainers: true,
+      })
+    ).toBe("<<100(dt'1969-07-21T02:56:16Z')>>");
+  });
+
+  test('inlineLeafContainers: a preserved app-sequence spelling is judged by its actual rendering, not the resolved value', () => {
+    // ip's own extension declares preserveAppSeqSource: 'optional', so
+    // `ip<<'192.0.2.42'>>` never wraps in CborAppSeqResult at all — it sets
+    // appSeqSource directly on the resolved CborIpExt (a CborByteString
+    // subclass) and CborIpExt._toCDN() renders the preserved spelling
+    // verbatim when preserveAppPrefix is set. CborByteString's
+    // _isMultiWordText only checks whether the raw bytes would render as
+    // multi-word bare sqstr *text* — it makes no prediction at all about
+    // prefixed-literal shapes, so it can't be "wrong" about the (irrelevant)
+    // raw address bytes here; the actual output "ip<<'192.0.2.42'>>" simply
+    // isn't a shape any check disqualifies on (`<<` follows the prefix, not
+    // a quote).
+    expect(
+      CBOR.format("[ip<<'192.0.2.42'>>]", {
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveAppPrefix: true,
+      })
+    ).toBe("[ip<<'192.0.2.42'>>]");
+    // IP (uppercase, tagged) is a CborTag subclass (CborTaggedIpExt) that
+    // overrides _toCDN() to render "IP<<'...'>>" instead of generic
+    // tagNum(content) notation — CborTag._isMultiWordText tokenizes this
+    // node's *own* output rather than looking at its tag content (which
+    // would be the address bytes, irrelevantly shaped like h'...'), so it
+    // correctly sees the app-sequence shape and doesn't disqualify.
+    expect(
+      CBOR.format("[IP<<'192.0.2.42'>>]", {
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveAppPrefix: true,
+      })
+    ).toBe("[IP<<'192.0.2.42'>>]");
+    expect(
+      CBOR.format("[DT<<b64'MTk2OS0wNy0yMVQwMjo1NjoxNlo='>>]", {
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveAppPrefix: true,
+      })
+    ).toBe("[DT<<b64'MTk2OS0wNy0yMVQwMjo1NjoxNlo='>>]");
+    // ilts/ilbs's preserveAppSeqSource is `true`, so `ilts<<...>>`/
+    // `ilbs<<...>>` *do* wrap in CborAppSeqResult — but it tokenizes its
+    // own rendered output directly (isMultiWordRenderedLiteral), same as
+    // CborTag, rather than delegating to `this.inner._isMultiWordText()`.
+    // Peeling the app-sequence wrapper and checking each item under the
+    // loose rule (matching `<<...>>` itself) gets both directions right:
+    // a multi-word text item still always counts...
+    expect(
+      CBOR.format('[ilts<<"two words">>]', {
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveAppPrefix: true,
+      })
+    ).toBe('[\n  ilts<<"two words">>\n]');
+    // A single-word chunk stays inline, same as any other leaf.
+    expect(
+      CBOR.format('[ilts<<"word">>]', {
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveAppPrefix: true,
+      })
+    ).toBe('[ilts<<"word">>]');
+    // ...while a prefixed-literal (hex) item never counts under the loose
+    // rule, even one whose bytes happen to *decode* to printable multi-word
+    // text ("hello world") — delegating to `this.inner` (a
+    // CborIndefiniteByteString wrapping a CborByteString chunk) would get
+    // this backwards: the chunk's raw bytes decode to "hello world", so a
+    // semantic check on `this.inner` reports it as multi-word, but the
+    // actual rendering is the hex literal inside the preserved
+    // `ilbs<<...>>` spelling, never decoded text — h'00' alone doesn't
+    // expose this divergence, since 0x00 isn't valid UTF-8 either way.
+    expect(
+      CBOR.format("[ilbs<<h'00'>>]", {
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveAppPrefix: true,
+      })
+    ).toBe("[ilbs<<h'00'>>]");
+    expect(
+      CBOR.format("[ilbs<<h'68656c6c6f20776f726c64'>>]", {
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveAppPrefix: true,
+      })
+    ).toBe("[ilbs<<h'68656c6c6f20776f726c64'>>]");
+  });
+
+  test('inlineLeafContainers: a trailing encoding indicator on the inner literal is ignored, not mistaken for extra content', () => {
+    // encodingIndicators: 'always' adds an explicit _N/_i suffix to every
+    // value, including the tag's own content — so the tokenized range
+    // isMultiWordRenderedLiteral recurses into after peeling a tag's parens
+    // is "TSTR ENCODING_INDICATOR" (two tokens), not a bare TSTR. Without
+    // stripping a trailing ENCODING_INDICATOR before checking "is this a
+    // single literal", that would wrongly look like more-than-one-token
+    // content and never match any recognized shape.
+    expect(
+      CBOR.format('[100("two words")]', {
+        indent: 2,
+        inlineLeafContainers: true,
+        encodingIndicators: 'always',
+      })
+    ).toBe('[_i \n  100_0("two words"_i)\n]');
+    expect(
+      CBOR.format("[100(h'00')]", {
+        indent: 2,
+        inlineLeafContainers: true,
+        encodingIndicators: 'always',
+      })
+    ).toBe("[_i \n  100_0(h'00'_i)\n]");
+  });
+
+  test('inlineLeafContainers: app-sequence items may be separated by whitespace alone, not just a comma', () => {
+    // CDN allows app-sequence items to be separated by a comma, by
+    // whitespace alone, or both — splitTopLevelItems must find each item's
+    // own extent structurally (consumeOneItem), not just split at commas,
+    // or two whitespace-separated items collapse into one unrecognized,
+    // multi-token range that never gets checked at all.
+    expect(
+      CBOR.format('[ilts<<"two words" "x">>]', {
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveAppPrefix: true,
+      })
+    ).toBe('[\n  ilts<<"two words" "x">>\n]');
+    // Two single-word, whitespace-separated items stay inline.
+    expect(
+      CBOR.format('[ilts<<"a" "b">>]', {
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveAppPrefix: true,
+      })
+    ).toBe('[ilts<<"a" "b">>]');
+  });
+
+  test('inlineLeafContainers: a trailing encoding indicator on an app-sequence wrapper itself is stripped before wrapper detection', () => {
+    // `same<<"two words">>_i` is valid CDN — same<<...>> resolves to (and
+    // round-trips as) its inner item, here a plain TSTR, so it can carry
+    // its own encoding indicator after the closing `>>`. Stripping a
+    // trailing ENCODING_INDICATOR must happen *before* checking whether
+    // the range is an app-sequence (or tag) wrapper, not only before the
+    // single-literal check — otherwise the wrapper's own closing `>>`
+    // is no longer the last token in range, "spans the whole range" fails,
+    // and the wrapper is never peeled at all.
+    expect(
+      CBOR.format('[same<<"two words">>_i]', {
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveAppPrefix: true,
+        extensions: [same],
+      })
+    ).toBe('[\n  same<<"two words">>_i\n]');
+    expect(
+      CBOR.format('[same<<"word">>_i]', {
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveAppPrefix: true,
+        extensions: [same],
+      })
+    ).toBe('[same<<"word">>_i]');
+  });
+
+  test('inlineLeafContainers: a `+`-concatenation chain is one item, checked by its combined decoded content', () => {
+    // `"one " + "word"` decodes to a single 2-word text string, but
+    // consumeOneItem only used to consume the first TSTR, splitting the
+    // chain into three bogus top-level items (TSTR, PLUS, TSTR) — each
+    // checked (and found single-word, or not a literal at all) in
+    // isolation, so the disqualification was missed entirely. The chain
+    // must be consumed and decoded as one value.
+    expect(
+      CBOR.format('[ilts<<"one " + "word">>]', {
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveAppPrefix: true,
+      })
+    ).toBe('[\n  ilts<<"one " + "word">>\n]');
+    // Two parts that are each one word, but combine into one word, stay
+    // inline — the check is on the *merged* content, not per-part.
+    expect(
+      CBOR.format('[ilts<<"a" + "b">>]', {
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveAppPrefix: true,
+      })
+    ).toBe('[ilts<<"a" + "b">>]');
+    // A chain as one of several app-sequence items: the chain is still
+    // recognized as a single item (not split across the following comma),
+    // and its own multi-word combined content still disqualifies.
+    expect(
+      CBOR.format('[ilts<<"one " + "word", "x">>]', {
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveAppPrefix: true,
+      })
+    ).toBe('[\n  ilts<<"one " + "word", "x">>\n]');
+  });
+
+  test('inlineLeafContainers: an elision chain (`+ ...`) item is consumed but judged indeterminate, without aborting later items', () => {
+    // consumeOneItem's chain-continuation check only accepted
+    // STRINGISH_TYPES parts, so `"a" + ...` (an elision chain — CDN's own
+    // `+`-chain grammar accepts a trailing `...` for a deliberately omitted
+    // part, building a tag-888 value instead of a plain string) failed to
+    // find its item's own extent at all, returning null — which made
+    // splitTopLevelItems give up on the *entire* app-sequence, so the
+    // second item's own multi-word content was never even reached.
+    expect(
+      CBOR.format('<<t1<<"a" + ..., "two words">>>>', {
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveAppPrefix: true,
+        extensions: [t1],
+      })
+    ).toBe('<<\n  t1<<"a" + ..., "two words">>\n>>');
+  });
+
+  test('splitCdn: a byte-leading `+`-chain keeps its chain kind through a bare-sqstr continuation', () => {
+    // The chain-state tracking only recorded *whether* a chain was active,
+    // not *which kind* — so a byte-leading chain (`h'' + ...`) left no
+    // record of itself, and a following bare SQSTR continuation (which
+    // looks text-leading in isolation) wrongly started its own independent
+    // text-leading chain, checking its content for word count even though
+    // the whole chain — being byte-leading — should be exempt from that
+    // check entirely under the loose `<<...>>` rule (same as a lone
+    // `h'...'`).
+    expect(
+      CBOR.format("\" <<h'' + 'two words'>> \"".trim(), {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe("\" <<h'' + 'two words'>> \"");
+    // The same byte-leading chain under the strict rule (a plain array,
+    // not `<<...>>`) still disqualifies — unaffected by this fix, since
+    // that check fires unconditionally on the chain's first token.
+    expect(
+      CBOR.format("\"[h'' + 'two words']\"", {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[" +\n    "h\'\' + \'two words\'" +\n  "]"');
+    // A *text*-leading chain with a byte-literal continuation still merges
+    // and checks combined word count correctly (unaffected by the
+    // byte-leading fix above).
+    expect(
+      CBOR.format("\"<<'two ' + h'776f726473'>>\"", {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"<<" +\n    "\'two \' + h\'776f726473\'" +\n  ">>"');
+  });
+
+  test('inlineLeafContainers: an elision chain may also *start* with `...`, not just continue with it', () => {
+    // consumeOneItem's chain-continuation check (round 8) accepted ELLIPSIS
+    // only as the token *after* a `+` — but src/cdn/parser.ts's own
+    // `+`-chain grammar also lets a value *start* with ELLIPSIS
+    // (`... + "b"`, an unknown prefix concatenated with a known suffix).
+    // Previously, the leading `...` was treated as its own independent
+    // 1-token item, and the following `"two words"` was judged as a *new*,
+    // ordinary text item — reporting the visible suffix's own word count
+    // instead of "indeterminate," even though the true combined value
+    // (prefix + suffix) can't be known.
+    expect(
+      CBOR.format('<<t1<<... + "two words">>>>', {
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveAppPrefix: true,
+        extensions: [t1],
+      })
+    ).toBe('<<t1<<... + "two words">>>>');
+  });
+
+  test('splitCdn: an elision chain starting with `...` starts an indeterminate chain state, not a fresh text chain from what follows', () => {
+    // Same bug as above, in the collectCdnBreakpoints mirror: a leading
+    // ELLIPSIS didn't record any chain state at all, so the following
+    // `"two words"` looked like a fresh, ordinary text-leading chain start
+    // and got checked (and flagged) on its own.
+    expect(
+      CBOR.format('"<<... + \\"two words\\">>"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"<<... + \\"two words\\">>"');
+  });
+
+  test('splitCdn: a byte-shaped continuation of a text-leading chain is judged by the merged content, not disqualified on its own', () => {
+    // Found while verifying the elision-chain fix above: the byte-literal
+    // branch's "always strict, no natural word boundary" check fired
+    // unconditionally for *any* BYTES_HEX/etc token, even one that's really
+    // just a continuation of an already-merging text-leading chain — so
+    // `"a" + h'62'` (merges to "ab", one word) was wrongly disqualified
+    // under the strict rule despite serialize-utils.ts's isMultiWordTokenRange
+    // correctly reporting it as not multi-word. The unconditional check now
+    // only applies when this token actually fixes the chain's element type
+    // (byte-leading, or standalone) — not when it's a continuation of a
+    // text-leading merge, which is judged solely by the combined content.
+    expect(
+      CBOR.format('"[\\"a\\" + h\'62\']"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[\\"a\\" + h\'62\']"');
+    // The same fix also makes a leading-ellipsis chain with a byte
+    // continuation correctly indeterminate *by word count* under the
+    // strict rule too, matching serialize-utils.ts — but it still
+    // disqualifies here, for the unrelated "elision chain is secretly a
+    // nested container" reason a later round adds (see the elision-chain
+    // container test below), so this still ends up multi-line overall.
+    expect(
+      CBOR.format('"[... + h\'00\']"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[" +\n    "... + h\'00\'" +\n  "]"');
+    // A pure byte-leading chain (no text-leading merge involved) still
+    // disqualifies under strict — unaffected by this fix.
+    expect(
+      CBOR.format("\"[h'' + 'two words']\"", {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[" +\n    "h\'\' + \'two words\'" +\n  "]"');
+  });
+
+  test("inlineLeafContainers: an elision chain's continuation may be any value shape, not just a string/byte literal", () => {
+    // consumeOneItem's ELLIPSIS-start handling (added in the previous round)
+    // still used the string/byte-literal-only CHAIN_ATOM_TYPES rule for
+    // each continuation after `+` — but src/cdn/parser.ts's own grammar
+    // reads an elision chain's continuations with the *general* value
+    // parser (parseValue()), so any value shape is valid there: a tag, a
+    // container, an indefinite-length string group, an app-sequence, even
+    // a nested ellipsis chain. `... + (_ "a")` (an indefinite-length text
+    // string group as the continuation) previously made consumeOneItem
+    // return null (LPAREN isn't in CHAIN_ATOM_TYPES), which made
+    // splitTopLevelItems give up on the *entire* app-sequence item list —
+    // so the second, clearly multi-word item was never reached.
+    expect(
+      CBOR.format('<<t1<<... + (_ "a"), "two words">>>>', {
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveAppPrefix: true,
+        extensions: [t1],
+      })
+    ).toBe('<<\n  t1<<... + (_ "a"), "two words">>\n>>');
+    // A plain string-leading chain keeps the restricted rule as-is —
+    // unaffected by this fix (only an ELLIPSIS-led chain gets the general
+    // value-shape continuation rule).
+    expect(
+      CBOR.format('[ilts<<"one " + "word">>]', {
+        indent: 2,
+        inlineLeafContainers: true,
+        preserveAppPrefix: true,
+      })
+    ).toBe('[\n  ilts<<"one " + "word">>\n]');
+  });
+
+  test("splitCdn: an elision chain's continuation may be any value shape (collectCdnBreakpoints already handles this via its bracket-frame stack)", () => {
+    // Unlike serialize-utils.ts's flat, index-based consumeOneItem (which
+    // needed an explicit recursive fix above), collectCdnBreakpoints scans
+    // token-by-token with its own bracket-frame stack, so a nested value
+    // like `(_ "a")` is already handled as its own independent
+    // sub-structure regardless of chain state — no code change was needed
+    // here, but this locks in that it stays correct.
+    expect(
+      CBOR.format('"t1<<... + (_ \\"a\\"), \\"two words\\">>"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe(
+      '"t1<<" +\n    "... + (_ \\"a\\"), " +\n    "\\"two words\\"" +\n  ">>"'
+    );
+  });
+
+  test('splitCdn: an elision chain is a synthetic nested container, disqualifying a strict array/map regardless of word count', () => {
+    // `"a" + ...` resolves, in the real AST, to a CborEllipsis wrapping a
+    // CborArray of fragments (src/cdn/parser.ts's concatenate()) — a
+    // *container*-shaped node per CborArray._containsCdnContainer (always
+    // true) and CborTag._containsCdnContainer (delegates to its content) —
+    // even though its own written source has no literal `[`/`{` at all.
+    // collectCdnBreakpoints only tracked the chain's *word count*
+    // (correctly indeterminate), never this structural fact, so
+    // `["a" + ...]` disqualified via the real AST's `_containsCdnContainer`
+    // check but stayed on one line via splitCdn — the two disagreed.
+    const options = { indent: 2, inlineLeafContainers: true };
+    expect(CBOR.format('["a" + ...]', options)).toBe('[\n  "a" + ...\n]');
+    expect(
+      CBOR.format('"[\\"a\\" + ...]"', { ...options, splitCdn: true })
+    ).toBe('"[" +\n    "\\"a\\" + ..." +\n  "]"');
+    // A truly standalone bare `...` (no `+` at all) is *not* a synthetic
+    // container — it resolves to CborEllipsis(CborSimple.NULL), no array —
+    // so it can still inline.
+    expect(CBOR.format('[...]', options)).toBe('[...]');
+    expect(CBOR.format('"[...]"', { ...options, splitCdn: true })).toBe(
+      '"[...]"'
+    );
+    // The loose <<...>> rule still ignores this flag entirely, same as it
+    // already ignores a literal nested `[...]`/`{...}` — unaffected.
+    expect(
+      CBOR.format('<<t1<<... + "two words">>>>', {
+        ...options,
+        preserveAppPrefix: true,
+        extensions: [t1],
+      })
+    ).toBe('<<t1<<... + "two words">>>>');
+  });
+
+  test("splitCdn: an ellipsis-led chain's poisoned state survives a bracketed continuation and resumes if a further `+` follows", () => {
+    // `... + (_ "a") + "two words"` is one continuous elision chain — the
+    // bracketed `(_ "a")` is just one continuation value among several, per
+    // consumeOneItem's recursive handling in serialize-utils.ts. But
+    // collectCdnBreakpoints's chainCanContinueHere didn't treat a bracket
+    // opener as a valid way to keep the chain going, so it finalized right
+    // before `(_ "a")` — losing the poisoned (indeterminate) state — and
+    // then `+ "two words"` afterward looked like a brand-new, unpoisoned
+    // chain, whose own multi-word content wrongly forced a break. Under a
+    // strict parent this was masked by the round-12 synthetic-container
+    // check (which disqualifies regardless), but a loose `<<...>>` — which
+    // ignores that flag — exposed the disagreement directly.
+    const options = { indent: 2, inlineLeafContainers: true };
+    expect(CBOR.format('<<... + (_ "a") + "two words">>', options)).toBe(
+      '<<... + (_ "a") + "two words">>'
+    );
+    expect(
+      CBOR.format('"<<... + (_ \\"a\\") + \\"two words\\">>"', {
+        ...options,
+        splitCdn: true,
+      })
+    ).toBe('"<<... + (_ \\"a\\") + \\"two words\\">>"');
+    // Independent checks still fire correctly on tokens *inside* the
+    // suspended bracket — a prefixed byte literal there still disqualifies
+    // its own strict frame (an indefinite-length group has no literal
+    // brackets of its own, so this only works if the byte-literal's
+    // unconditional check still ran despite the outer suspension).
+    expect(
+      CBOR.format('"[... + (_ h\'00\')]"', { ...options, splitCdn: true })
+    ).toBe('"[" +\n    "... + (_ " +\n      "h\'00\'" +\n    ")" +\n  "]"');
+  });
+
+  test("splitCdn: an ellipsis-led chain's continuation may be a bare atom or a tag, not just a bracketed value", () => {
+    // Round 13 only suspended chain tracking for OPEN_TOKENS (bracketed)
+    // continuations — but parseValue() (what src/cdn/parser.ts actually
+    // uses to parse an ellipsis-led chain's continuations) also accepts a
+    // bare atom (a number, e.g.) or a tag (`INTEGER [EI] LPAREN ... RPAREN`
+    // — which *starts* with an INTEGER token, not a bracket opener at all).
+    // Neither was suspended, so the chain finalized (losing its
+    // indeterminate state) right before the atom/tag, and the following
+    // `+ "two words"` looked like a fresh, unpoisoned chain whose own
+    // multi-word content wrongly forced a break.
+    const options = { indent: 2, inlineLeafContainers: true };
+    // Bare atom (integer) continuation.
+    expect(CBOR.format('<<... + 1 + "two words">>', options)).toBe(
+      '<<... + 1 + "two words">>'
+    );
+    expect(
+      CBOR.format('"<<... + 1 + \\"two words\\">>"', {
+        ...options,
+        splitCdn: true,
+      })
+    ).toBe('"<<... + 1 + \\"two words\\">>"');
+    // Tag continuation — distinguished from a bare integer only by the
+    // token *after* it (`LPAREN` vs. anything else).
+    expect(CBOR.format('<<... + 100("a") + "two words">>', options)).toBe(
+      '<<... + 100("a") + "two words">>'
+    );
+    expect(
+      CBOR.format('"<<... + 100(\\"a\\") + \\"two words\\">>"', {
+        ...options,
+        splitCdn: true,
+      })
+    ).toBe('"<<... + 100(\\"a\\") + \\"two words\\">>"');
+    // A chain ending right after a bare atom/tag, with no further `+`,
+    // still correctly finalizes (rather than getting stuck "awaiting").
+    expect(CBOR.format('<<... + 1>>', options)).toBe('<<... + 1>>');
+    expect(CBOR.format('<<... + 100("a")>>', options)).toBe(
+      '<<... + 100("a")>>'
+    );
+  });
+
+  test("splitCdn: a bracketed continuation's own content still gets its own, ordinary multi-word tracking", () => {
+    // Rounds 13/14 suspended chain tracking entirely while inside a
+    // bracketed/tag continuation of an ellipsis-led chain — correctly
+    // freezing the *outer* chain, but as a side effect also skipping the
+    // multi-word tracking that continuation's *own* content needs for
+    // itself: `["two words"]`'s own entry never got checked, so the array
+    // never picked up its own entryForcedBreak, and neither did the outer
+    // `<<...>>` (whose own break depends on the entry's rendering
+    // containing one). Fixed by pushing the outer chain onto a stack and
+    // resetting to a *fresh* chain for the bracket's content — restored
+    // when the bracket closes — rather than freezing tracking altogether.
+    const options = { indent: 2, inlineLeafContainers: true };
+    expect(CBOR.format('<<... + ["two words"]>>', options)).toBe(
+      '<<\n  ... + [\n    "two words"\n  ]\n>>'
+    );
+    expect(
+      CBOR.format('"<<... + [\\"two words\\"]>>"', {
+        ...options,
+        splitCdn: true,
+      })
+    ).toBe(
+      '"<<" +\n    "... + [" +\n      "\\"two words\\"" +\n    "]" +\n  ">>"'
+    );
+    // A single-word entry inside the same shape stays inline — confirms
+    // this is real word-count tracking, not just "always break".
+    expect(CBOR.format('<<... + ["a"]>>', options)).toBe('<<... + ["a"]>>');
+    expect(
+      CBOR.format('"<<... + [\\"a\\"]>>"', { ...options, splitCdn: true })
+    ).toBe('"<<... + [\\"a\\"]>>"');
+    // A plain (non-ellipsis) `+`-chain inside the continuation array is
+    // also tracked correctly on its own — merges to "one word", one word,
+    // but a further check with two genuinely separate words confirms the
+    // merge-then-check still runs inside the pushed context too.
+    expect(
+      CBOR.format('"<<... + [\\"one \\" + \\"word\\"]>>"', {
+        ...options,
+        splitCdn: true,
+      })
+    ).toBe(
+      '"<<" +\n    "... + [" +\n      "\\"one \\" + \\"word\\"" +\n    "]" +\n  ">>"'
+    );
+  });
+
+  test("splitCdn: a tag continuation's semantic multi-word content must not leak past the ellipsis it belongs to", () => {
+    // Round 15's fix let a bracketed continuation's own content be tracked
+    // normally against its own frame — correct for a container (array/map/
+    // indefinite-length group), which genuinely collapses/expands based on
+    // its entries' word count, producing a *real* newline that should
+    // propagate. But a *tag* never collapses/expands based on content word
+    // count at all (CborTag always renders `tagNum(content)` on one
+    // physical line, deferring entirely to the content's own rendering),
+    // and CborEllipsis's own rendering never delegates to a fragment's
+    // semantic multi-word-ness either — it only ever joins each fragment's
+    // *actual* rendered text. So `100("two words")`'s own semantic
+    // multi-word-ness (which correctly disqualifies a *real* strict
+    // parent, e.g. `[100("two words")]`) must not leak past the ellipsis
+    // when the tag is itself one of its continuation values.
+    const options = { indent: 2, inlineLeafContainers: true };
+    expect(CBOR.format('<<... + 100("two words")>>', options)).toBe(
+      '<<... + 100("two words")>>'
+    );
+    expect(
+      CBOR.format('"<<... + 100(\\"two words\\")>>"', {
+        ...options,
+        splitCdn: true,
+      })
+    ).toBe('"<<... + 100(\\"two words\\")>>"');
+    // A plain (non-ellipsis) tag with multi-word content is unaffected —
+    // still correctly disqualifies a real strict array...
+    expect(CBOR.format('[100("two words")]', options)).toBe(
+      '[\n  100("two words")\n]'
+    );
+    expect(
+      CBOR.format('"[100(\\"two words\\")]"', { ...options, splitCdn: true })
+    ).toBe('"[" +\n    "100(\\"two words\\")" +\n  "]"');
+    // ...and a plain (non-ellipsis) tag directly inside `<<...>>` — since
+    // that check isn't gated on strict/loose either.
+    expect(CBOR.format('<<100("two words")>>', options)).toBe(
+      '<<\n  100("two words")\n>>'
+    );
+    expect(
+      CBOR.format('"<<100(\\"two words\\")>>"', { ...options, splitCdn: true })
+    ).toBe('"<<" +\n    "100(\\"two words\\")" +\n  ">>"');
+    // A tag *nested inside* an ellipsis's array-continuation still
+    // disqualifies that array normally (isChainContinuationRoot only ever
+    // applies to the outermost bracket/tag of the continuation, not
+    // anything nested deeper within it) — the array's own genuine
+    // collapse/expand decision produces a real newline, which correctly
+    // still propagates all the way out.
+    expect(CBOR.format('<<... + [100("two words")]>>', options)).toBe(
+      '<<\n  ... + [\n    100("two words")\n  ]\n>>'
+    );
+    expect(
+      CBOR.format('"<<... + [100(\\"two words\\")]>>"', {
+        ...options,
+        splitCdn: true,
+      })
+    ).toBe(
+      '"<<" +\n    "... + [" +\n      "100(\\"two words\\")" +\n    "]" +\n  ">>"'
+    );
+  });
+
+  test('splitCdn: <<...>> collapses without inlineLeafContainers; indefinite-length string groups do not', () => {
+    // <<...>>'s one-line collapse isn't gated behind inlineLeafContainers
+    // at all — mirrors the real AST's `alwaysInlineLeaf` (serializeContainer).
+    expect(CBOR.format('"<<h\'0000\'>>"', { indent: 2, splitCdn: true })).toBe(
+      '"<<h\'0000\'>>"'
+    );
+    // A multi-word text entry still forces a break either way.
+    expect(
+      CBOR.format('"<<\\"two words\\">>"', { indent: 2, splitCdn: true })
+    ).toBe('"<<" +\n    "\\"two words\\"" +\n  ">>"');
+    // Contrast: an indefinite-length string group follows the same
+    // option-gated strict rule as an array/map instead — still splits
+    // unconditionally without inlineLeafContainers, same as before.
+    expect(
+      CBOR.format('"(_ \\"a\\", \\"b\\")"', { indent: 2, splitCdn: true })
+    ).toBe('"(_ " +\n    "\\"a\\", " +\n    "\\"b\\"" +\n  ")"');
+    // A strict array/map is unaffected either way.
+    expect(CBOR.format('"[1, 2]"', { indent: 2, splitCdn: true })).toBe(
+      '"[" +\n    "1, " +\n    "2" +\n  "]"'
+    );
+  });
+
+  test('splitCdn + inlineLeafContainers: app-sequences do not corrupt the bracket stack', () => {
+    // `prefix<<` tokenizes as one APP_SEQUENCE token (no separate opener),
+    // while its `>>` close is a normal GT_GT — regression guard for a stack
+    // desync that used to pop an unrelated ancestor frame here. `h'0000'` is
+    // a prefixed byte-string literal inside a loose frame (the app-sequence
+    // is loose, same as `<<...>>`), so it stays an ordinary leaf here even
+    // though the same literal in a strict array/map would always disqualify
+    // inlining (see `isPrefixedLiteralText`).
+    expect(
+      CBOR.format('"[float<<h\'0000\'>>]"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[float<<h\'0000\'>>]"');
+    // A nested array inside a sibling entry still forces the outer array
+    // to break, same as the real AST.
+    expect(
+      CBOR.format('"[float<<h\'0000\'>>, [1, 2]]"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[" +\n    "float<<h\'0000\'>>, " +\n    "[1, 2]" +\n  "]"');
+  });
+
+  test('splitCdn + inlineLeafContainers: tag content and indefinite-length string groups inline', () => {
+    // A tag wrapping a primitive is a leaf, same as real CborTag — its own
+    // parens never force a break, matching renderSingleChildWithComments.
+    expect(
+      CBOR.format('"[100(2), 100(3)]"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[100(2), 100(3)]"');
+    // A tag wrapping an array is not a leaf — the array inside still
+    // disqualifies the outer array via entryHasContainer.
+    expect(
+      CBOR.format('"[100([1, 2]), 3]"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[" +\n    "100([1, 2]), " +\n    "3" +\n  "]"');
+    // Indefinite-length string groups go through serializeContainer for
+    // real and use the same strict, option-gated rule as an array/map —
+    // unlike `<<...>>`, which is the only container using the loose rule.
+    expect(
+      CBOR.format('"(_ \\"a\\", \\"b\\")"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"(_ \\"a\\", \\"b\\")"');
+    // Without inlineLeafContainers, both still split unconditionally as
+    // before — the flag gates all of this, it isn't a baseline change.
+    expect(
+      CBOR.format('"[100(2), 100(3)]"', { indent: 2, splitCdn: true })
+    ).toBe(
+      '"[" +\n    "100(" +\n      "2" +\n    "), " +\n    "100(" +\n      "3" +\n    ")" +\n  "]"'
+    );
+  });
+
+  test("splitCdn + inlineLeafContainers: suppressing a tag paren keeps its content's own real breaks", () => {
+    // The tag's own `(`/`)` stay tight (unconditionally suppressed), but a
+    // non-leaf array inside still needs its own breakpoints — those must
+    // not be discarded along with the tag's parens.
+    expect(
+      CBOR.format('"100([[1, 2], [3, 4]])"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"100([" +\n      "[1, 2], " +\n      "[3, 4]" +\n    "])"');
+    // A `splitNewline` break inside the tag's string content produces no
+    // breakpoint of its own within the tag (that's added by a separate
+    // pass) — the forced-break signal must still reach the outer array so
+    // its own brackets aren't wrongly suppressed either.
+    const node = CBOR.fromCBOR(CBOR.encode('[100("a\\nb")]'));
+    const quoted = node.toCDN({ indent: 2 });
+    expect(
+      CBOR.format(quoted, {
+        indent: 2,
+        splitCdn: true,
+        splitNewline: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[" +\n    "100(\\"a\\\\n" +\n        "b\\")" +\n  "]"');
+  });
+
+  test('splitCdn handles a very large embedded CDN array without blowing the call stack', () => {
+    // Forwarding breakpoints between frames must loop rather than spread a
+    // whole array as call arguments (`push(...huge)`) — spreading hits the
+    // engine's argument-count limit well before 130k elements.
+    const source = `[${Array(130_000).fill('1').join(',')}]`;
+    expect(() =>
+      CBOR.format(JSON.stringify(source), {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: false,
+      })
+    ).not.toThrow();
+    // A leaf array that size should still collapse to one inline literal
+    // once inlineLeafContainers is on.
+    expect(
+      CBOR.format(JSON.stringify(source), {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe(JSON.stringify(source));
+  });
+
+  test('preserveConcatenation + splitNewline handles a part with many newlines without blowing the call stack', () => {
+    // Regression: splitting a preserved concatenation part at its newline
+    // breakpoints used `parts.push(...splitAtBreakpoints(...))` — spreading
+    // the result as call arguments hits the engine's argument-count limit
+    // well before 130k newlines in a single part.
+    const source = `"${'\\n'.repeat(130_000)}" + "tail"`;
+    expect(() =>
+      CBOR.format(source, {
+        indent: 2,
+        preserveConcatenation: true,
+        splitNewline: true,
+      })
+    ).not.toThrow();
+  });
+
+  test('splitCdn + splitNewline: an embedded newline forces the surrounding CDN structure to break too', () => {
+    // The array's own breakpoints must not be suppressed just because its
+    // single entry looked leaf at the bracket level — the entry's own
+    // rendering will contain a line break once splitNewline splits it,
+    // same as serializeContainer's `s.includes('\n')` check on a rendered
+    // entry.
+    const node = CBOR.fromCBOR(CBOR.encode('["a\\nb"]'));
+    const quoted = node.toCDN({ indent: 2 });
+    const result = CBOR.format(`[${quoted}]`, {
+      indent: 2,
+      splitCdn: true,
+      splitNewline: true,
+      inlineLeafContainers: true,
+    });
+    // The outer array's own `[`/`]` breakpoints survive alongside the
+    // newline-forced split inside the string.
+    expect(result).toContain('"[" +');
+    expect(result).toContain('+\n    "]"');
   });
 
   test('splitCdn / splitNewline take precedence over textStringFormat', () => {
@@ -1559,7 +2532,7 @@ describe('CBOR.format()', () => {
   });
 
   test('preserveAll + explicit preserveNumberFormat: false also applies inside a preserved raw tag', () => {
-    // preserveAll turns preserveAppSequence on too, but a raw-tag source's
+    // preserveAll turns preserveAppPrefix on too, but a raw-tag source's
     // verbatim text is itself number-literal spelling — the explicit
     // preserveNumberFormat: false must still win there, not just for
     // top-level literals.
@@ -1581,6 +2554,50 @@ describe('CBOR.format()', () => {
 
     const withCapture = CBOR.fromCDN('1 # hi', { preserveAll: true });
     expect(withCapture.toCDN({ preserveAll: true, indent: 2 })).toBe('1 # hi');
+  });
+});
+
+// ─── preserveAppSequence (deprecated alias for preserveAppPrefix) ─────────
+
+describe('preserveAppSequence (deprecated alias)', () => {
+  test('still works when preserveAppPrefix is left unset', () => {
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", {
+        preserveAppSequence: true,
+      })
+    ).toBe("DT<<'1969-07-21T02:56:16Z'>>");
+  });
+
+  test('preserveAppPrefix wins when both are set', () => {
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", {
+        preserveAppSequence: false,
+        preserveAppPrefix: true,
+      })
+    ).toBe("DT<<'1969-07-21T02:56:16Z'>>");
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", {
+        preserveAppSequence: true,
+        preserveAppPrefix: false,
+      })
+    ).toBe("DT'1969-07-21T02:56:16Z'");
+  });
+
+  test('preserveAll fills preserveAppPrefix, not the deprecated alias', () => {
+    // preserveAppSequence itself no longer participates in preserveAll (like
+    // preserveTextString) — only its preserveAppPrefix resolution does.
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", { preserveAll: true })
+    ).toBe("DT<<'1969-07-21T02:56:16Z'>>");
+  });
+
+  test('explicit preserveAppSequence: false is honoured under preserveAll', () => {
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", {
+        preserveAll: true,
+        preserveAppSequence: false,
+      })
+    ).toBe("DT'1969-07-21T02:56:16Z'");
   });
 });
 

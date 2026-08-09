@@ -8,20 +8,25 @@ import {
 } from '../cbor/encode';
 import {
   serializeBytes,
+  isMultiWordByteString,
   resolveEiSuffix,
   resolveIndent,
   joinConcatParts,
+  joinAppSeqParts,
   canonicalEncodingWidth,
   stripByteLiteralComments,
   danglingCommentsByGap,
+  shouldEmitComments,
+  resolveCommentStyle,
   type ByteCommentSyntax,
 } from '../cdn/serialize-utils';
 
 /**
  * A preserved literal source, with any embedded comment stripped unless
- * `preserveComments` is set — the preserved spelling should still drop
- * comments by default, the same as an unpreserved literal re-derived from
- * its decoded value would. `commentSyntax` is `undefined` for a literal
+ * comments are requested (`preserveComments`/`comments`) — the preserved
+ * spelling should still drop comments by default, the same as an
+ * unpreserved literal re-derived from its decoded value would.
+ * `commentSyntax` is `undefined` for a literal
  * family with no comment syntax at all (bare sqstr `'...'`) or one whose
  * comment syntax isn't known (an app-string extension other than the
  * specific built-in `b32`/`h32` objects — see `ednCommentSyntax`); in
@@ -34,7 +39,7 @@ function preservedSource(
   commentSyntax: ByteCommentSyntax | undefined
 ): string | undefined {
   if (source === undefined) return undefined;
-  if (options?.preserveComments || commentSyntax === undefined) return source;
+  if (shouldEmitComments(options) || commentSyntax === undefined) return source;
   return stripByteLiteralComments(source, commentSyntax);
 }
 
@@ -98,6 +103,28 @@ export class CborByteString extends CborItem {
     this.ednParts = options?.ednParts;
   }
 
+  /**
+   * Only the "bare sqstr text with 2+ words" case — the "is this a
+   * prefixed literal" question is deliberately *not* predicted here from
+   * raw bytes at all (a subclass like `CborIpExt` might override `_toCDN()`
+   * to render something else entirely, e.g. a preserved
+   * `ip<<'192.0.2.42'>>` app-sequence spelling, that raw-byte prediction
+   * knows nothing about — see `isMultiWordByteString`'s doc). That
+   * question is instead answered from the *actual rendering*: for a bare
+   * entry, `serializeContainer`'s own `isPrefixedLiteralText(s)` check
+   * already covers it (this node's render *is* `s`, unobscured); for one
+   * wrapped in a `CborTag`, `CborTag._isMultiWordText`'s
+   * `isMultiWordRenderedLiteral` check covers it instead. `strict` isn't
+   * needed here at all now — it's accepted purely for interface
+   * consistency with the base class.
+   */
+  override _isMultiWordText(
+    options: ToCDNOptions | undefined,
+    _strict = true
+  ): boolean {
+    return isMultiWordByteString(this.value, options?.sqstr);
+  }
+
   override _encodeTo(writer: CborWriter, _options?: ToCBOROptions): void {
     writeHeadTo(writer, MT_BYTES, this.value.length, this.encodingWidth);
     writer.writeBytes(this.value);
@@ -117,7 +144,7 @@ export class CborByteString extends CborItem {
         canonicalEncodingWidth(BigInt(this.value.length))
       );
       let encoding = options?.bstrEncoding ?? this.ednEncoding;
-      if (options?.appStrings === false && encoding !== 'hex') encoding = 'hex';
+      if (options?.appPrefix === false && encoding !== 'hex') encoding = 'hex';
       const literals = this.ednParts.map((part) => {
         const source = options?.preserveByteString
           ? preservedSource(part.source, options, part.commentSyntax)
@@ -126,16 +153,24 @@ export class CborByteString extends CborItem {
           ? source
           : serializeBytes(part.bytes, encoding, options?.sqstr);
       });
-      literals[literals.length - 1] += suffix;
-      const midComments = options?.preserveComments
+      const midComments = shouldEmitComments(options)
         ? danglingCommentsByGap(
             this.comments?.dangling,
             this.ednParts,
-            typeof options.preserveComments === 'string'
-              ? options.preserveComments
-              : undefined
+            resolveCommentStyle(options)
           )
         : undefined;
+      if (options?.modernConcat && options?.appPrefix !== false) {
+        return joinAppSeqParts(
+          'b1',
+          literals,
+          suffix,
+          indentStr,
+          _depth,
+          midComments
+        );
+      }
+      literals[literals.length - 1] += suffix;
       return joinConcatParts(literals, indentStr, _depth, midComments);
     }
     const preservedWhole = options?.preserveByteString
@@ -164,7 +199,7 @@ export class CborByteString extends CborItem {
       canonicalEncodingWidth(BigInt(this.value.length))
     );
     let encoding = options?.bstrEncoding ?? this.ednEncoding;
-    if (options?.appStrings === false && encoding !== 'hex') encoding = 'hex';
+    if (options?.appPrefix === false && encoding !== 'hex') encoding = 'hex';
     return serializeBytes(this.value, encoding, options?.sqstr) + suffix;
   }
 

@@ -146,8 +146,16 @@ const LAYOUT_OPTION_IDS = [
   'opt-split-cdn',
   'opt-inline-leaf',
   'opt-comments',
+  'opt-comments-style',
   'opt-blank-lines',
   'opt-concat',
+  // `modernConcat` only changes anything for a plain (non-elision) preserved
+  // concatenation, which — like `opt-concat` itself — is a layout feature
+  // gated behind `indent`. `opt-stream-ilbs-ilts` is deliberately *not*
+  // here: `modernStreamSyntax` applies to indefinite-length strings
+  // unconditionally, with no `indent` dependency (see
+  // `CborIndefiniteTextString`/`CborIndefiniteByteString`).
+  'opt-concat-t1b1',
 ] as const;
 
 /**
@@ -179,22 +187,38 @@ function syncPreserveAllCheckbox(): void {
   master.indeterminate = checkedCount > 0 && checkedCount < boxes.length;
 }
 
+/**
+ * A hint normally opens downward below its row (see .opt-hint). If the
+ * hovered row is close enough to the popover's bottom that this would
+ * clip it against the popover's own overflow-y: auto edge (see
+ * .format-popover), flip it to open upward instead via .flip-up.
+ *
+ * Which rows are "close enough" isn't fixed — it depends on the popover's
+ * current layout (two columns vs. reflowed to one on a narrow window, how
+ * many rows happen to be above/below a given row), so this re-measures on
+ * every hover rather than targeting specific rows in CSS. `hint.scrollHeight`
+ * reads the hint's natural (expanded) height even while it's visually
+ * collapsed to 0 — see the "collapsed to zero vertical footprint" comment
+ * on .opt-hint — so the check works before the hover transition has run.
+ */
+export function wireHintFlip(popoverId: string): void {
+  const popover = document.getElementById(popoverId);
+  if (!popover) return;
+  for (const hint of popover.querySelectorAll<HTMLElement>('.opt-hint')) {
+    const label = hint.closest('label')!;
+    label.addEventListener('mouseenter', () => {
+      const labelRect = label.getBoundingClientRect();
+      const popoverRect = popover.getBoundingClientRect();
+      const opensBelowPopover =
+        labelRect.bottom + 6 + hint.scrollHeight > popoverRect.bottom;
+      hint.classList.toggle('flip-up', opensBelowPopover);
+    });
+  }
+}
+
 export function initFormatPopover(): void {
   wirePopoverToggle('format-opts-btn', 'format-popover');
-  wirePopoverToggle('preserve-opts-btn', 'preserve-popover');
-  // Clicking the outer toggle stops propagation before the document-level
-  // "close" listener registered above ever sees it (see wirePopoverToggle),
-  // so the submenu would otherwise stay open behind a hidden format-popover.
-  // Force it closed every time format-popover itself is toggled.
-  document.getElementById('format-opts-btn')!.addEventListener('click', () => {
-    const preservePopover = document.getElementById(
-      'preserve-popover'
-    ) as HTMLElement;
-    preservePopover.hidden = true;
-    document
-      .getElementById('preserve-opts-btn')!
-      .setAttribute('aria-expanded', 'false');
-  });
+  wireHintFlip('format-popover');
   const indentSelect = document.getElementById(
     'opt-indent'
   ) as HTMLSelectElement;
@@ -234,11 +258,14 @@ export function readFormatOptions(): FromCDNOptions & ToCDNOptions {
     intFormat: sel('opt-int') as ToCDNOptions['intFormat'],
     floatFormat: sel('opt-float') as ToCDNOptions['floatFormat'],
     bstrEncoding: sel('opt-bstr') as ToCDNOptions['bstrEncoding'],
+    sqstr: sel('opt-sqstr') as ToCDNOptions['sqstr'],
   };
   if (indentRaw !== '')
     options.indent = indentRaw === 'tab' ? '\t' : Number(indentRaw);
   const encInd = sel('opt-enc-ind') as ToCDNOptions['encodingIndicators'];
   if (encInd !== 'auto') options.encodingIndicators = encInd;
+  const commentsStyle = sel('opt-comments-style') as ToCDNOptions['comments'];
+  if (commentsStyle !== 'strip') options.comments = commentsStyle;
   if (
     (document.getElementById('opt-split-newline') as HTMLInputElement).checked
   )
@@ -262,9 +289,16 @@ export function readFormatOptions(): FromCDNOptions & ToCDNOptions {
   )
     options.preserveNumberFormat = true;
   if ((document.getElementById('opt-app-sequence') as HTMLInputElement).checked)
-    options.preserveAppSequence = true;
+    options.preserveAppPrefix = true;
   if (!(document.getElementById('opt-app-strings') as HTMLInputElement).checked)
-    options.appStrings = false;
+    options.appPrefix = false;
+  if ((document.getElementById('opt-concat-t1b1') as HTMLInputElement).checked)
+    options.modernConcat = true;
+  if (
+    (document.getElementById('opt-stream-ilbs-ilts') as HTMLInputElement)
+      .checked
+  )
+    options.modernStreamSyntax = true;
   return options;
 }
 

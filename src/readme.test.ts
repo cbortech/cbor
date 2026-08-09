@@ -165,6 +165,19 @@ describe('README examples', () => {
     ).toBe("h'68' +\n  b64'aQ'");
   });
 
+  test('modernConcat / modernStreamSyntax emit t1/b1/ilbs/ilts notation', () => {
+    expect(
+      CBOR.format('"a" + "b"', {
+        indent: 2,
+        preserveConcatenation: true,
+        modernConcat: true,
+      })
+    ).toBe('t1<<"a", "b">>');
+    expect(CBOR.format('(_ "a", "b")', { modernStreamSyntax: true })).toBe(
+      'ilts<<"a","b">>'
+    );
+  });
+
   test('preserveTextString keeps double-quoted escape spelling', () => {
     expect(CBOR.format('"caf\\u00e9"')).toBe('"café"');
     expect(CBOR.format('"caf\\u00e9"', { preserveTextString: true })).toBe(
@@ -179,9 +192,9 @@ describe('README examples', () => {
     ).toBe('{"a":0xff,"b":1.50}');
   });
 
-  test('preserveAppSequence keeps 1(...), DT<<...>>, and DT`...` notation', () => {
+  test('preserveAppPrefix keeps 1(...), DT<<...>>, and DT`...` notation', () => {
     expect(CBOR.format('1(1749772800)')).toBe("DT'2025-06-13T00:00:00Z'");
-    expect(CBOR.format('1(1749772800)', { preserveAppSequence: true })).toBe(
+    expect(CBOR.format('1(1749772800)', { preserveAppPrefix: true })).toBe(
       '1(1749772800)'
     );
     expect(CBOR.format("DT<<'1969-07-21T02:56:16Z'>>")).toBe(
@@ -189,11 +202,11 @@ describe('README examples', () => {
     );
     expect(
       CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe("DT<<'1969-07-21T02:56:16Z'>>");
     expect(
-      CBOR.format('DT`1969-07-21T02:56:16Z`', { preserveAppSequence: true })
+      CBOR.format('DT`1969-07-21T02:56:16Z`', { preserveAppPrefix: true })
     ).toBe('DT`1969-07-21T02:56:16Z`');
   });
 

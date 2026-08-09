@@ -1,5 +1,5 @@
 /**
- * Strip whitespace and EDN §2.2 comments from app-string content.
+ * Strip whitespace and EDN §2.1 comments from app-string content.
  *
  * Used by extensions whose content allows the same comment syntax as byte
  * string literals (b32, h32, float, …):

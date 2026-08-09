@@ -13,7 +13,7 @@
  * The sequence form `float<<byteStr>>` accepts a single byte-string expression
  * (e.g. `float<<h'7ef0'>>`) and interprets its bytes as float bits.
  *
- * Defined in draft-ietf-cbor-edn-literals-26 §3.7 and included in the default
+ * Defined in draft-ietf-cbor-edn-literals-27 §3.8 and included in the default
  * extension set:
  *
  * @example
