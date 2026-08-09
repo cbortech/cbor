@@ -1209,8 +1209,12 @@ describe("CborFloat.toCDN() — floatFormat: 'app-extension'", () => {
   });
 
   // A value already parsed from `float'...'` keeps its own original
-  // spelling regardless of floatFormat (unaffected by this option).
-  test("a value parsed from float'...' keeps its own ednSource spelling", () => {
+  // spelling when floatFormat is left unset or set to 'app-extension'.
+  test("a value parsed from float'...' keeps its own ednSource spelling with floatFormat unset", () => {
+    const parsed = parseCDN("float'7ef0'") as CborFloat;
+    expect(toCDN(parsed)).toBe("float'7ef0'");
+  });
+  test("a value parsed from float'...' keeps its own ednSource spelling with floatFormat: 'app-extension'", () => {
     const parsed = parseCDN("float'7ef0'") as CborFloat;
     expect(toCDN(parsed, { floatFormat: 'app-extension' })).toBe("float'7ef0'");
   });
@@ -1220,6 +1224,19 @@ describe("CborFloat.toCDN() — floatFormat: 'app-extension'", () => {
   test('a plain decimal literal regenerates as app-extension notation', () => {
     const parsed = parseCDN('1.5') as CborFloat;
     expect(toCDN(parsed, { floatFormat: 'app-extension' })).toBe("float'3e00'");
+  });
+
+  // An explicit 'decimal'/'hex' request opts a float'...'-sourced value out
+  // of the ednSource round-trip and reformats it like any other float —
+  // 0.5 parsed as `float'3800'` reformats to '0.5' / '0x1p-1' rather than
+  // staying pinned to its original app-extension spelling.
+  test("floatFormat: 'decimal' reformats a value parsed from float'...'", () => {
+    const parsed = parseCDN("float'3800'") as CborFloat;
+    expect(toCDN(parsed, { floatFormat: 'decimal' })).toBe('0.5');
+  });
+  test("floatFormat: 'hex' reformats a value parsed from float'...'", () => {
+    const parsed = parseCDN("float'3800'") as CborFloat;
+    expect(toCDN(parsed, { floatFormat: 'hex' })).toBe('0x1p-1');
   });
 });
 

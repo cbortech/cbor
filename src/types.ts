@@ -926,6 +926,14 @@ export interface ToCDNOptions {
    *   ±Infinity too (not just finite values). Falls back to `'decimal'`
    *   when `appPrefix` is `false`, matching how other built-in extensions
    *   fall back to raw notation.
+   *
+   * A value originally parsed from a `float'...'`/`float<<...>>` literal
+   * normally re-emits that exact source spelling regardless of this option
+   * (so its own encoding-width choice, or a non-canonical bit pattern, isn't
+   * silently normalized away) — leaving `floatFormat` unset, or setting it
+   * to `'app-extension'`, keeps that round-trip. Explicitly requesting
+   * `'decimal'` or `'hex'` opts out of it and reformats the value like any
+   * other float, since that's the point of asking for a different format.
    * @default 'decimal'
    */
   floatFormat?: 'decimal' | 'hex' | 'app-extension';

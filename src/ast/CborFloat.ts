@@ -98,8 +98,15 @@ export class CborFloat extends CborItem {
     // In single-line output (no `indent`), a source spelling that spans
     // multiple lines (e.g. a `float<<...>>` app-sequence written across
     // lines) cannot be re-emitted, so it falls back to normal serialization.
+    // An explicit `floatFormat` request (anything other than leaving it
+    // unset, or asking for the app-extension form it's already in) opts out
+    // of this round-trip too — the whole point of asking for `'decimal'`/
+    // `'hex'` is to reformat every float, including one that started out as
+    // a `float'...'` literal.
     if (
       options?.appPrefix !== false &&
+      (options?.floatFormat === undefined ||
+        options?.floatFormat === 'app-extension') &&
       this.ednSource !== undefined &&
       (resolveIndent(options) !== null || !/[\r\n]/.test(this.ednSource))
     ) {
