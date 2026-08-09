@@ -21,6 +21,8 @@ import {
   isMultiWordText,
   joinAppSeqParts,
   pushAll,
+  shouldEmitComments,
+  resolveCommentStyle,
 } from '../cdn/serialize-utils';
 import { hexToBytes } from '../utils/hex';
 import { base64ToBytes } from '../utils/base64';
@@ -53,7 +55,7 @@ export class CborTextString extends CborItem {
   /**
    * `true` at index `i`, aligned with `ednParts`, when that part came from a
    * byte-string literal on the right of a text-leading `+` concatenation
-   * (decoded as UTF-8 and merged in per §5.1) rather than a double-quoted
+   * (decoded as UTF-8 and merged in per draft-25 §5.1) rather than a double-quoted
    * `"..."` literal. Both cases leave `ednPartSources[i]` `undefined` (byte
    * strings have no preserved raw source here, same as an unpreserved
    * double-quoted literal), so this is what lets `appSeqSourceFeatures`
@@ -199,13 +201,11 @@ function formatTextString(
     // its own to attach to — it lands as `dangling` on this whole node
     // instead (see `ednPartSpans`'s doc) — so re-derive which gap each one
     // belongs to from each part's own source span.
-    const gapComments = options?.preserveComments
+    const gapComments = shouldEmitComments(options)
       ? danglingCommentsByGap(
           dangling,
           ednPartSpans,
-          typeof options.preserveComments === 'string'
-            ? options.preserveComments
-            : undefined
+          resolveCommentStyle(options)
         )
       : undefined;
     const parts: StringPart[] = [];
@@ -233,10 +233,19 @@ function formatTextString(
         parts[parts.length - 1]!.commentsAfter = comments;
       }
     }
-    if (options?.modernConcat && options?.appStrings !== false) {
-      const literals = parts.map(({ text, source }) => source ?? escapeString(text));
+    if (options?.modernConcat && options?.appPrefix !== false) {
+      const literals = parts.map(
+        ({ text, source }) => source ?? escapeString(text)
+      );
       const midComments = parts.map((p) => p.commentsAfter ?? []);
-      return joinAppSeqParts('t1', literals, suffix, indentStr, depth, midComments);
+      return joinAppSeqParts(
+        't1',
+        literals,
+        suffix,
+        indentStr,
+        depth,
+        midComments
+      );
     }
     return emitParts(parts, suffix, indentStr, depth);
   }
@@ -1003,7 +1012,7 @@ function collectCdnBreakpoints(
         // in serialize-utils.ts (`"a" + h'62'` merges to `"ab"`, one word,
         // and must not be disqualified just because one part happened to
         // be spelled as `h'62'`). APP_STRING never participates in
-        // concatenation (§5.1), so it never continues one; `BYTES_HEX_ELIDED`'s
+        // concatenation (draft-25 §5.1), so it never continues one; `BYTES_HEX_ELIDED`'s
         // missing data can't be decoded, so it always breaks the chain
         // instead of silently under-counting.
         let decoded: string | null = null;
@@ -1200,7 +1209,7 @@ const CLOSE_TOKENS = new Set<TokenType>([
 ]);
 
 // Token types that can appear as one part of a `+`-concatenation chain
-// (§5.1) — mirrors `STRINGISH_TYPES` in serialize-utils.ts.
+// (draft-25 §5.1) — mirrors `STRINGISH_TYPES` in serialize-utils.ts.
 const STRINGISH_CHAIN_TYPES = new Set<TokenType>([
   'TSTR',
   'RAWSTRING',

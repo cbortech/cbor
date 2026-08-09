@@ -385,22 +385,22 @@ CBOR.format("h'68' + b64'aQ'", {
 //   b64'aQ'
 ```
 
-保持した連結を `+` ではなく draft-26 の `t1<<...>>` / `b1<<...>>` 記法で
+保持した連結を `+` ではなく draft-27 の `t1<<...>>` / `b1<<...>>` 記法で
 出力するには、[文字列連結と不定長文字列](#文字列連結と不定長文字列) の
 `modernConcat` を参照してください。
 
-### application-string / -sequence 記法を保持する
+### app-string / -sequence 記法を保持する
 
 一部の組み込み拡張(`dt`/`DT`、`ip`/`IP`)は同じ値に対して `prefix'...'`
-(application string)、`` prefix`...` ``(backtick application string)、
-`prefix<<...>>`(application sequence)、生のタグリテラル(`N(...)`)の
+(app-string)、`` prefix`...` ``(backtick app-string)、
+`prefix<<...>>`(app-sequence)、生のタグリテラル(`N(...)`)の
 いずれの記法もサポートしていますが、デフォルトでは `CBOR.format()` を呼ぶ
 たびに解決済みの値から `prefix'...'` を再生成します。そのため
 `` DT`1969-07-21T02:56:16Z` `` も `DT<<'1969-07-21T02:56:16Z'>>` も、生の
 タグ記法 `1(1749772800)` さえも、すべて `DT'...'` 記法に正規化され、さら
 に非正規な `DT'...'` の表記(例えば `Z` の代わりに `+00:00` を使った場合
-など)も書き換えられます。`preserveAppSequence` を指定すると、実際に使わ
-れていた表記のまま保持します。`appStrings: false` を同時に指定した場合は
+など)も書き換えられます。`preserveAppPrefix` を指定すると、実際に使わ
+れていた表記のまま保持します。`appPrefix: false` を同時に指定した場合は
 効果がありません(どちらにせよ元の表記に関わらず生のタグ記法になるため)。
 これらの記法からパースされていない値にも効果はありません。
 
@@ -410,15 +410,49 @@ import { CBOR } from '@cbortech/cbor';
 CBOR.format('1(1749772800)');
 // "DT'2025-06-13T00:00:00Z'"
 
-CBOR.format('1(1749772800)', { preserveAppSequence: true });
+CBOR.format('1(1749772800)', { preserveAppPrefix: true });
 // "1(1749772800)"
 
-CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", { preserveAppSequence: true });
+CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", { preserveAppPrefix: true });
 // "DT<<'1969-07-21T02:56:16Z'>>"
 
-CBOR.format('DT`1969-07-21T02:56:16Z`', { preserveAppSequence: true });
+CBOR.format('DT`1969-07-21T02:56:16Z`', { preserveAppPrefix: true });
 // "DT`1969-07-21T02:56:16Z`"
 ```
+
+### コメントを保持する
+
+デフォルトでは、`CBOR.fromCDN()` はコメントを破棄し、`CBOR.format()` も
+コメントを出力しません。`preserveComments: true` を指定すると、パース時に
+コメントを取り込み、元々書かれていたマーカー(`#`・`//`・`/* */`・`/ /`)の
+まま再出力します。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const text = '{ "a": 1 } # trailing comment';
+
+CBOR.format(text, { indent: 2 });
+// '{\n  "a": 1\n}'
+
+CBOR.format(text, { indent: 2, preserveComments: true });
+// '{\n  "a": 1\n} # trailing comment'
+```
+
+書かれていたマーカーを混在させたまま保持するのではなく、すべてのコメントの
+マーカーを正規化したい場合は `comments` を使います — `'c-style'` は
+`//` と `/* */`、`'cdn-style'` は `#` と `/ /` に正規化します。
+`preserveComments: true` が指定されている場合は効果がありません(verbatim
+が優先されます)。コメントを完全に削除するには `comments: 'strip'` を
+明示的に指定するか(あるいは両方とも未指定のままにするか)します。
+
+```ts
+CBOR.format(text, { indent: 2, comments: 'c-style' });
+// '{\n  "a": 1\n} // trailing comment'
+```
+
+`indent` を指定して整形出力する場合のみ効果があります。1 行出力では改行で
+終端する必要がある行コメントの性質上、コメントは常に取り除かれます。
 
 ### 空行を保持する
 
@@ -676,7 +710,7 @@ console.log(text);
 
 ## 文字列連結と不定長文字列
 
-draft-ietf-cbor-edn-literals-26(§3.4 / §3.5)の application extension
+draft-ietf-cbor-edn-literals-27(§3.5 / §3.6)の app-extension
 `t1` / `b1` / `ilbs` / `ilts` は、デフォルトで有効です。
 
 `t1<<...>>` と `b1<<...>>` は、(テキストまたはバイト)文字列の引数を左から
@@ -687,11 +721,11 @@ draft-ietf-cbor-edn-literals-26(§3.4 / §3.5)の application extension
 import { CBOR } from '@cbortech/cbor';
 
 const text = CBOR.fromCDN('t1<<"Hello ", "world">>');
-console.log(text.toCDN({ appStrings: false }));
+console.log(text.toCDN({ appPrefix: false }));
 // "Hello world"
 
 const bytes = CBOR.fromCDN("b1<<'Hello ', h'776f726c64'>>");
-console.log(bytes.toCDN({ appStrings: false }));
+console.log(bytes.toCDN({ appPrefix: false }));
 // 'Hello world'
 ```
 
@@ -705,7 +739,7 @@ streamstring 構文の置き換えですが、本ライブラリは従来構文�
 import { CBOR } from '@cbortech/cbor';
 
 const v = CBOR.fromCDN("ilbs<<'Hello ', 'world'>>");
-console.log(v.toCDN({ appStrings: false }));
+console.log(v.toCDN({ appPrefix: false }));
 // (_ 'Hello ','world')
 ```
 
@@ -715,8 +749,8 @@ console.log(v.toCDN({ appStrings: false }));
 `CBOR.format()` はデフォルトではこれらを自ら出力しません。保持した連結
 (`preserveConcatenation`)は従来どおり `+` で、不定長文字列は従来どおり
 `(_ ...)` streamstring 形式でレンダリングされます。`modernConcat` と
-`modernStreamSyntax` を `true` にすると draft-26 の記法での出力を選択でき
-ます。どちらもデフォルトは `false`(従来構文)で、`appStrings` が `false`
+`modernStreamSyntax` を `true` にすると draft-27 の記法での出力を選択でき
+ます。どちらもデフォルトは `false`(従来構文)で、`appPrefix` が `false`
 の場合は従来構文にフォールバックします。
 
 ```ts
@@ -733,7 +767,7 @@ CBOR.format('(_ "a", "b")', { modernStreamSyntax: true });
 // ilts<<"a","b">>
 ```
 
-`modernConcat` は `...` による省略連結(§4.2)にも適用され、
+`modernConcat` は `...` による省略連結(§5.2)にも適用され、
 `"a" + ... + "b"` は `t1<<"a", ..., "b">>` としてレンダリングされます。
 通常の連結と異なり、これは `preserveConcatenation` の値に関わらず適用され
 ます — 省略連結にはそもそも1つのリテラルに畳み込んだ状態が存在しないため
@@ -741,44 +775,46 @@ CBOR.format('(_ "a", "b")', { modernStreamSyntax: true });
 
 > [!NOTE]
 > どちらのオプションも `t1`/`b1`/`ilbs`/`ilts` のソースを従来記法に
-> **変換**するものではありません。`t1<<...>>`(や `ilbs<<...>>` など)
-> からパースされた値は、`appStrings` が `false` でなく、
+> 変換するものではありません。`t1<<...>>`(や `ilbs<<...>>` など)
+> からパースされた値は、`appPrefix` が `false` でなく、
 > `encodingIndicators` が `'auto'`(どちらもデフォルト)であり、かつ
 > ソースが単一行、または `indent` 指定時であれば、`modernConcat` /
 > `modernStreamSyntax` の値に関わらずそのままの記法で出力されます。
-> `encodingIndicators: 'always'`/`'never'` や `appStrings: false` を指定
-> した場合は、他の application-string 値と同様に正規化されます(例:
+> `encodingIndicators: 'always'`/`'never'` や `appPrefix: false` を指定
+> した場合は、他の app-string 値と同様に正規化されます(例:
 > `encodingIndicators: 'always'` では `t1<<"a", "b">>` が `"ab"_i` に
 > なります)。また、複数行のソースは `indent` 未指定(1行出力)の場合、
 > そのレイアウトを再現できないため正規化されます:
+>
 > ```ts
 > CBOR.format('t1<<\n  "a",\n  "b"\n>>');
 > // '"ab"' — indent未指定のため正規化される
 > CBOR.format('t1<<\n  "a",\n  "b"\n>>', { indent: 2 });
 > // 't1<<\n  "a",\n  "b"\n>>' — そのまま保持される
 > ```
+>
 > 両オプションが影響するのは `+` チェーンや `(_ ...)` チャンク列から
 > 再構築された値の出力のみです。
 
 > [!NOTE]
-> `t1` / `b1` という識別子は draft-26 で暫定(provisional)と明記されて
+> `t1` / `b1` という識別子は draft-27 でも暫定(provisional)と明記されて
 > おり、CBOR ワーキンググループにより改名される可能性があります。
 
 ## float
 
 16 進数のビットパターンを IEEE 754 浮動小数点値として解釈します
-(draft-ietf-cbor-edn-literals-26 §3.7)。デフォルトで有効です。
+(draft-ietf-cbor-edn-literals-27 §3.8)。デフォルトで有効です。
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
 const v = CBOR.fromCDN("float'7e00'");
-console.log(v.toCDN({ appStrings: false }));
+console.log(v.toCDN({ appPrefix: false }));
 // NaN
 
 // バイト列から解釈する場合
 const v2 = CBOR.fromCDN("float<<h'3f800000'>>");
-console.log(v2.toCDN({ appStrings: false }));
+console.log(v2.toCDN({ appPrefix: false }));
 // 1.0_2
 ```
 
@@ -791,7 +827,7 @@ extension があります。必要なものを `import` し、
 ### b32 / h32
 
 [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648) の Base32 エンコードによるバイト列リテラルです。
-[RFC 8949](https://www.rfc-editor.org/rfc/rfc8949) §8 に記載があり、[draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/) でも触れられています。
+[RFC 8949](https://www.rfc-editor.org/rfc/rfc8949) §8 に記載があり、[draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/27/) でも触れられています。
 
 - `b32` — §6 Base32（`A–Z 2–7` アルファベット）
 - `h32` — §7 Base32Hex（`0–9 A–V` アルファベット）
@@ -800,11 +836,11 @@ extension があります。必要なものを `import` し、
 import { CBOR, b32, h32 } from '@cbortech/cbor';
 
 const v1 = CBOR.fromCDN("b32'AEBAGBA'", { extensions: [b32] });
-console.log(v1.toCDN({ appStrings: false }));
+console.log(v1.toCDN({ appPrefix: false }));
 // h'01020304'
 
 const v2 = CBOR.fromCDN("h32'00P00'", { extensions: [h32] });
-console.log(v2.toCDN({ appStrings: false }));
+console.log(v2.toCDN({ appPrefix: false }));
 // h'003200'
 ```
 
@@ -818,25 +854,24 @@ console.log(v2.toCDN({ appStrings: false }));
 ```ts
 import { CBOR, same } from '@cbortech/cbor';
 
-// すべての要素が同じバイト列かを検証し、最初の要素を返す
 const v = CBOR.fromCDN("same<<h'0102', h'0102'>>", { extensions: [same] });
-console.log(v.toCDN({ appStrings: false }));
+console.log(v.toCDN({ appPrefix: false }));
 // h'0102'
 
 // 要素が 1 つでも有効（常にパスする）
 const v2 = CBOR.fromCDN('same<<42>>', { extensions: [same] });
-console.log(v2.toCDN({ appStrings: false }));
+console.log(v2.toCDN({ appPrefix: false }));
 // 42
 ```
 
 ---
 
-追加の application extension は別パッケージとして公開されています。必要なものを
+追加の app-extension は別パッケージとして公開されています。必要なものを
 インストールし、`extensions` オプションに渡して使います。
 
 ### hash
 
-`hash` は [draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/) §3.3 で定義された標準の application extension です。
+`hash` は [draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/27/) §3.4 で定義された標準の app-extension です。
 ハッシュアルゴリズムと値を `hash'algorithm:value'` の形式で表現します。
 実装には外部の暗号ライブラリが必要なため、[@cbortech/hash-extension](https://www.npmjs.com/package/@cbortech/hash-extension) として
 別パッケージで提供しています。
@@ -861,7 +896,7 @@ const digest = cbor.parse(
 
 ### uuid
 
-`uuid` はこのライブラリ独自の application extension です。
+`uuid` はこのライブラリ独自の app-extension です。
 [@cbortech/uuid-extension](https://www.npmjs.com/package/@cbortech/uuid-extension) として別パッケージで提供しています。
 
 ```bash
@@ -881,7 +916,7 @@ const id = cbor.parse("uuid'550e8400-e29b-41d4-a716-446655440000'");
 ### set / map
 
 `SET` と `MAP` は、タグ付きの Set / Map 値を扱うための、このライブラリ独自の
-application extension です。
+app-extension です。
 [@cbortech/set-map-extensions](https://www.npmjs.com/package/@cbortech/set-map-extensions)
 としてまとめて別パッケージで提供しています。`SET<<[...]>>` は配列に CBOR tag
 258 を付けた値、`MAP<<{...}>>` は map に CBOR tag 259 を付けた値を生成します。
@@ -1138,9 +1173,11 @@ CDDL コンパイラは `@cbortech/cbor/cddl`
 
 - CBOR
   - [RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)
+- CBOR Sequences
+  - [RFC 8742](https://www.rfc-editor.org/rfc/rfc8742)
 - CDN (CBOR-EDN)
   - [draft-ietf-cbor-edn-literals-25](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/)
-  - [draft-ietf-cbor-edn-literals-26](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/26/)
+  - [draft-ietf-cbor-edn-literals-27](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/27/)
 - CDDL
   - [RFC 8610](https://www.rfc-editor.org/rfc/rfc8610)
   - [RFC 9682](https://www.rfc-editor.org/rfc/rfc9682)
@@ -1148,7 +1185,7 @@ CDDL コンパイラは `@cbortech/cbor/cddl`
 
 補足:
 
-- CDN は draft-26 に準拠しつつ、draft-25 の `(_ ...)` streamstring 構文と
+- CDN は draft-27 に準拠しつつ、draft-25 の `(_ ...)` streamstring 構文と
   `+` による文字列連結構文も引き続きサポートしています。
 - CDDL は RFC 8610 のすべての control operator と、RFC 9165 の `.plus`、
   `.cat`、`.feature` をサポートしています。

@@ -16,7 +16,7 @@ import type { EncodingWidth } from '../cbor/encode';
 
 /**
  * Plugin that extends EDN parsing, CBOR decoding, and `fromJS()` for specific
- * application-string prefixes or CBOR tag numbers.
+ * app-string prefixes or CBOR tag numbers.
  *
  * Pass instances via `FromCDNOptions.extensions`, `FromCBOROptions.extensions`,
  * or `FromJSOptions.extensions`.
@@ -76,7 +76,7 @@ export interface CborExtension {
   ): CborItem;
 
   /**
-   * Controls how the CDN parser preserves the original application-string
+   * Controls how the CDN parser preserves the original app-string
    * / -sequence / raw-tag source text — `prefix'...'`, `` prefix`...` ``,
    * `prefix<<...>>`, or a raw tag literal `N(...)` resolved via `parseTag`
    * — for round-tripping through `toCDN()`.
@@ -84,7 +84,7 @@ export interface CborExtension {
    * - `true`: the parser wraps the result of `parseAppSequence` (only —
    *   `parseAppString` and `parseTag` results are unaffected) in a
    *   `CborAppSeqResult`, which round-trips the original `<<...>>` notation
-   *   unconditionally whenever `appStrings !== false` (no extra option
+   *   unconditionally whenever `appPrefix !== false` (no extra option
    *   needed). Use this when the result has no dedicated subclass whose
    *   identity callers rely on (e.g. `instanceof` checks) — the wrapper
    *   changes the returned node's type.
@@ -92,7 +92,7 @@ export interface CborExtension {
    *   results alike, the parser instead sets `appSeqSource` directly on the
    *   *same* result node (preserving its class/identity) and leaves it to
    *   the node's own `_toCDN()` override to decide whether to use it — by
-   *   convention, only when `ToCDNOptions.preserveAppSequence` is set, so
+   *   convention, only when `ToCDNOptions.preserveAppPrefix` is set, so
    *   the default output keeps regenerating `prefix'...'` form from the
    *   resolved value. This covers a `` prefix`...` `` (backtick) source, a
    *   non-canonically-spelled `prefix'...'` source, and a raw tag literal

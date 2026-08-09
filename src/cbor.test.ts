@@ -1097,21 +1097,21 @@ describe('CBOR.format()', () => {
     ).toBe("b1<<h'01', h'02'>>");
   });
 
-  test('modernConcat: true falls back to + when appStrings is false', () => {
+  test('modernConcat: true falls back to + when appPrefix is false', () => {
     expect(
       CBOR.format('"a" + "b"', {
         indent: 2,
         preserveConcatenation: true,
         modernConcat: true,
-        appStrings: false,
+        appPrefix: false,
       })
     ).toBe('"a" +\n  "b"');
   });
 
   test('modernConcat: true has no effect without preserveConcatenation', () => {
-    expect(
-      CBOR.format('"a" + "b"', { indent: 2, modernConcat: true })
-    ).toBe('"ab"');
+    expect(CBOR.format('"a" + "b"', { indent: 2, modernConcat: true })).toBe(
+      '"ab"'
+    );
   });
 
   test('modernConcat: true round-trips through the parser', () => {
@@ -1523,7 +1523,7 @@ describe('CBOR.format()', () => {
     // `ip<<'192.0.2.42'>>` never wraps in CborAppSeqResult at all — it sets
     // appSeqSource directly on the resolved CborIpExt (a CborByteString
     // subclass) and CborIpExt._toCDN() renders the preserved spelling
-    // verbatim when preserveAppSequence is set. CborByteString's
+    // verbatim when preserveAppPrefix is set. CborByteString's
     // _isMultiWordText only checks whether the raw bytes would render as
     // multi-word bare sqstr *text* — it makes no prediction at all about
     // prefixed-literal shapes, so it can't be "wrong" about the (irrelevant)
@@ -1534,7 +1534,7 @@ describe('CBOR.format()', () => {
       CBOR.format("[ip<<'192.0.2.42'>>]", {
         indent: 2,
         inlineLeafContainers: true,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe("[ip<<'192.0.2.42'>>]");
     // IP (uppercase, tagged) is a CborTag subclass (CborTaggedIpExt) that
@@ -1547,14 +1547,14 @@ describe('CBOR.format()', () => {
       CBOR.format("[IP<<'192.0.2.42'>>]", {
         indent: 2,
         inlineLeafContainers: true,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe("[IP<<'192.0.2.42'>>]");
     expect(
       CBOR.format("[DT<<b64'MTk2OS0wNy0yMVQwMjo1NjoxNlo='>>]", {
         indent: 2,
         inlineLeafContainers: true,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe("[DT<<b64'MTk2OS0wNy0yMVQwMjo1NjoxNlo='>>]");
     // ilts/ilbs's preserveAppSeqSource is `true`, so `ilts<<...>>`/
@@ -1568,7 +1568,7 @@ describe('CBOR.format()', () => {
       CBOR.format('[ilts<<"two words">>]', {
         indent: 2,
         inlineLeafContainers: true,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe('[\n  ilts<<"two words">>\n]');
     // A single-word chunk stays inline, same as any other leaf.
@@ -1576,7 +1576,7 @@ describe('CBOR.format()', () => {
       CBOR.format('[ilts<<"word">>]', {
         indent: 2,
         inlineLeafContainers: true,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe('[ilts<<"word">>]');
     // ...while a prefixed-literal (hex) item never counts under the loose
@@ -1592,14 +1592,14 @@ describe('CBOR.format()', () => {
       CBOR.format("[ilbs<<h'00'>>]", {
         indent: 2,
         inlineLeafContainers: true,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe("[ilbs<<h'00'>>]");
     expect(
       CBOR.format("[ilbs<<h'68656c6c6f20776f726c64'>>]", {
         indent: 2,
         inlineLeafContainers: true,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe("[ilbs<<h'68656c6c6f20776f726c64'>>]");
   });
@@ -1638,7 +1638,7 @@ describe('CBOR.format()', () => {
       CBOR.format('[ilts<<"two words" "x">>]', {
         indent: 2,
         inlineLeafContainers: true,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe('[\n  ilts<<"two words" "x">>\n]');
     // Two single-word, whitespace-separated items stay inline.
@@ -1646,7 +1646,7 @@ describe('CBOR.format()', () => {
       CBOR.format('[ilts<<"a" "b">>]', {
         indent: 2,
         inlineLeafContainers: true,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe('[ilts<<"a" "b">>]');
   });
@@ -1664,7 +1664,7 @@ describe('CBOR.format()', () => {
       CBOR.format('[same<<"two words">>_i]', {
         indent: 2,
         inlineLeafContainers: true,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         extensions: [same],
       })
     ).toBe('[\n  same<<"two words">>_i\n]');
@@ -1672,7 +1672,7 @@ describe('CBOR.format()', () => {
       CBOR.format('[same<<"word">>_i]', {
         indent: 2,
         inlineLeafContainers: true,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         extensions: [same],
       })
     ).toBe('[same<<"word">>_i]');
@@ -1689,7 +1689,7 @@ describe('CBOR.format()', () => {
       CBOR.format('[ilts<<"one " + "word">>]', {
         indent: 2,
         inlineLeafContainers: true,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe('[\n  ilts<<"one " + "word">>\n]');
     // Two parts that are each one word, but combine into one word, stay
@@ -1698,7 +1698,7 @@ describe('CBOR.format()', () => {
       CBOR.format('[ilts<<"a" + "b">>]', {
         indent: 2,
         inlineLeafContainers: true,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe('[ilts<<"a" + "b">>]');
     // A chain as one of several app-sequence items: the chain is still
@@ -1708,7 +1708,7 @@ describe('CBOR.format()', () => {
       CBOR.format('[ilts<<"one " + "word", "x">>]', {
         indent: 2,
         inlineLeafContainers: true,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe('[\n  ilts<<"one " + "word", "x">>\n]');
   });
@@ -1725,7 +1725,7 @@ describe('CBOR.format()', () => {
       CBOR.format('<<t1<<"a" + ..., "two words">>>>', {
         indent: 2,
         inlineLeafContainers: true,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         extensions: [t1],
       })
     ).toBe('<<\n  t1<<"a" + ..., "two words">>\n>>');
@@ -1783,7 +1783,7 @@ describe('CBOR.format()', () => {
       CBOR.format('<<t1<<... + "two words">>>>', {
         indent: 2,
         inlineLeafContainers: true,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         extensions: [t1],
       })
     ).toBe('<<t1<<... + "two words">>>>');
@@ -1861,7 +1861,7 @@ describe('CBOR.format()', () => {
       CBOR.format('<<t1<<... + (_ "a"), "two words">>>>', {
         indent: 2,
         inlineLeafContainers: true,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         extensions: [t1],
       })
     ).toBe('<<\n  t1<<... + (_ "a"), "two words">>\n>>');
@@ -1872,7 +1872,7 @@ describe('CBOR.format()', () => {
       CBOR.format('[ilts<<"one " + "word">>]', {
         indent: 2,
         inlineLeafContainers: true,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe('[\n  ilts<<"one " + "word">>\n]');
   });
@@ -1922,7 +1922,7 @@ describe('CBOR.format()', () => {
     expect(
       CBOR.format('<<t1<<... + "two words">>>>', {
         ...options,
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         extensions: [t1],
       })
     ).toBe('<<t1<<... + "two words">>>>');
@@ -2532,7 +2532,7 @@ describe('CBOR.format()', () => {
   });
 
   test('preserveAll + explicit preserveNumberFormat: false also applies inside a preserved raw tag', () => {
-    // preserveAll turns preserveAppSequence on too, but a raw-tag source's
+    // preserveAll turns preserveAppPrefix on too, but a raw-tag source's
     // verbatim text is itself number-literal spelling — the explicit
     // preserveNumberFormat: false must still win there, not just for
     // top-level literals.
@@ -2554,6 +2554,50 @@ describe('CBOR.format()', () => {
 
     const withCapture = CBOR.fromCDN('1 # hi', { preserveAll: true });
     expect(withCapture.toCDN({ preserveAll: true, indent: 2 })).toBe('1 # hi');
+  });
+});
+
+// ─── preserveAppSequence (deprecated alias for preserveAppPrefix) ─────────
+
+describe('preserveAppSequence (deprecated alias)', () => {
+  test('still works when preserveAppPrefix is left unset', () => {
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", {
+        preserveAppSequence: true,
+      })
+    ).toBe("DT<<'1969-07-21T02:56:16Z'>>");
+  });
+
+  test('preserveAppPrefix wins when both are set', () => {
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", {
+        preserveAppSequence: false,
+        preserveAppPrefix: true,
+      })
+    ).toBe("DT<<'1969-07-21T02:56:16Z'>>");
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", {
+        preserveAppSequence: true,
+        preserveAppPrefix: false,
+      })
+    ).toBe("DT'1969-07-21T02:56:16Z'");
+  });
+
+  test('preserveAll fills preserveAppPrefix, not the deprecated alias', () => {
+    // preserveAppSequence itself no longer participates in preserveAll (like
+    // preserveTextString) — only its preserveAppPrefix resolution does.
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", { preserveAll: true })
+    ).toBe("DT<<'1969-07-21T02:56:16Z'>>");
+  });
+
+  test('explicit preserveAppSequence: false is honoured under preserveAll', () => {
+    expect(
+      CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", {
+        preserveAll: true,
+        preserveAppSequence: false,
+      })
+    ).toBe("DT'1969-07-21T02:56:16Z'");
   });
 });
 

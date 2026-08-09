@@ -139,7 +139,7 @@ describe('toHexDump — CborTag', () => {
   });
 
   test('DT tag content shows raw integer, not app-string notation', () => {
-    // Bug: _toHexDump called content._toHexDump without { appStrings: false },
+    // Bug: _toHexDump called content._toHexDump without { appPrefix: false },
     // so dt extension returned "dt'...'" instead of the raw epoch integer.
     const node = new CborTaggedEpochDtExt('2026-06-14T00:00:00Z');
     const lines = node.toHexDump().split('\n');

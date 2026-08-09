@@ -23,7 +23,7 @@ export type {
 } from './types';
 
 // Encoding-width type used by `encodingWidth` fields on CborItem subclasses,
-// and by the `preserveAppSequence` primitives exposed from `@cbortech/cbor/cdn`.
+// and by the `preserveAppSeqSource` primitives exposed from `@cbortech/cbor/cdn`.
 export type { EncodingWidth } from './cbor/encode';
 
 // Structured syntax error thrown by fromCDN/parse
@@ -57,7 +57,7 @@ export { cri } from './extensions/cri';
 export { t1, b1 } from './extensions/concat';
 export { ilbs, ilts } from './extensions/ilstrings';
 
-// The default set of bundled application-oriented extensions, for use with
+// The default set of bundled app-extensions, for use with
 // the `builtinExtensions` option (e.g. to build a filtered subset).
 export { BUILTIN_EXTENSIONS } from './extensions/builtins';
 

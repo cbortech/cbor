@@ -283,49 +283,29 @@ describe('playground', () => {
       byId<HTMLSelectElement>('opt-indent').value = '2'; // restore
     });
 
-    test('individual preserve options open in their own submenu popover', () => {
+    test('individual preserve options sit directly in format-popover, not a nested submenu', () => {
+      // Regression: these used to live inside their own "Individual preserve
+      // options" submenu popover (a separate hideable element that needed
+      // vertical room to open below the button). They're now plain checkboxes
+      // in format-popover's own "Preserve" column, so no submenu element
+      // exists at all.
+      expect(byId('preserve-popover')).toBeNull();
+      expect(byId('preserve-opts-btn')).toBeNull();
+
       byId('format-opts-btn').click();
-      const preserveBtn = byId<HTMLButtonElement>('preserve-opts-btn');
-      const preservePopover = byId('preserve-popover');
+      const formatPopover = byId('format-popover');
+      expect(formatPopover.hidden).toBe(false);
+      expect(formatPopover.contains(byId('opt-comments'))).toBe(true);
+      expect(formatPopover.contains(byId('opt-preserve-all'))).toBe(true);
 
-      // Starts closed; the individual checkboxes live inside it.
-      expect(preservePopover.hidden).toBe(true);
-      expect(preserveBtn.getAttribute('aria-expanded')).toBe('false');
-      expect(preservePopover.contains(byId('opt-comments'))).toBe(true);
-
-      preserveBtn.click();
-      expect(preservePopover.hidden).toBe(false);
-      expect(preserveBtn.getAttribute('aria-expanded')).toBe('true');
-
-      // Clicking a checkbox inside the submenu doesn't close it or the
-      // parent format-popover.
+      // Clicking a preserve checkbox doesn't close format-popover.
       byId('opt-comments').click();
-      expect(preservePopover.hidden).toBe(false);
-      expect(byId('format-popover').hidden).toBe(false);
+      expect(formatPopover.hidden).toBe(false);
       byId('opt-comments').click(); // restore
 
-      // Clicking fully outside closes both.
+      // Clicking fully outside closes it.
       byId('editor').click();
-      expect(preservePopover.hidden).toBe(true);
-      expect(byId('format-popover').hidden).toBe(true);
-    });
-
-    test('closing format-popover also force-closes the preserve submenu', () => {
-      byId('format-opts-btn').click();
-      byId<HTMLButtonElement>('preserve-opts-btn').click();
-      expect(byId('preserve-popover').hidden).toBe(false);
-
-      // Toggling format-popover closed stops propagation before it can
-      // reach the submenu's own document-level close listener, so
-      // initFormatPopover() force-closes it explicitly instead.
-      byId('format-opts-btn').click();
-      expect(byId('format-popover').hidden).toBe(true);
-      expect(byId('preserve-popover').hidden).toBe(true);
-      expect(
-        byId<HTMLButtonElement>('preserve-opts-btn').getAttribute(
-          'aria-expanded'
-        )
-      ).toBe('false');
+      expect(formatPopover.hidden).toBe(true);
     });
 
     test('Preserve everything toggles all "Keep …" checkboxes together', () => {
@@ -558,14 +538,23 @@ describe('playground', () => {
       expect(dl.calls[0]!.blob.size).toBe(expectedLength);
     });
 
+    /**
+     * The Edit tab is a CodeMirror instance (see hex-edit-highlight.ts), not
+     * a plain <textarea>, so its content is driven through the same
+     * `page.elementLocator(...).fill()` user-event path real typing goes
+     * through — not `.value =` — to actually exercise CodeMirror's own
+     * change pipeline (and therefore the app's onDocChanged listener).
+     */
+    function hexEditContent(): Element {
+      return document.querySelector('#bytes-edit-host .cm-content')!;
+    }
+
     test('Edit mode decodes a typed hex dump back into CDN', async () => {
       document
         .querySelector<HTMLButtonElement>('.mode-tabs .tab[data-mode=edit]')!
         .click();
       const hex = bytesToHexString(CBOR.encode({ fromHex: 1 }));
-      const textarea = byId<HTMLTextAreaElement>('bytes-edit');
-      textarea.value = hex;
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      await page.elementLocator(hexEditContent()).fill(hex);
       await vi.waitFor(() => expect(cmText('editor')).toContain('fromHex'), {
         timeout: 2000,
       });
@@ -580,7 +569,6 @@ describe('playground', () => {
       document
         .querySelector<HTMLButtonElement>('.mode-tabs .tab[data-mode=edit]')!
         .click();
-      const textarea = byId<HTMLTextAreaElement>('bytes-edit');
       const hex = '84 18 74 19 03 af 18 ea 19 97 89';
 
       // A prior failed run of this test can leave opt-indent at Compact;
@@ -592,17 +580,20 @@ describe('playground', () => {
       // (The default sample's "IDs" field already contains this same array,
       // so wait for the exact single-line replacement rather than a substring
       // match, which the stale pre-conversion text would also satisfy.)
-      textarea.value = hex;
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      await page.elementLocator(hexEditContent()).fill(hex);
       await vi.waitFor(
         () => expect(cmText('editor')).toBe('[116, 943, 234, 38793]'),
         { timeout: 2000 }
       );
 
       // Compact indent must also flow through to the bytes → CDN conversion.
+      // Re-filling (rather than re-dispatching a bare 'input' event, which
+      // doesn't apply to a CodeMirror doc with no textual change) is what
+      // forces onDocChanged to re-run bytesToCdnText under the new option.
       byId('format-opts-btn').click();
       byId<HTMLSelectElement>('opt-indent').value = '';
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      await page.elementLocator(hexEditContent()).fill('');
+      await page.elementLocator(hexEditContent()).fill(hex);
       await vi.waitFor(
         () => expect(cmText('editor')).toBe('[116,943,234,38793]'),
         { timeout: 2000 }

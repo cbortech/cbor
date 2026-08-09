@@ -37,7 +37,7 @@ export interface ExtensionEntry {
 // entries here. `bignum` / `cbordata` are core RFC 8949 data-model features
 // always active regardless of `builtinExtensions` and aren't shown at all.
 export const EXTENSION_ENTRIES: ExtensionEntry[] = [
-  // Bundled by @cbortech/cbor (draft-ietf-cbor-edn-literals-26 §2.1/§3) —
+  // Bundled by @cbortech/cbor (draft-ietf-cbor-edn-literals-27 §3) —
   // toggled via the `builtinExtensions` option.
   { key: 'dt', label: 'dt / DT', ext: dt, kind: 'builtin' },
   { key: 'ip', label: 'ip / IP', ext: ip, kind: 'builtin' },

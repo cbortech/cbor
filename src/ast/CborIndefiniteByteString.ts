@@ -69,11 +69,11 @@ export class CborIndefiniteByteString extends CborItem {
       }
       return new CborByteString(merged)._toCDN(options, depth);
     }
-    // `ilbs<<...>>` (draft-26 §3.5) replaces the legacy `(_ ...)` marker
-    // notation; falls back to it when `appStrings` disables app-string
+    // `ilbs<<...>>` (draft-27 §3.6) replaces the legacy `(_ ...)` marker
+    // notation; falls back to it when `appPrefix` disables app-string
     // notation entirely.
     const useIlbs =
-      !!options?.modernStreamSyntax && options?.appStrings !== false;
+      !!options?.modernStreamSyntax && options?.appPrefix !== false;
     if (!useIlbs && this.chunks.length === 0) return "''_";
     return serializeContainer({
       node: this,
@@ -94,7 +94,7 @@ export class CborIndefiniteByteString extends CborItem {
       // to serializeContainer's probe — so a chunk that renders as a
       // prefixed literal (`h'...'`) always disqualifies inlining here, same
       // as it would in `[h'...']`. `ilbs<<...>>` is itself an
-      // application-sequence form, so it always collapses like
+      // app-sequence form, so it always collapses like
       // CborEmbeddedCBOR instead (loose rule, entryIsLeaf omitted).
       entryIsLeaf: useIlbs ? undefined : () => true,
       alwaysInlineLeaf: useIlbs,

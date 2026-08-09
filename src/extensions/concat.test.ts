@@ -1,9 +1,9 @@
 /**
  * Tests for the `t1` / `b1` string-concatenation app-extensions
- * (§3.4 of draft-ietf-cbor-edn-literals-26).
+ * (§3.5 of draft-ietf-cbor-edn-literals-27).
  *
  * Covers:
- *  - Spec §3.4 equivalence examples (text and byte)
+ *  - Spec §3.5 equivalence examples (text and byte)
  *  - Mixing text and byte string arguments
  *  - Single-quoted / raw-string shorthand forms
  *  - Ellipsis arguments → tag CPA888 array, adjacent-ellipsis collapsing,
@@ -26,9 +26,9 @@ function cborHex(text: string): string {
   return hex(parseCDN(text).toCBOR());
 }
 
-// ─── Spec §3.4 equivalence examples ───────────────────────────────────────────
+// ─── Spec §3.5 equivalence examples ───────────────────────────────────────────
 
-describe('t1 — spec §3.4 text-string equivalences', () => {
+describe('t1 — spec §3.5 text-string equivalences', () => {
   const expected = cborHex('"Hello world"');
 
   test.each([
@@ -41,7 +41,7 @@ describe('t1 — spec §3.4 text-string equivalences', () => {
   });
 });
 
-describe('b1 — spec §3.4 byte-string equivalences', () => {
+describe('b1 — spec §3.5 byte-string equivalences', () => {
   const expected = cborHex("'Hello world'");
 
   test.each([
@@ -59,7 +59,7 @@ describe('b1 — spec §3.4 byte-string equivalences', () => {
 
 // ─── Shorthand string forms ───────────────────────────────────────────────────
 
-describe('t1 / b1 — string shorthand forms (§2.1)', () => {
+describe('t1 / b1 — string shorthand forms (§3)', () => {
   test("t1'foo' → text string", () => {
     const v = parseCDN("t1'foo'");
     expect(v.toJS()).toBe('foo');
@@ -79,7 +79,7 @@ describe('t1 / b1 — string shorthand forms (§2.1)', () => {
   });
 });
 
-// ─── Ellipsis arguments (§3.4 / §4.2) ─────────────────────────────────────────
+// ─── Ellipsis arguments (§3.5 / §5.2) ─────────────────────────────────────────
 
 describe('t1 / b1 — ellipsis arguments', () => {
   test("b1<<'Hello', ..., 'world'>> ≡ h'48656c6c6f...776f726c64'", () => {
@@ -125,7 +125,7 @@ describe('t1 / b1 — ellipsis arguments', () => {
 
 // ─── UTF-8 validity of the t1 result ──────────────────────────────────────────
 
-describe('t1 — UTF-8 validity (§3.4 / §2.5.8)', () => {
+describe('t1 — UTF-8 validity (§3.5 / §2.3.5)', () => {
   test("t1<<h'ff'>> throws in strict mode", () => {
     expect(() => parseCDN("t1<<h'ff'>>")).toThrow(SyntaxError);
   });
@@ -171,9 +171,9 @@ describe('t1 / b1 — round-trip and errors', () => {
     expect(parseCDN('t1<<"a", "b">>').toCDN()).toBe('t1<<"a", "b">>');
   });
 
-  test('appStrings: false serializes the resolved value', () => {
+  test('appPrefix: false serializes the resolved value', () => {
     expect(
-      parseCDN('t1<<"Hello ", "world">>').toCDN({ appStrings: false })
+      parseCDN('t1<<"Hello ", "world">>').toCDN({ appPrefix: false })
     ).toBe('"Hello world"');
   });
 

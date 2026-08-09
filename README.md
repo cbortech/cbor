@@ -392,23 +392,23 @@ CBOR.format("h'68' + b64'aQ'", {
 //   b64'aQ'
 ```
 
-To render the preserved concatenation using draft-26's `t1<<...>>` /
+To render the preserved concatenation using draft-27's `t1<<...>>` /
 `b1<<...>>` notation instead of `+`, see `modernConcat` in
 [String Concatenation and Indefinite-Length Strings](#string-concatenation-and-indefinite-length-strings).
 
-### Preserve application-string/-sequence notation
+### Preserve app-string/-sequence notation
 
 Some built-in extensions (`dt`/`DT`, `ip`/`IP`) support `prefix'...'`
-(application string), `` prefix`...` `` (backtick application string),
-`prefix<<...>>` (application sequence), and a raw tag literal (`N(...)`)
+(app-string), `` prefix`...` `` (backtick app-string),
+`prefix<<...>>` (app-sequence), and a raw tag literal (`N(...)`)
 notation for the same value, and by default regenerate `prefix'...'` from
 the resolved value on every `CBOR.format()` call — so
 `` DT`1969-07-21T02:56:16Z` ``, `DT<<'1969-07-21T02:56:16Z'>>`, and even the
 raw tag form `1(1749772800)` all normalize to `DT'...'` notation, and a
 non-canonical `DT'...'` spelling (e.g. a `+00:00` offset instead of `Z`)
-gets rewritten too. `preserveAppSequence` keeps the original spelling
+gets rewritten too. `preserveAppPrefix` keeps the original spelling
 instead — whichever form was used. It has no effect when
-`appStrings: false` is also set (raw tag notation is used either way
+`appPrefix: false` is also set (raw tag notation is used either way
 regardless of the original spelling), or on values not parsed from one of
 these forms.
 
@@ -418,15 +418,49 @@ import { CBOR } from '@cbortech/cbor';
 CBOR.format('1(1749772800)');
 // "DT'2025-06-13T00:00:00Z'"
 
-CBOR.format('1(1749772800)', { preserveAppSequence: true });
+CBOR.format('1(1749772800)', { preserveAppPrefix: true });
 // "1(1749772800)"
 
-CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", { preserveAppSequence: true });
+CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", { preserveAppPrefix: true });
 // "DT<<'1969-07-21T02:56:16Z'>>"
 
-CBOR.format('DT`1969-07-21T02:56:16Z`', { preserveAppSequence: true });
+CBOR.format('DT`1969-07-21T02:56:16Z`', { preserveAppPrefix: true });
 // "DT`1969-07-21T02:56:16Z`"
 ```
+
+### Preserve comments
+
+By default, `CBOR.fromCDN()` discards comments and `CBOR.format()` emits
+none. `preserveComments: true` captures them while parsing and re-emits each
+comment verbatim, with whichever marker (`#`, `//`, `/* */`, `/ /`) it was
+originally written with.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const text = '{ "a": 1 } # trailing comment';
+
+CBOR.format(text, { indent: 2 });
+// '{\n  "a": 1\n}'
+
+CBOR.format(text, { indent: 2, preserveComments: true });
+// '{\n  "a": 1\n} # trailing comment'
+```
+
+To normalize every comment's marker instead of keeping the mix as originally
+written, use `comments` — `'c-style'` for `//` and `/* */`, or
+`'cdn-style'` for `#` and `/ /`. It has no effect when `preserveComments` is
+`true` (verbatim wins); explicitly set `comments: 'strip'` (or leave
+both options unset) to drop comments entirely.
+
+```ts
+CBOR.format(text, { indent: 2, comments: 'c-style' });
+// '{\n  "a": 1\n} // trailing comment'
+```
+
+Only effective when `indent` enables pretty-printing: single-line output
+strips all comments regardless, since line comments can only be terminated
+by a newline.
 
 ### Preserve blank lines
 
@@ -687,8 +721,8 @@ console.log(text);
 
 ## String Concatenation and Indefinite-Length Strings
 
-The `t1` / `b1` / `ilbs` / `ilts` application extensions from
-draft-ietf-cbor-edn-literals-26 (§3.4 / §3.5) are enabled by default.
+The `t1` / `b1` / `ilbs` / `ilts` app-extensions from
+draft-ietf-cbor-edn-literals-27 (§3.5 / §3.6) are enabled by default.
 
 `t1<<...>>` and `b1<<...>>` join (text or byte) string arguments from left to
 right into a single text string (`t1`) or byte string (`b1`). Arguments may
@@ -698,11 +732,11 @@ also be ellipses (`...`) to elide parts of a string.
 import { CBOR } from '@cbortech/cbor';
 
 const text = CBOR.fromCDN('t1<<"Hello ", "world">>');
-console.log(text.toCDN({ appStrings: false }));
+console.log(text.toCDN({ appPrefix: false }));
 // "Hello world"
 
 const bytes = CBOR.fromCDN("b1<<'Hello ', h'776f726c64'>>");
-console.log(bytes.toCDN({ appStrings: false }));
+console.log(bytes.toCDN({ appPrefix: false }));
 // 'Hello world'
 ```
 
@@ -715,7 +749,7 @@ documents; this library keeps accepting the legacy syntax on input.
 import { CBOR } from '@cbortech/cbor';
 
 const v = CBOR.fromCDN("ilbs<<'Hello ', 'world'>>");
-console.log(v.toCDN({ appStrings: false }));
+console.log(v.toCDN({ appPrefix: false }));
 // (_ 'Hello ','world')
 ```
 
@@ -725,9 +759,9 @@ Parsing already accepts `t1`/`b1`/`ilbs`/`ilts` notation, but by default
 `toCDN()`/`CBOR.format()` never emit it on their own: a preserved
 concatenation (`preserveConcatenation`) still renders as `+`, and an
 indefinite-length string still renders as the legacy `(_ ...)` streamstring
-form. `modernConcat` and `modernStreamSyntax` opt into emitting the draft-26
+form. `modernConcat` and `modernStreamSyntax` opt into emitting the draft-27
 notation instead — both default to `false` (the legacy syntax), and both fall
-back to it when `appStrings` is `false`.
+back to it when `appPrefix` is `false`.
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -743,51 +777,53 @@ CBOR.format('(_ "a", "b")', { modernStreamSyntax: true });
 // ilts<<"a","b">>
 ```
 
-`modernConcat` also applies within a `...` elision chain (§4.2), rendering
+`modernConcat` also applies within a `...` elision chain (§5.2), rendering
 `"a" + ... + "b"` as `t1<<"a", ..., "b">>` — unlike plain concatenation, this
 happens regardless of `preserveConcatenation`, since an elision chain has no
 single-literal collapsed form to fall back to in the first place.
 
 > [!NOTE]
-> Neither option *converts* `t1`/`b1`/`ilbs`/`ilts` source back to the
+> Neither option converts `t1`/`b1`/`ilbs`/`ilts` source back to the
 > legacy notation: a value parsed from `t1<<...>>` (or `ilbs<<...>>`, etc.)
 > keeps that exact spelling on output regardless of `modernConcat` /
-> `modernStreamSyntax` — as long as `appStrings` is not `false`,
+> `modernStreamSyntax` — as long as `appPrefix` is not `false`,
 > `encodingIndicators` is `'auto'` (both defaults), and the source is either
 > single-line or being rendered with `indent` enabled. `encodingIndicators:
-> 'always'`/`'never'` or `appStrings: false` still normalize it like any
-> other application-string value (e.g. `t1<<"a", "b">>` becomes `"ab"_i`
+'always'`/`'never'` or `appPrefix: false` still normalize it like any
+> other app-string value (e.g. `t1<<"a", "b">>` becomes `"ab"_i`
 > under `encodingIndicators: 'always'`), and a multi-line source falls back
 > to normalized output in single-line mode (that layout can't be reproduced
 > without `indent`):
+>
 > ```ts
 > CBOR.format('t1<<\n  "a",\n  "b"\n>>');
 > // '"ab"' — falls back: multi-line source, no `indent`
 > CBOR.format('t1<<\n  "a",\n  "b"\n>>', { indent: 2 });
 > // 't1<<\n  "a",\n  "b"\n>>' — kept verbatim
 > ```
+>
 > Both options only affect how a value reconstructed from a `+` chain or a
-> `(_ ...)` chunk list is *newly* rendered.
+> `(_ ...)` chunk list is _newly_ rendered.
 
 > [!NOTE]
-> The identifiers `t1` and `b1` are explicitly provisional in draft-26 and
+> The identifiers `t1` and `b1` are explicitly provisional in draft-27 and
 > may be renamed by the CBOR working group.
 
 ## float
 
 Interprets a hex bit-pattern as an IEEE 754 floating-point value
-(draft-ietf-cbor-edn-literals-26 §3.7). Enabled by default.
+(draft-ietf-cbor-edn-literals-27 §3.8). Enabled by default.
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
 
 const v = CBOR.fromCDN("float'7e00'");
-console.log(v.toCDN({ appStrings: false }));
+console.log(v.toCDN({ appPrefix: false }));
 // NaN
 
 // Interpret bytes as float bits
 const v2 = CBOR.fromCDN("float<<h'3f800000'>>");
-console.log(v2.toCDN({ appStrings: false }));
+console.log(v2.toCDN({ appPrefix: false }));
 // 1.0_2
 ```
 
@@ -801,7 +837,7 @@ default. Import what you need and pass it through the `extensions` option.
 Byte-string literals using [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648)
 Base32 encoding. These prefixes are described in §8 of
 [RFC 8949](https://www.rfc-editor.org/rfc/rfc8949) and also mentioned in
-[draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/).
+[draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/27/).
 
 - `b32` — §6 Base32 (`A–Z 2–7` alphabet)
 - `h32` — §7 Base32Hex (`0–9 A–V` alphabet)
@@ -810,11 +846,11 @@ Base32 encoding. These prefixes are described in §8 of
 import { CBOR, b32, h32 } from '@cbortech/cbor';
 
 const v1 = CBOR.fromCDN("b32'AEBAGBA'", { extensions: [b32] });
-console.log(v1.toCDN({ appStrings: false }));
+console.log(v1.toCDN({ appPrefix: false }));
 // h'01020304'
 
 const v2 = CBOR.fromCDN("h32'00P00'", { extensions: [h32] });
-console.log(v2.toCDN({ appStrings: false }));
+console.log(v2.toCDN({ appPrefix: false }));
 // h'003200'
 ```
 
@@ -828,24 +864,24 @@ identical CBOR bytes and returns the first item. This extension is described in
 import { CBOR, same } from '@cbortech/cbor';
 
 const v = CBOR.fromCDN("same<<h'0102', h'0102'>>", { extensions: [same] });
-console.log(v.toCDN({ appStrings: false }));
+console.log(v.toCDN({ appPrefix: false }));
 // h'0102'
 
 // A single-item sequence always passes
 const v2 = CBOR.fromCDN('same<<42>>', { extensions: [same] });
-console.log(v2.toCDN({ appStrings: false }));
+console.log(v2.toCDN({ appPrefix: false }));
 // 42
 ```
 
 ---
 
-Additional application extensions are published as separate packages. Install
+Additional app-extensions are published as separate packages. Install
 the ones you need and pass them through the `extensions` option.
 
 ### hash
 
-`hash` is an application extension defined in §3.3 of
-[draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/).
+`hash` is an app-extension defined in §3.4 of
+[draft-ietf-cbor-edn-literals](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/27/).
 It represents cryptographic hash values in the form `hash'algorithm:value'`.
 Because it requires an external cryptographic library, it is provided separately
 as [@cbortech/hash-extension](https://www.npmjs.com/package/@cbortech/hash-extension).
@@ -870,7 +906,7 @@ const digest = cbor.parse(
 
 ### uuid
 
-`uuid` is a library-specific application extension, provided separately as
+`uuid` is a library-specific app-extension, provided separately as
 [@cbortech/uuid-extension](https://www.npmjs.com/package/@cbortech/uuid-extension).
 
 ```bash
@@ -889,7 +925,7 @@ const id = cbor.parse("uuid'550e8400-e29b-41d4-a716-446655440000'");
 
 ### set / map
 
-`SET` and `MAP` are library-specific application extensions for tagged Set and
+`SET` and `MAP` are library-specific app-extensions for tagged Set and
 Map values. They are provided together as
 [@cbortech/set-map-extensions](https://www.npmjs.com/package/@cbortech/set-map-extensions).
 `SET<<[...]>>` produces CBOR tag 258 over an array, and `MAP<<{...}>>` produces
@@ -1147,9 +1183,11 @@ types).
 
 - CBOR
   - [RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)
+- CBOR Sequences
+  - [RFC 8742](https://www.rfc-editor.org/rfc/rfc8742)
 - CDN (CBOR-EDN)
   - [draft-ietf-cbor-edn-literals-25](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/)
-  - [draft-ietf-cbor-edn-literals-26](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/26/)
+  - [draft-ietf-cbor-edn-literals-27](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/27/)
 - CDDL
   - [RFC 8610](https://www.rfc-editor.org/rfc/rfc8610)
   - [RFC 9682](https://www.rfc-editor.org/rfc/rfc9682)
@@ -1157,7 +1195,7 @@ types).
 
 Implementation notes:
 
-- CDN follows draft-26 while retaining draft-25's `(_ ...)` streamstring syntax
+- CDN follows draft-27 while retaining draft-25's `(_ ...)` streamstring syntax
   and `+` string-concatenation syntax.
 - CDDL implements every RFC 8610 control operator, plus RFC 9165's `.plus`,
   `.cat`, and `.feature`.

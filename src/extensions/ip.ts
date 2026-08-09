@@ -1,5 +1,5 @@
 /**
- * CDN "ip" / "IP" application-extension (§3.2 of draft-ietf-cbor-edn-literals-25).
+ * CDN "ip" / "IP" app-extension (§3.3 of draft-ietf-cbor-edn-literals-27).
  *
  * Parses IPv4 / IPv6 address strings (RFC 3986 §3.2.2) into byte strings,
  * and optionally wraps them in CBOR tags per RFC 9164:
@@ -99,7 +99,7 @@ function expandToFull(truncated: Uint8Array, fullLen: number): Uint8Array {
  */
 export class CborIpExt extends CborByteString {
   override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
-    if (options?.appStrings === false) return super._toCDN(options, _depth);
+    if (options?.appPrefix === false) return super._toCDN(options, _depth);
     const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(BigInt(this.value.length))
     );
@@ -134,7 +134,7 @@ export class CborIpPrefixExt extends CborArray {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toCDN(options, depth);
+    if (options?.appPrefix === false) return super._toCDN(options, depth);
     const decision = decideTaggedAppSeqRendering(
       options,
       this.appSeqSource,
@@ -169,7 +169,7 @@ export class CborTaggedIpExt extends CborTag {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toCDN(options, depth);
+    if (options?.appPrefix === false) return super._toCDN(options, depth);
     const decision = decideTaggedAppSeqRendering(
       options,
       this.appSeqSource,
@@ -186,7 +186,7 @@ export class CborTaggedIpExt extends CborTag {
         this.appSeqEncodingEdits
       );
     // Unlike dt's content classes, ip's content (CborByteString / CborArray
-    // / CborUint) never self-switches on `appStrings`, so no need to force
+    // / CborUint) never self-switches on `appPrefix`, so no need to force
     // it false here — doing so would also force hex byte-string encoding
     // (see CborByteString._toCDN), overriding `bstrEncoding`/`sqstr`.
     if (decision === 'structural') return super._toCDN(options, depth);
@@ -286,7 +286,7 @@ function buildIpValue(prefix: string, content: string): CborItem {
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
 /**
- * Create an ip/IP CborExtension (RFC 9164 / §3.2 of draft-ietf-cbor-edn-literals-25).
+ * Create an ip/IP CborExtension (RFC 9164 / §3.3 of draft-ietf-cbor-edn-literals-27).
  *
  * - `ip'addr'`          → CborIpExt (bare byte string, 4 or 16 bytes)
  * - `IP'addr'`          → CborTaggedIpExt  tag(52 or 54, bytes)
@@ -300,7 +300,7 @@ export const ip: CborExtension = {
   // ip/IP results always have a dedicated subclass (CborIpExt /
   // CborIpPrefixExt / CborTaggedIpExt) that regenerates its notation by
   // default; 'optional' preserves the <<...>> spelling only when
-  // ToCDNOptions.preserveAppSequence is set, without changing the
+  // ToCDNOptions.preserveAppPrefix is set, without changing the
   // returned node's class/identity (see preservedAppSeqSpelling).
   preserveAppSeqSource: 'optional',
 

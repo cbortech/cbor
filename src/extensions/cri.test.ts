@@ -169,9 +169,9 @@ describe("cri — cri'…' (lowercase, untagged)", () => {
     expect(v.toCDN()).toBe("cri'https://example.com/a%20b/c'");
   });
 
-  test('appStrings:false falls back to generic array notation', () => {
+  test('appPrefix:false falls back to generic array notation', () => {
     const v = CBOR.fromCDN("cri'https://example.com/path'");
-    const edn = v.toCDN({ appStrings: false });
+    const edn = v.toCDN({ appPrefix: false });
     expect(edn).not.toContain("cri'");
     expect(edn).toMatch(/^\[/); // plain array
   });
@@ -295,27 +295,27 @@ describe("cri — CRI'…' (uppercase, tag 99)", () => {
     expect(decoded.toCDN()).toBe("CRI'https://example.com'");
   });
 
-  test('appStrings:false falls back to generic tag(99, …) notation', () => {
+  test('appPrefix:false falls back to generic tag(99, …) notation', () => {
     const v = CBOR.fromCDN("CRI'https://example.com/path'");
-    const edn = v.toCDN({ appStrings: false });
+    const edn = v.toCDN({ appPrefix: false });
     expect(edn).toMatch(/^99\(/);
     expect(edn).not.toContain("CRI'");
   });
 });
 
-// ─── preserveAppSequence ───────────────────────────────────────────────────────
+// ─── preserveAppPrefix ───────────────────────────────────────────────────────
 
-describe('cri — preserveAppSequence', () => {
+describe('cri — preserveAppPrefix', () => {
   // By design, cri/CRI regenerate their notation from the resolved URI on
   // every format() call — so <<...>> normally collapses to '...' even
-  // though both spell the same URI. preserveAppSequence keeps the original
+  // though both spell the same URI. preserveAppPrefix keeps the original
   // bracketed spelling instead, without changing the parsed node's class
   // (CborCriExt / CborTaggedCriExt).
 
   test("cri<<'...'>> keeps its bracketed notation when requested", () => {
     expect(
       CBOR.format("cri<<'https://example.com/'>>", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe("cri<<'https://example.com/'>>");
     // Default output normalises to the cri'...' form.
@@ -327,16 +327,16 @@ describe('cri — preserveAppSequence', () => {
   test("CRI<<'...'>> (tagged) keeps its bracketed notation when requested", () => {
     expect(
       CBOR.format("CRI<<'https://example.com/'>>", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe("CRI<<'https://example.com/'>>");
   });
 
-  test('appStrings:false still wins over preserveAppSequence', () => {
+  test('appPrefix:false still wins over preserveAppPrefix', () => {
     expect(
       CBOR.format("CRI<<'https://example.com/'>>", {
-        preserveAppSequence: true,
-        appStrings: false,
+        preserveAppPrefix: true,
+        appPrefix: false,
       })
     ).toMatch(/^99\(/);
   });
@@ -347,7 +347,7 @@ describe('cri — preserveAppSequence', () => {
     // percent-decoded canonical form.
     expect(
       CBOR.format("cri'https://example.com/foo%2Fbar'", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe("cri'https://example.com/foo%2Fbar'");
     expect(CBOR.format("cri'https://example.com/foo%2Fbar'")).toBe(
@@ -357,10 +357,10 @@ describe('cri — preserveAppSequence', () => {
 
   test('keeps prefix`...` (backtick app-string) notation when requested', () => {
     expect(
-      CBOR.format('cri`https://example.com/`', { preserveAppSequence: true })
+      CBOR.format('cri`https://example.com/`', { preserveAppPrefix: true })
     ).toBe('cri`https://example.com/`');
     expect(
-      CBOR.format('CRI`https://example.com/`', { preserveAppSequence: true })
+      CBOR.format('CRI`https://example.com/`', { preserveAppPrefix: true })
     ).toBe('CRI`https://example.com/`');
     // Default output normalises to the single-quoted form.
     expect(CBOR.format('cri`https://example.com/`')).toBe(
@@ -375,15 +375,15 @@ describe('cri — preserveAppSequence', () => {
 
   test('keeps raw tag notation (99(...)) instead of upgrading to CRI notation', () => {
     const rawTag = '99([-4,["example","com"],[""]])';
-    expect(CBOR.format(rawTag, { preserveAppSequence: true })).toBe(rawTag);
+    expect(CBOR.format(rawTag, { preserveAppPrefix: true })).toBe(rawTag);
     // Default output normalises to the regenerated CRI'...' form.
     expect(CBOR.format(rawTag)).toBe("CRI'https://example.com/'");
   });
 
-  test('appStrings:false still wins over preserveAppSequence for raw tag notation', () => {
+  test('appPrefix:false still wins over preserveAppPrefix for raw tag notation', () => {
     const rawTag = '99([-4,["example","com"],[""]])';
     expect(
-      CBOR.format(rawTag, { preserveAppSequence: true, appStrings: false })
+      CBOR.format(rawTag, { preserveAppPrefix: true, appPrefix: false })
     ).toBe(rawTag);
   });
 
@@ -404,9 +404,9 @@ describe('cri — preserveAppSequence', () => {
   });
 
   test('preserveNumberFormat: false overrides verbatim raw tag notation', () => {
-    // preserveAll turns preserveAppSequence on but leaves an explicit
+    // preserveAll turns preserveAppPrefix on but leaves an explicit
     // preserveNumberFormat: false alone; the 'structural' fallback must
-    // force appStrings: false when re-deriving, otherwise CborCriExt's own
+    // force appPrefix: false when re-deriving, otherwise CborCriExt's own
     // _toCDN() would switch straight back to cri'...' notation.
     expect(
       CBOR.format('0x63([-0x4,["example","com"],[""]])', {
@@ -623,11 +623,11 @@ describe('cri — relative CRI references', () => {
     expect(v.toCDN()).toBe("cri'#section'");
   });
 
-  // ── appStrings:false falls back to generic array ──────────────────────────
+  // ── appPrefix:false falls back to generic array ──────────────────────────
 
-  test('relative CRI with appStrings:false falls back to array notation', () => {
+  test('relative CRI with appPrefix:false falls back to array notation', () => {
     const v = CBOR.fromCDN("cri'../sibling'");
-    const edn = v.toCDN({ appStrings: false });
+    const edn = v.toCDN({ appPrefix: false });
     expect(edn).toMatch(/^\[/);
     expect(edn).not.toContain("cri'");
   });
@@ -689,7 +689,7 @@ function hexBytes(s: string): Uint8Array {
 }
 
 describe('cri — non-canonical inner encoding falls back to generic tag notation', () => {
-  // Per §2.3.1: CRI'...'_N encodes only the tag number's width.
+  // Per §4.1: CRI'...'_N encodes only the tag number's width.
   // When the inner CRI array uses a non-canonical count header, _toCDN() falls
   // back to CborTag._toCDN() so the inner EI is preserved.
 

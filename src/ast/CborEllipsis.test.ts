@@ -867,24 +867,24 @@ describe('CborEllipsis — toCDN with modernConcat', () => {
     );
   });
 
-  test('a lone h\'xx...yy\' literal (no real boundary) is not wrapped', () => {
+  test("a lone h'xx...yy' literal (no real boundary) is not wrapped", () => {
     // Nothing to concatenate — modernConcat only changes how a real `+`
     // boundary is spelled, not the compact elided-literal form itself.
     expect(CBOR.format("h'AB...CD'", opts)).toBe("h'ab...cd'");
   });
 
-  test('falls back to raw tag notation when appStrings is false, same as without modernConcat', () => {
+  test('falls back to raw tag notation when appPrefix is false, same as without modernConcat', () => {
     // `...`/`+` elision notation is itself app-string sugar, so
-    // `appStrings: false` already reverts the whole thing to `888([...])`
+    // `appPrefix: false` already reverts the whole thing to `888([...])`
     // regardless of `modernConcat` — matching plain `preserveConcatenation`
-    // with `appStrings: false`.
+    // with `appPrefix: false`.
     const withT1B1 = CBOR.format('"a" + ... + "b"', {
       ...opts,
-      appStrings: false,
+      appPrefix: false,
     });
     const withoutT1B1 = CBOR.format('"a" + ... + "b"', {
       preserveConcatenation: true,
-      appStrings: false,
+      appPrefix: false,
     });
     expect(withT1B1).toBe(withoutT1B1);
   });

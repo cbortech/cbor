@@ -1,6 +1,6 @@
 /**
  * `ilbs'...'` / `ilbs<<...>>` and `ilts'...'` / `ilts<<...>>` app-extensions
- * (§3.5 of draft-ietf-cbor-edn-literals-26) — build indefinite-length
+ * (§3.6 of draft-ietf-cbor-edn-literals-27) — build indefinite-length
  * encoded strings.
  *
  * Semantically identical to `b1` / `t1` at the data model level, but instead
@@ -17,7 +17,7 @@
  * elision in an indefinite-length string.
  *
  * These extensions replace the now-deprecated `(_ chunk, ...)` streamstring
- * syntax for new CDN documents (§2.5.5); this library keeps accepting the
+ * syntax for new CDN documents (§4.3); this library keeps accepting the
  * legacy syntax on input.
  */
 
@@ -131,7 +131,7 @@ function makeExtension(prefix: 'ilbs' | 'ilts'): CborExtension {
     preserveAppSeqSource: true,
 
     // prefix'...' / prefix`...` is shorthand for a sequence with exactly
-    // that one text string (§2.1) — the result has a single chunk.
+    // that one text string (§3) — the result has a single chunk.
     // The result is wrapped so that toCDN() round-trips an app-string form
     // instead of normalizing to the deprecated `(_ ...)` streamstring
     // syntax.  The source is reconstructed from the content, so the raw

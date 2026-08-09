@@ -55,11 +55,11 @@ export class CborIndefiniteTextString extends CborItem {
       const merged = this.chunks.map((c) => c.value).join('');
       return new CborTextString(merged)._toCDN(options, depth);
     }
-    // `ilts<<...>>` (draft-26 §3.5) replaces the legacy `(_ ...)` marker
-    // notation; falls back to it when `appStrings` disables app-string
+    // `ilts<<...>>` (draft-27 §3.6) replaces the legacy `(_ ...)` marker
+    // notation; falls back to it when `appPrefix` disables app-string
     // notation entirely.
     const useIlts =
-      !!options?.modernStreamSyntax && options?.appStrings !== false;
+      !!options?.modernStreamSyntax && options?.appPrefix !== false;
     if (!useIlts && this.chunks.length === 0) return '""_';
     return serializeContainer({
       node: this,
@@ -78,7 +78,7 @@ export class CborIndefiniteTextString extends CborItem {
       // inlineLeafContainers: entryIsLeaf is trivially always true (chunks
       // can never be containers), but its presence is what signals "strict"
       // to serializeContainer's probe. `ilts<<...>>` is itself an
-      // application-sequence form, so it always collapses like
+      // app-sequence form, so it always collapses like
       // CborEmbeddedCBOR instead (loose rule, entryIsLeaf omitted).
       entryIsLeaf: useIlts ? undefined : () => true,
       alwaysInlineLeaf: useIlts,

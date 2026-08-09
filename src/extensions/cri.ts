@@ -1,5 +1,5 @@
 /**
- * Standard CDN "cri" / "CRI" application-extension (§3.4 and §5.2.5 of draft-ietf-cbor-edn-literals-25).
+ * Standard CDN "cri" / "CRI" app-extension (§3.7 and §6.2.5 of draft-ietf-cbor-edn-literals-27).
  *
  * Converts URI references (RFC 3986) to CRI (Constrained Resource Identifier,
  * draft-ietf-core-href) CBOR array format and back.
@@ -24,7 +24,7 @@
  *   discard   = uint — number of path segments to remove from base before appending
  *               (1 = same directory, 2 = one level up "../", N = (N-1) levels up)
  *
- * Tag number 99 is used for the tagged "CRI" variant (§3.4 of draft-ietf-cbor-edn-literals-25).
+ * Tag number 99 is used for the tagged "CRI" variant (§3.7 of draft-ietf-cbor-edn-literals-27).
  */
 
 import type { ToCDNOptions } from '../types';
@@ -52,7 +52,7 @@ const PREFIX_CRI = 'cri';
 const PREFIX_CRI_TAGGED = 'CRI';
 
 /**
- * CBOR tag number for the tagged CRI variant (§3.4 and §5.2.5 of draft-ietf-cbor-edn-literals-25).
+ * CBOR tag number for the tagged CRI variant (§3.7 and §6.2.5 of draft-ietf-cbor-edn-literals-27).
  */
 export const TAG_CRI = 99n;
 
@@ -638,7 +638,7 @@ function criItemsToUri(items: readonly CborItem[]): string {
  */
 export class CborCriExt extends CborArray {
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toCDN(options, depth);
+    if (options?.appPrefix === false) return super._toCDN(options, depth);
     const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(BigInt(this.items.length))
     );
@@ -674,7 +674,7 @@ export class CborTaggedCriExt extends CborTag {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toCDN(options, depth);
+    if (options?.appPrefix === false) return super._toCDN(options, depth);
     const decision = decideTaggedAppSeqRendering(
       options,
       this.appSeqSource,
@@ -691,9 +691,9 @@ export class CborTaggedCriExt extends CborTag {
         this.appSeqEncodingEdits
       );
     // Like dt's content classes, cri's content (CborCriExt) re-switches to
-    // its own app-string notation unless `appStrings` is forced false here.
+    // its own app-string notation unless `appPrefix` is forced false here.
     if (decision === 'structural')
-      return super._toCDN({ ...options, appStrings: false }, depth);
+      return super._toCDN({ ...options, appPrefix: false }, depth);
     try {
       const inner = this.content as CborArray;
       // CRI'...'_N only encodes the tag's width. If the inner array uses a
@@ -739,7 +739,7 @@ function buildCriValue(prefix: string, uri: string): CborItem {
 // ─── Extension factory ────────────────────────────────────────────────────────
 
 /**
- * Create the cri/CRI CborExtension (§3.4 and §5.2.5 of draft-ietf-cbor-edn-literals-25).
+ * Create the cri/CRI CborExtension (§3.7 and §6.2.5 of draft-ietf-cbor-edn-literals-27).
  *
  * - `cri'uri'`        → CborCriExt (bare CRI array, no CBOR tag)
  * - `CRI'uri'`        → CborTaggedCriExt tag(99, CRI array)
@@ -750,7 +750,7 @@ export const cri: CborExtension = {
   tagNumbers: [TAG_CRI],
   // cri/CRI results always have a dedicated subclass (CborCriExt /
   // CborTaggedCriExt) that regenerates its notation by default; 'optional'
-  // preserves the source spelling only when ToCDNOptions.preserveAppSequence
+  // preserves the source spelling only when ToCDNOptions.preserveAppPrefix
   // is set, without changing the returned node's class/identity.
   preserveAppSeqSource: 'optional',
 

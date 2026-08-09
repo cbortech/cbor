@@ -284,7 +284,7 @@ export class Tokenizer {
       if (c === '/') {
         const next = this.input[this.pos + 1] ?? '';
         if (next === '/') {
-          // EDN end-of-line comment: // to end of line (§2.2)
+          // EDN end-of-line comment: // to end of line (§2.1)
           const start = this.pos;
           const line = this.line;
           const col = this.col;
@@ -303,7 +303,7 @@ export class Tokenizer {
           continue;
         }
         if (next === '*') {
-          // EDN block comment: /* ... */ (§2.2)
+          // EDN block comment: /* ... */ (§2.1)
           const start = this.pos;
           const line = this.line;
           const col = this.col;
@@ -321,7 +321,7 @@ export class Tokenizer {
           });
           continue;
         }
-        // EDN slash-delimited comment: / ... / (§2.2, first char must not be * or /)
+        // EDN slash-delimited comment: / ... / (§2.1, first char must not be * or /)
         const start = this.pos;
         const line = this.line;
         const col = this.col;
@@ -348,7 +348,7 @@ export class Tokenizer {
    * Returns true if a comment was consumed, false if the current char is not a
    * comment start. `quote` is the closing delimiter character.
    *
-   * Supports / ... /, /* *\/, //, and # comment forms (§2.2).
+   * Supports / ... /, /* *\/, //, and # comment forms (§2.1).
    */
   private _skipByteStringComment(quote: string): boolean {
     const ch = this._ch();
@@ -474,7 +474,7 @@ export class Tokenizer {
    * Called with `i` pointing at the comment-start character.
    * Returns the index after the comment, or -1 if no comment was found.
    *
-   * Supports / ... /, /* *\/, //, and # comment forms (§2.2).
+   * Supports / ... /, /* *\/, //, and # comment forms (§2.1).
    * `context` is used in unterminated-comment error messages.
    */
   private _skipRawComment(
@@ -556,13 +556,13 @@ export class Tokenizer {
    * - Literal LF (U+000A) is allowed; all other C0 controls and U+007F are rejected.
    * - Literal CR (U+000D) is silently stripped (source-level CRLF normalisation).
    * - Only spec-defined escape sequences are accepted; `\q` etc. throw SyntaxError.
-   * - `\/` is valid only in double-quoted strings (not in escapable-s, §5.1).
+   * - `\/` is valid only in double-quoted strings (not in escapable-s, §6.1).
    * - `\\` (backslash) is valid in both single- and double-quoted strings.
    * - `\uXXXX` for a high surrogate must be immediately followed by `\uXXXX` for
    *   the corresponding low surrogate; lone surrogates are rejected.
    * - `\u{N}` … `\u{10FFFF}` extended syntax is supported; surrogates are rejected.
    * - In single-quoted strings, `\u` escapes to printable ASCII (U+0020–U+007E)
-   *   are forbidden (hexchar-s restriction, draft-25 §5.1).
+   *   are forbidden (hexchar-s restriction, draft-ietf-cbor-edn-literals-27 §6.1).
    */
   private _readStringContent(quote: string): string {
     this._advance(); // opening quote
@@ -601,13 +601,13 @@ export class Tokenizer {
 
       const ch = this._ch();
 
-      // Strip literal CR (cross-platform source normalisation — spec §2.5.1)
+      // Strip literal CR (cross-platform source normalisation — spec §1.3.5)
       if (ch === '\r') {
         this._advance();
         continue;
       }
 
-      // Reject unescaped C0 control characters (except LF) and DEL — spec §5.1 unescaped
+      // Reject unescaped C0 control characters (except LF) and DEL — spec §6.1 unescaped
       const cp = ch.codePointAt(0)!;
       if ((cp < 0x20 && cp !== 0x0a) || cp === 0x7f)
         this._fail(
@@ -652,7 +652,7 @@ export class Tokenizer {
             if (e === '/') {
               if (quote === "'")
                 this._fail(
-                  `\\/ is not a valid escape in single-quoted byte strings (§5.1)`,
+                  `\\/ is not a valid escape in single-quoted byte strings (§6.1)`,
                   eLine,
                   eCol
                 );
@@ -769,7 +769,8 @@ export class Tokenizer {
    *   which is then decoded into the corresponding non-BMP code point.
    *
    * In single-quoted strings (`quote === "'"`), `\u` escapes that resolve to
-   * printable ASCII (U+0020–U+007E) are rejected per draft-25 §5.1 hexchar-s.
+   * printable ASCII (U+0020–U+007E) are rejected per draft-ietf-cbor-edn-literals-27
+   * §6.1 hexchar-s.
    * Use `\\` for backslash (U+005C) and `\'` for the single-quote delimiter.
    */
   private _readUnicodeEscape(
@@ -783,12 +784,12 @@ export class Tokenizer {
 
     /** Warn or throw when this is a single-quoted string and the code point is printable ASCII. */
     const checkSingleQuotedPrintable = (cp: number): void => {
-      // Per draft-25 §5.1 hexchar-s, \u escapes for printable ASCII (U+0020–U+007E)
+      // Per draft-ietf-cbor-edn-literals-27 §6.1 hexchar-s, \u escapes for printable ASCII (U+0020–U+007E)
       // are not valid in single-quoted strings.  Use \\ for backslash and \' for
       // the single-quote delimiter.  In lenient mode (onEscapeWarning set) we emit
       // a warning and accept the value rather than hard-failing.
       if (quote === "'" && cp >= 0x20 && cp <= 0x7e) {
-        const msg = `\\u escape for printable ASCII U+${cp.toString(16).padStart(4, '0').toUpperCase()} is not allowed in single-quoted strings (§5.1 hexchar-s)`;
+        const msg = `\\u escape for printable ASCII U+${cp.toString(16).padStart(4, '0').toUpperCase()} is not allowed in single-quoted strings (§6.1 hexchar-s)`;
         if (this.onEscapeWarning) {
           this.onEscapeWarning(
             msg,
@@ -893,7 +894,7 @@ export class Tokenizer {
 
   /**
    * Read raw text-string content between N-backtick delimiters
-   * (§2.5.4 of draft-ietf-cbor-edn-literals-26).
+   * (§2.3.3 of draft-ietf-cbor-edn-literals-27).
    *
    * - The opening delimiter is the maximal run of consecutive backticks (N ≥ 1).
    * - No escape sequences are processed — content is taken verbatim.
@@ -915,7 +916,7 @@ export class Tokenizer {
       n++;
     }
 
-    // Strip a single leading CRLF or LF (§2.5.4, first trimming rule)
+    // Strip a single leading CRLF or LF (§2.3.3, first trimming rule)
     let newlineStripped = false;
     if (!this._eof() && this._ch() === '\r') this._advance(); // CR
     if (!this._eof() && this._ch() === '\n') {
@@ -973,7 +974,7 @@ export class Tokenizer {
         }
         if (m === n) {
           // Closing delimiter found (alikerawdelim: exactly N backticks).
-          // Second trimming rule (§2.5.4): if no leading newline was
+          // Second trimming rule (§2.3.3): if no leading newline was
           // stripped and the inner string starts AND ends with a space,
           // strip exactly one of each.
           if (
@@ -985,7 +986,7 @@ export class Tokenizer {
             out = out.slice(1, -1);
           if (out === '')
             this._fail(
-              'raw string must not be empty (§2.5.4)',
+              'raw string must not be empty (§2.3.3)',
               openLine,
               openCol
             );
@@ -993,7 +994,7 @@ export class Tokenizer {
         }
         if (m > n) {
           // Longer runs can neither be content (shortrawdelim) nor close the
-          // string (alikerawdelim) — §2.5.4 / §5.1 Item 7.
+          // string (alikerawdelim) — §2.3.3 / §6.1.
           this._fail(
             `raw string contains a run of ${m} backquotes, longer than the ${n}-backquote delimiter; use longer delimiters`,
             runLine,
@@ -1007,14 +1008,14 @@ export class Tokenizer {
         // rawchars = 1*(%x0a/%x0d / %x20-5f / %x61-7e / NONASCII) — HT and other C0 controls forbidden
         if (cp < 0x20 && cp !== 0x0a && cp !== 0x0d) {
           this._fail(
-            `raw string content must not contain control character U+${cp.toString(16).toUpperCase().padStart(4, '0')} (§2.5.4)`,
+            `raw string content must not contain control character U+${cp.toString(16).toUpperCase().padStart(4, '0')} (§2.3.3)`,
             this.line,
             this.col
           );
         }
         if (cp === 0x7f) {
           this._fail(
-            'raw string content must not contain DEL (U+007F) (§2.5.4)',
+            'raw string content must not contain DEL (U+007F) (§2.3.3)',
             this.line,
             this.col
           );
@@ -1027,7 +1028,7 @@ export class Tokenizer {
   }
 
   /**
-   * Post-process raw hex content from a `h``…``\` raw string (§5.3.3).
+   * Post-process raw hex content from a `h``…``\` raw string (§6.3.3).
    *
    * Skips:
    *   - lblank whitespace (LF, SP; also CR for source-level normalisation)
@@ -1036,7 +1037,7 @@ export class Tokenizer {
    * Detects `...` ellipsis sequences.
    *
    * A trailing `# comment` immediately before the closing delimiter is allowed
-   * per §5.3.3 `r-app-string-h`.
+   * per §6.3.3 `r-app-string-h`.
    *
    * Returns { value: hex-string-with-ellipsis-markers, elided: boolean }
    */
@@ -1058,12 +1059,12 @@ export class Tokenizer {
       // HT is still forbidden (rawchars excludes %x09)
       if (ch === '\t') {
         this._fail(
-          'horizontal tab (HT) is not allowed inside h`` raw byte string literals (§5.3.3)',
+          'horizontal tab (HT) is not allowed inside h`` raw byte string literals (§6.3.3)',
           tokenLine,
           tokenCol
         );
       }
-      // Comments (§2.2)
+      // Comments (§2.1)
       const afterComment = this._skipRawComment(
         raw,
         i,
@@ -1100,7 +1101,7 @@ export class Tokenizer {
   }
 
   /**
-   * Post-process raw base64 content from a `b64``…``\` raw string (§5.3.4).
+   * Post-process raw base64 content from a `b64``…``\` raw string (§6.3.4).
    *
    * Skips:
    *   - lblank whitespace (LF, SP; also CR for source-level normalisation)
@@ -1125,7 +1126,7 @@ export class Tokenizer {
       // HT forbidden
       if (ch === '\t') {
         this._fail(
-          'horizontal tab (HT) is not allowed inside b64`` raw byte string literals (§5.3.4)',
+          'horizontal tab (HT) is not allowed inside b64`` raw byte string literals (§6.3.4)',
           tokenLine,
           tokenCol
         );
@@ -1153,7 +1154,7 @@ export class Tokenizer {
   /**
    * Read raw byte-string content between `quote` chars (b64 / b64url).
    *
-   * Strips whitespace and skips `# ...` line comments per §2.5.5.
+   * Strips whitespace and skips `# ...` line comments per §6.2.2.
    * `/` is NOT treated as a comment delimiter because it is a valid base64 character.
    */
   private _readByteContent(quote: string): string {
@@ -1161,7 +1162,7 @@ export class Tokenizer {
     let raw = '';
     while (!this._eof() && this._ch() !== quote) {
       const ch = this._ch();
-      // lblank = %x0A / %x20 — only LF and SP are whitespace (§5.2.2 Fig 4); HT is forbidden
+      // lblank = %x0A / %x20 — only LF and SP are whitespace (§6.2.2 Fig 4); HT is forbidden
       if (ch === '\n' || ch === ' ') {
         this._advance();
         continue;
@@ -1173,7 +1174,7 @@ export class Tokenizer {
       }
       if (ch === '\t') {
         this._fail(
-          'horizontal tab (HT) is not allowed inside byte string literals (§5.2.2)',
+          'horizontal tab (HT) is not allowed inside byte string literals (§6.2.2)',
           this.line,
           this.col
         );
@@ -1222,7 +1223,7 @@ export class Tokenizer {
   }
 
   /**
-   * Read hex byte-string content, recognising `...` ellipsis sequences (§4.2).
+   * Read hex byte-string content, recognising `...` ellipsis sequences (§5.2).
    *
    * Returns the raw hex string (with `...` markers embedded) and a flag
    * indicating whether any ellipsis was found.
@@ -1243,14 +1244,14 @@ export class Tokenizer {
     let hexEndsWithEllipsis = false;
     while (!this._eof() && this._ch() !== quote) {
       const ch = this._ch();
-      // lblank = %x0A / %x20 only; HT is forbidden per §5.2 Figure 3
+      // lblank = %x0A / %x20 only; HT is forbidden per §6.2.1 Figure 3
       if (ch === '\n' || ch === ' ' || ch === '\r') {
         this._advance();
         continue;
       }
       if (ch === '\t') {
         this._fail(
-          'horizontal tab (HT) is not allowed inside hex byte string literals (§5.2.1)',
+          'horizontal tab (HT) is not allowed inside hex byte string literals (§6.2.1)',
           this.line,
           this.col
         );
@@ -1474,7 +1475,7 @@ export class Tokenizer {
       return this._readNumber(line, col);
     if (/[a-zA-Z_]/.test(c)) return this._readIdent(line, col);
 
-    // Three or more dots → ellipsis notation (§4.2)
+    // Three or more dots → ellipsis notation (§5.2)
     if (c === '.') {
       if (
         (this.input[this.pos + 1] ?? '') === '.' &&
@@ -1758,7 +1759,7 @@ export class Tokenizer {
     }
 
     // Byte-string prefixes or app-string extensions.
-    // App-prefix grammar (§3 of draft-ietf-cbor-edn-literals-25):
+    // App-prefix grammar (§6.1 of draft-ietf-cbor-edn-literals-27):
     //   app-prefix = lcalpha *lcldh / ucalpha *ucldh
     //   lcldh = lcalpha / DIGIT / "-"
     //   ucldh = ucalpha / DIGIT / "-"
@@ -1832,12 +1833,12 @@ export class Tokenizer {
           }
         }
 
-        // app-rstring: prefix followed by backtick raw string (§2.5.4 / app-rstring)
+        // app-rstring: prefix followed by backtick raw string (§2.3.3 / app-rstring)
         if (q === '`') {
           const raw = this._readRawStringContent();
           switch (ident) {
             case 'h': {
-              // §5.3.3: lblank + / / block comments + # line comments + ellipsis
+              // §6.3.3: lblank + / / block comments + # line comments + ellipsis
               const { value: hexVal, elided } = this._processRawHexContent(
                 raw,
                 line,
@@ -1851,7 +1852,7 @@ export class Tokenizer {
               );
             }
             case 'b64':
-              // §5.3.4: lblank + # line comments
+              // §6.3.4: lblank + # line comments
               return this._tok(
                 'BYTES_B64',
                 this._processRawB64Content(raw, line, col),

@@ -12,8 +12,8 @@ import float from './float';
 /**
  * Core data-model extensions (bignum tags 2/3, embedded-CBOR tag 24, and the
  * CPA888 ellipsis tag). These implement base CBOR/EDN representation rather
- * than an application-oriented extension, so they are always active and are
- * not affected by the `builtinExtensions` option.
+ * than an app-extension, so they are always active and are not affected by
+ * the `builtinExtensions` option.
  */
 export const CORE_EXTENSIONS: readonly CborExtension[] = [
   bignum,
@@ -22,12 +22,12 @@ export const CORE_EXTENSIONS: readonly CborExtension[] = [
 ];
 
 /**
- * Default application-oriented extensions bundled with the library.
+ * Default app-extensions bundled with the library.
  * Overridable per call via `builtinExtensions` (an array to use instead, or
  * `false` to disable all of them).
  *
- * `dt`, `ip`, `t1`, and `b1` are mandatory-to-implement per §2.1 of
- * draft-ietf-cbor-edn-literals-26; `cri`, `ilbs`, `ilts`, and `float` are
+ * `dt`, `ip`, `t1`, and `b1` are mandatory-to-implement per §3 of
+ * draft-ietf-cbor-edn-literals-27; `cri`, `ilbs`, `ilts`, and `float` are
  * bundled but not mandatory.
  */
 export const BUILTIN_EXTENSIONS: readonly CborExtension[] = [

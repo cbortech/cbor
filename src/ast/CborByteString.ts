@@ -16,14 +16,17 @@ import {
   canonicalEncodingWidth,
   stripByteLiteralComments,
   danglingCommentsByGap,
+  shouldEmitComments,
+  resolveCommentStyle,
   type ByteCommentSyntax,
 } from '../cdn/serialize-utils';
 
 /**
  * A preserved literal source, with any embedded comment stripped unless
- * `preserveComments` is set — the preserved spelling should still drop
- * comments by default, the same as an unpreserved literal re-derived from
- * its decoded value would. `commentSyntax` is `undefined` for a literal
+ * comments are requested (`preserveComments`/`comments`) — the preserved
+ * spelling should still drop comments by default, the same as an
+ * unpreserved literal re-derived from its decoded value would.
+ * `commentSyntax` is `undefined` for a literal
  * family with no comment syntax at all (bare sqstr `'...'`) or one whose
  * comment syntax isn't known (an app-string extension other than the
  * specific built-in `b32`/`h32` objects — see `ednCommentSyntax`); in
@@ -36,7 +39,7 @@ function preservedSource(
   commentSyntax: ByteCommentSyntax | undefined
 ): string | undefined {
   if (source === undefined) return undefined;
-  if (options?.preserveComments || commentSyntax === undefined) return source;
+  if (shouldEmitComments(options) || commentSyntax === undefined) return source;
   return stripByteLiteralComments(source, commentSyntax);
 }
 
@@ -141,7 +144,7 @@ export class CborByteString extends CborItem {
         canonicalEncodingWidth(BigInt(this.value.length))
       );
       let encoding = options?.bstrEncoding ?? this.ednEncoding;
-      if (options?.appStrings === false && encoding !== 'hex') encoding = 'hex';
+      if (options?.appPrefix === false && encoding !== 'hex') encoding = 'hex';
       const literals = this.ednParts.map((part) => {
         const source = options?.preserveByteString
           ? preservedSource(part.source, options, part.commentSyntax)
@@ -150,17 +153,22 @@ export class CborByteString extends CborItem {
           ? source
           : serializeBytes(part.bytes, encoding, options?.sqstr);
       });
-      const midComments = options?.preserveComments
+      const midComments = shouldEmitComments(options)
         ? danglingCommentsByGap(
             this.comments?.dangling,
             this.ednParts,
-            typeof options.preserveComments === 'string'
-              ? options.preserveComments
-              : undefined
+            resolveCommentStyle(options)
           )
         : undefined;
-      if (options?.modernConcat && options?.appStrings !== false) {
-        return joinAppSeqParts('b1', literals, suffix, indentStr, _depth, midComments);
+      if (options?.modernConcat && options?.appPrefix !== false) {
+        return joinAppSeqParts(
+          'b1',
+          literals,
+          suffix,
+          indentStr,
+          _depth,
+          midComments
+        );
       }
       literals[literals.length - 1] += suffix;
       return joinConcatParts(literals, indentStr, _depth, midComments);
@@ -191,7 +199,7 @@ export class CborByteString extends CborItem {
       canonicalEncodingWidth(BigInt(this.value.length))
     );
     let encoding = options?.bstrEncoding ?? this.ednEncoding;
-    if (options?.appStrings === false && encoding !== 'hex') encoding = 'hex';
+    if (options?.appPrefix === false && encoding !== 'hex') encoding = 'hex';
     return serializeBytes(this.value, encoding, options?.sqstr) + suffix;
   }
 

@@ -33,8 +33,8 @@ const FLOAT_EXTENSIONS = [float, same];
  * edn-abnf encodes "`'foo\\bar'` is invalid" as a negative assertion
  * `'foo\\bar' ≠ 'foo\\bar'` (same expression on both sides — valid input
  * would produce equal bytes and fail; invalid input would throw and trivially
- * pass).  However, draft-25 §5.1 escapable1 includes `\` (0x5C), so `\\` is
- * a valid escape in single-quoted strings.  We follow draft-25 and skip this
+ * pass).  However, draft-27 §6.1 escapable1 includes `\` (0x5C), so `\\` is
+ * a valid escape in single-quoted strings.  We follow the draft and skip this
  * assertion.
  */
 // For "-" with output, knownSkip is keyed by rawInput alone — NOT "input ≠ output".
@@ -43,7 +43,7 @@ const BASIC_SKIP = new Map<string, string>([
   // "-" op key = rawInput only
   [
     "'foo\\\\bar'",
-    "corpus conflict: draft-25 §5.1 escapable1 includes \\\\ — 'foo\\\\bar' is valid",
+    "corpus conflict: draft-27 §6.1 escapable1 includes \\\\ — 'foo\\\\bar' is valid",
   ],
 ]);
 
