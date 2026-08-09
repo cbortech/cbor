@@ -544,6 +544,10 @@ select.ctl {
 .popover-grid label.check {
   justify-content: flex-start;
   gap: 6px;
+  /* Labels with a space (e.g. "dt / DT") have a break opportunity a
+     single-word label like "float" or "ilbs" doesn't, so only they wrapped
+     to a second line at the grid column's width. */
+  white-space: nowrap;
 }
 .popover label.check:has(input:disabled) {
   color: var(--fg-dim);
