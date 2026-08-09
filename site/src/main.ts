@@ -11,7 +11,7 @@ import {
 import { createEditor, selectRange, setEditorText } from './editor/editor';
 import { HexView } from './hexview/hexview';
 import { rangeAtByte, rangeAtChar } from './mapping/lockstep';
-import { inspectJS } from './js-preview';
+import { appendJSChunks, tokenizeJS } from './js-preview';
 import { DEFAULT_SAMPLE, SAMPLES } from './samples';
 import { initCddlPane, type CddlPane } from './cddl-pane';
 import {
@@ -132,11 +132,16 @@ function renderBytesPane(): void {
   if (mode === 'annotated' || mode === 'plain') {
     hexView.render(rows, bytes, mode);
   } else if (mode === 'js') {
+    jsViewEl.textContent = '';
     try {
-      jsViewEl.textContent =
-        seqLength > 1
-          ? binAsts.map((ast) => inspectJS(ast.toJS())).join('\n─────\n')
-          : inspectJS(binAst.toJS());
+      if (seqLength > 1) {
+        binAsts.forEach((ast, i) => {
+          if (i > 0) jsViewEl.appendChild(document.createTextNode('\n─────\n'));
+          appendJSChunks(jsViewEl, tokenizeJS(ast.toJS()));
+        });
+      } else {
+        appendJSChunks(jsViewEl, tokenizeJS(binAst.toJS()));
+      }
     } catch (e) {
       jsViewEl.textContent = e instanceof Error ? e.message : String(e);
     }

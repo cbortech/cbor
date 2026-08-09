@@ -115,6 +115,11 @@ export class HexView {
           const spanEl = document.createElement('span');
           spanEl.className = `hex-span mt${span.majorType} role-${span.role}`;
           spanEl.textContent = hexPairs(bytes, cursor, lineEnd);
+          // Same per-item description the Annotated tab shows inline (e.g.
+          // "Array of length 3", a leaf's CDN spelling, "break") — Hex mode
+          // has no room for a comment column, so surface it as a native
+          // tooltip on hover instead.
+          spanEl.title = row.comment;
           spanEl.addEventListener('click', () =>
             this.callbacks.onSelectBytes(span.byteStart)
           );
