@@ -692,17 +692,17 @@ select.ctl {
 
 .hex-table {
   display: grid;
-  /* max-content alone sizes this column to the *widest row's* bytes across
-     the whole table (grid tracks are shared across rows, not per-row) — a
-     single long byte/text span (no longer truncated, see hexview.ts) could
-     then claim so much width that the 1fr comment column next to *every*
-     row collapsed to 0 and disappeared entirely. fit-content(50%) — track
-     sizing's own built-in "max-content capped at a limit" (unlike
-     minmax(0, min(max-content, 50%)), which isn't valid track-sizing syntax
-     and silently drops the whole declaration, collapsing to a single
-     implicit column) — bounds that; .hex-bytes' own overflow-x lets just
-     that one row scroll to see the rest of its bytes, instead of blowing
-     out every row's layout. */
+  /* fit-content(50%) is max-content (i.e. size to content, as normal),
+     capped at 50% — a plain minmax(0, min(max-content, 50%)) is *not*
+     valid track-sizing syntax (min() isn't accepted there) and silently
+     drops the whole declaration; fit-content() is grid's own dedicated
+     function for exactly this "cap max-content at a limit" shape. Caps the
+     *column*, shared across every row (grid tracks aren't sized per row),
+     so one very long row (e.g. 128 bytes, no longer display-truncated —
+     see hexview.ts) can't squeeze the comment column toward 0 on every
+     row; .hex-bytes' own overflow-x lets that row scroll instead, driven
+     by the one shared .hex-scroll-track (hexview.ts) rather than each row
+     showing its own scrollbar. */
   grid-template-columns: fit-content(50%) 1fr;
   width: 100%;
 }
@@ -732,6 +732,53 @@ select.ctl {
   padding-right: 2ch;
   cursor: pointer;
   overflow-x: auto;
+  /* Still a real scroll container (driveHorizontalScrollFrom sets its
+     scrollLeft directly), just with its own scrollbar UI hidden — .hex-
+     scroll-track below is the one visible scrollbar for the whole column. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.hex-bytes::-webkit-scrollbar {
+  display: none;
+}
+/* The shared scrollbar itself — see driveHorizontalScrollFrom (hexview.ts)
+   for why one authoritative source, not every row's scrollbar syncing the
+   others, and renderAnnotated for how its scroll range (.hex-scroll-track-
+   inner's width) is set to the widest row's content. grid-column: 1 keeps
+   it in the same (shared, 50%-capped) track as every .hex-bytes cell, so
+   its visible width always matches theirs; sticky keeps it reachable
+   without scrolling all the way down through however many rows there are. */
+.hex-scroll-track {
+  grid-column: 1;
+  position: sticky;
+  bottom: 0;
+  height: 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--bg-editor);
+  border-top: 1px solid var(--border);
+  /* Explicit (not auto-hiding/overlay) scrollbar, unlike every .hex-bytes
+     row's now-hidden one — this is the only scroll affordance shown, so it
+     needs to stay visible and discoverable regardless of the platform's
+     default (overlay scrollbars that only appear on hover/scroll would
+     make it easy to miss entirely). */
+  scrollbar-width: thin;
+}
+.hex-scroll-track::-webkit-scrollbar {
+  height: 10px;
+}
+.hex-scroll-track::-webkit-scrollbar-track {
+  background: transparent;
+}
+.hex-scroll-track::-webkit-scrollbar-thumb {
+  background: var(--fg-faint);
+  border-radius: 5px;
+}
+.hex-scroll-track::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-dim);
+}
+.hex-scroll-track-inner {
+  height: 1px;
 }
 .hex-comment {
   color: var(--fg-dim);

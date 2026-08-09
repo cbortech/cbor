@@ -22,6 +22,40 @@ function hexPairs(bytes: Uint8Array, start: number, end: number): string {
   return parts.join(' ');
 }
 
+/**
+ * Drive every `.hex-bytes` cell's scroll position from one dedicated
+ * scrollbar (`.hex-scroll-track`), instead of syncing the cells against
+ * each other directly.
+ *
+ * An earlier version mirrored cells pairwise: on any cell's own `scroll`
+ * event, copy its `scrollLeft` to every other cell. That's a feedback
+ * loop waiting to happen — scrolling the widest row (say, a 128-byte span
+ * whose max scrollLeft is 2803px) writes 2803 to a narrower row (say, 32
+ * bytes, max 556px); the browser silently clamps that row's *own*
+ * scrollLeft to 556 and fires its *own* `scroll` event for the change;
+ * that event, arriving after the sync loop that triggered it had already
+ * finished (so a same-tick re-entrancy guard doesn't catch it), then
+ * mirrors the clamped 556 back onto every row, including the one actually
+ * being dragged — so it could never reach its own end. One authoritative
+ * source with only one-way propagation (track → cells) can't loop like
+ * that, since nothing ever reads a cell's scrollLeft back.
+ *
+ * The track's own scroll range is set to the widest row's content width
+ * (see renderAnnotated), so its scrollbar's thumb-to-range ratio reflects
+ * the longest row; every other row's assignment is simply clamped to
+ * whatever range *that* row actually has, same as scrolling it directly
+ * would do — a row shorter than the current position just shows fully
+ * scrolled, with nothing more to reveal.
+ */
+function driveHorizontalScrollFrom(
+  track: HTMLElement,
+  cells: readonly HTMLElement[]
+): void {
+  track.addEventListener('scroll', () => {
+    for (const cell of cells) cell.scrollLeft = track.scrollLeft;
+  });
+}
+
 export class HexView {
   private rendered: RenderedRow[] = [];
 
@@ -47,10 +81,30 @@ export class HexView {
   }
 
   private renderAnnotated(rows: HexRow[], bytes: Uint8Array): void {
+    // Bytes cell immediately followed by its comment cell, one row per
+    // item — same DOM order as what's visually selected, so drag-selecting
+    // (and copying) a range of rows picks up exactly those rows and
+    // nothing else. A version of this view that instead grouped "every
+    // row's bytes, then every row's comments" into two separate columns
+    // (so the bytes column could scroll as one shared unit without a
+    // per-row scrollbar) seemed appealing, but a Range's two endpoints can
+    // each land in either column; the browser's own selection would then,
+    // in DOM tree order, straddle unrelated rows on both sides — no amount
+    // of copy-event post-processing can recover which rows were actually
+    // meant, because by the time 'copy' fires the Selection/Range itself
+    // already spans more than intended. Keeping cells adjacent avoids the
+    // problem entirely; each row keeps its own overflow-x (needed so a row
+    // wider than the shared 50%-capped column can show any of its content
+    // at all), but its scrollbar is hidden (.hex-bytes) and driven by one
+    // shared, visible .hex-scroll-track instead — see
+    // driveHorizontalScrollFrom for why that's one-way (track → rows), not
+    // rows syncing each other.
     const table = document.createElement('div');
     table.className = 'hex-table';
+    const bytesCells: HTMLElement[] = [];
+
     for (const row of rows) {
-      const bytesCell = document.createElement('span');
+      const bytesCell = document.createElement('div');
       bytesCell.className = 'hex-bytes';
       bytesCell.style.paddingLeft = `${row.depth * 3}ch`;
       for (const span of row.spans) {
@@ -62,24 +116,27 @@ export class HexView {
         // through toHexDump() and was never affected) produced a byte
         // sequence with a literal "…" spliced into it — CBOR.fromHexDumpSeq
         // then rejected it as an invalid hex token when pasted into the
-        // Edit tab. A long span just makes its row wide; #hexview already
-        // scrolls horizontally (.hex-bytes: white-space: nowrap).
+        // Edit tab. A long span just makes its own row scroll (see
+        // .hex-scroll-track below); it no longer affects any other row.
         spanEl.textContent = hexPairs(bytes, span.byteStart, span.byteEnd);
         bytesCell.appendChild(spanEl);
         bytesCell.appendChild(document.createTextNode(' '));
       }
 
-      const commentCell = document.createElement('span');
+      const commentCell = document.createElement('div');
       commentCell.className = 'hex-comment';
       commentCell.textContent = `— ${row.comment}`;
 
-      // Flat grid children — both cells get the click listener.
+      // Flat grid children — both cells get the click listener; CSS
+      // handles hover/active/invalid highlighting via adjacent-sibling and
+      // :has() selectors, since the two cells are always DOM siblings.
       const onClick = () => this.callbacks.onSelectBytes(row.byteStart);
       bytesCell.addEventListener('click', onClick);
       commentCell.addEventListener('click', onClick);
 
       table.appendChild(bytesCell);
       table.appendChild(commentCell);
+      bytesCells.push(bytesCell);
       // Track the bytes cell; CSS handles the comment via adjacent sibling.
       this.rendered.push({
         el: bytesCell,
@@ -87,7 +144,28 @@ export class HexView {
         byteEnd: row.byteEnd,
       });
     }
+    // The one visible, shared horizontal scrollbar for the whole bytes
+    // column — a grid child of its own, placed in column 1 so it lines up
+    // under every .hex-bytes cell (same shared, 50%-capped track — see
+    // .hex-table), and sticky to the pane's bottom edge so it's reachable
+    // without scrolling all the way down through however many rows there
+    // are. Its own scroll range is the widest row's content, set below
+    // once the cells are actually laid out (scrollWidth needs that).
+    const scrollTrack = document.createElement('div');
+    scrollTrack.className = 'hex-scroll-track';
+    const scrollTrackInner = document.createElement('div');
+    scrollTrackInner.className = 'hex-scroll-track-inner';
+    scrollTrack.appendChild(scrollTrackInner);
+    table.appendChild(scrollTrack);
+
     this.container.appendChild(table);
+
+    const maxScrollWidth = bytesCells.reduce(
+      (max, cell) => Math.max(max, cell.scrollWidth),
+      0
+    );
+    scrollTrackInner.style.width = `${maxScrollWidth}px`;
+    driveHorizontalScrollFrom(scrollTrack, bytesCells);
   }
 
   private renderPlain(rows: HexRow[], bytes: Uint8Array): void {
