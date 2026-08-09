@@ -538,14 +538,23 @@ describe('playground', () => {
       expect(dl.calls[0]!.blob.size).toBe(expectedLength);
     });
 
+    /**
+     * The Edit tab is a CodeMirror instance (see hex-edit-highlight.ts), not
+     * a plain <textarea>, so its content is driven through the same
+     * `page.elementLocator(...).fill()` user-event path real typing goes
+     * through — not `.value =` — to actually exercise CodeMirror's own
+     * change pipeline (and therefore the app's onDocChanged listener).
+     */
+    function hexEditContent(): Element {
+      return document.querySelector('#bytes-edit-host .cm-content')!;
+    }
+
     test('Edit mode decodes a typed hex dump back into CDN', async () => {
       document
         .querySelector<HTMLButtonElement>('.mode-tabs .tab[data-mode=edit]')!
         .click();
       const hex = bytesToHexString(CBOR.encode({ fromHex: 1 }));
-      const textarea = byId<HTMLTextAreaElement>('bytes-edit');
-      textarea.value = hex;
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      await page.elementLocator(hexEditContent()).fill(hex);
       await vi.waitFor(() => expect(cmText('editor')).toContain('fromHex'), {
         timeout: 2000,
       });
@@ -560,7 +569,6 @@ describe('playground', () => {
       document
         .querySelector<HTMLButtonElement>('.mode-tabs .tab[data-mode=edit]')!
         .click();
-      const textarea = byId<HTMLTextAreaElement>('bytes-edit');
       const hex = '84 18 74 19 03 af 18 ea 19 97 89';
 
       // A prior failed run of this test can leave opt-indent at Compact;
@@ -572,17 +580,20 @@ describe('playground', () => {
       // (The default sample's "IDs" field already contains this same array,
       // so wait for the exact single-line replacement rather than a substring
       // match, which the stale pre-conversion text would also satisfy.)
-      textarea.value = hex;
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      await page.elementLocator(hexEditContent()).fill(hex);
       await vi.waitFor(
         () => expect(cmText('editor')).toBe('[116, 943, 234, 38793]'),
         { timeout: 2000 }
       );
 
       // Compact indent must also flow through to the bytes → CDN conversion.
+      // Re-filling (rather than re-dispatching a bare 'input' event, which
+      // doesn't apply to a CodeMirror doc with no textual change) is what
+      // forces onDocChanged to re-run bytesToCdnText under the new option.
       byId('format-opts-btn').click();
       byId<HTMLSelectElement>('opt-indent').value = '';
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      await page.elementLocator(hexEditContent()).fill('');
+      await page.elementLocator(hexEditContent()).fill(hex);
       await vi.waitFor(
         () => expect(cmText('editor')).toBe('[116,943,234,38793]'),
         { timeout: 2000 }

@@ -819,13 +819,10 @@
         <div id="bytes-edit-wrap" class="bytes-view" hidden>
           <p class="edit-hint">
             Paste plain hex or an annotated hex dump — it is parsed as you type
-            and converted back to CDN.
+            and converted back to CDN. Colored and hinted the same way as the
+            Hex tab once it parses.
           </p>
-          <textarea
-            id="bytes-edit"
-            spellcheck="false"
-            placeholder="83 01 02 03"
-          ></textarea>
+          <div id="bytes-edit-host" class="editor-host"></div>
         </div>
         <div
           id="bytes-status"

@@ -1,6 +1,7 @@
 import './styles.css';
 import { CBOR } from '@cbortech/cbor';
 import { forceLinting } from '@codemirror/lint';
+import { placeholder } from '@codemirror/view';
 import {
   bytesToCdnText,
   bytesToHexString,
@@ -9,6 +10,12 @@ import {
   type Conversion,
 } from './convert';
 import { createEditor, selectRange, setEditorText } from './editor/editor';
+import {
+  hexEditHighlight,
+  hexEditHoverTooltip,
+  hexEditModelField,
+  setHexEditModel,
+} from './editor/hex-edit-highlight';
 import { HexView } from './hexview/hexview';
 import { rangeAtByte, rangeAtChar } from './mapping/lockstep';
 import { appendJSChunks, tokenizeJS } from './js-preview';
@@ -57,7 +64,7 @@ const el = <T extends HTMLElement>(id: string): T =>
 const hexviewEl = el<HTMLDivElement>('hexview');
 const jsViewEl = el<HTMLPreElement>('js-view');
 const editWrapEl = el<HTMLDivElement>('bytes-edit-wrap');
-const editTextarea = el<HTMLTextAreaElement>('bytes-edit');
+const bytesEditHostEl = el<HTMLDivElement>('bytes-edit-host');
 const statusEl = el<HTMLDivElement>('bytes-status');
 const byteCountEl = el<HTMLSpanElement>('byte-count');
 const exportBtnEl = el<HTMLButtonElement>('export-btn');
@@ -70,6 +77,14 @@ let hexParseWarning: string | null = null;
 // Set to true while setEditorText is called programmatically from hex input so
 // that onDocChanged does not prematurely clear hexParseWarning.
 let _programmaticEdit = false;
+// Set to true while renderBytesPane() syncs hexEditEditor's document from
+// `bytes` (i.e. the Edit tab isn't focused, so nothing the user typed is
+// being echoed back). Without this, that sync — a real CodeMirror doc
+// change, unlike assigning a plain <textarea>.value — would itself trigger
+// hexEditEditor's onDocChanged, reconvert the very bytes it was just set
+// from, and overwrite the main CDN editor: a feedback loop with no
+// informational value (see hexEditEditor's onDocChanged below).
+let _programmaticHexEdit = false;
 
 const hexView = new HexView(hexviewEl, {
   onSelectBytes(byteStart) {
@@ -97,7 +112,8 @@ function renderBytesPane(): void {
     setStatus('error', e instanceof Error ? e.message : String(e));
     hexView.renderEmpty('');
     jsViewEl.textContent = '';
-    if (document.activeElement !== editTextarea) editTextarea.value = '';
+    if (!hexEditEditor.hasFocus) syncHexEditText('');
+    hexEditEditor.dispatch({ effects: setHexEditModel.of(null) });
     return;
   }
   if (conversion.empty) {
@@ -106,12 +122,16 @@ function renderBytesPane(): void {
     exportBtnEl.title = 'Save as a .cbor file';
     hexView.renderEmpty('Type CDN on the left to see CBOR bytes.');
     jsViewEl.textContent = '';
-    if (document.activeElement !== editTextarea) editTextarea.value = '';
+    if (!hexEditEditor.hasFocus) syncHexEditText('');
+    hexEditEditor.dispatch({ effects: setHexEditModel.of(null) });
     setStatus(null);
     return;
   }
 
   const { bytes, binAst, rows, warnings, seqLength, binAsts } = conversion;
+  // Kept fresh regardless of the active tab, so the coloring/hints in the
+  // Edit tab (see hex-edit-highlight.ts) are ready the moment it's shown.
+  hexEditEditor.dispatch({ effects: setHexEditModel.of({ rows, bytes }) });
   byteCountEl.textContent =
     `· ${bytes.length} byte${bytes.length === 1 ? '' : 's'}` +
     (seqLength > 1 ? ` (${seqLength} items)` : '');
@@ -145,8 +165,8 @@ function renderBytesPane(): void {
     } catch (e) {
       jsViewEl.textContent = e instanceof Error ? e.message : String(e);
     }
-  } else if (mode === 'edit' && document.activeElement !== editTextarea) {
-    editTextarea.value = bytesToHexString(bytes);
+  } else if (mode === 'edit' && !hexEditEditor.hasFocus) {
+    syncHexEditText(bytesToHexString(bytes));
   }
 }
 
@@ -241,25 +261,55 @@ initPaneDivider(el('cddl-divider'), cddlPaneEl, cdnPane);
 
 // ── Bytes edit mode: hex / annotated dump → CDN ──────────────────────────────
 
-editTextarea.addEventListener(
-  'input',
-  debounce(() => {
-    const text = editTextarea.value;
-    if (text.trim() === '') {
-      setEditorText(editor, '');
-      return;
-    }
-    try {
-      const { cdn, warnings } = bytesToCdnText(text, readFormatOptions());
-      applyHexResult(cdn, warnings);
-    } catch (e) {
-      debouncedUpdate.cancel();
-      conversion = { ok: false, error: e };
-      renderBytesPane();
-      updateCopyBytesBtn();
-    }
-  }, 300)
+// Editable hex dump, colored and hover-hinted the same way as the read-only
+// Hex tab once it parses (see hex-edit-highlight.ts) — the coloring model
+// is kept fresh independently, in renderBytesPane().
+const convertHexEditText = debounce((text: string) => {
+  if (text.trim() === '') {
+    setEditorText(editor, '');
+    return;
+  }
+  try {
+    const { cdn, warnings } = bytesToCdnText(text, readFormatOptions());
+    applyHexResult(cdn, warnings);
+  } catch (e) {
+    debouncedUpdate.cancel();
+    conversion = { ok: false, error: e };
+    renderBytesPane();
+    updateCopyBytesBtn();
+  }
+}, 300);
+
+const hexEditEditor = createEditor(
+  bytesEditHostEl,
+  '',
+  {
+    onDocChanged(text) {
+      // A programmatic sync from `bytes` (renderBytesPane, via
+      // syncHexEditText below), not something the user typed — converting
+      // it back would just reproduce the bytes it came from. See
+      // _programmaticHexEdit's own comment for why this guard exists at
+      // all (a plain <textarea> wouldn't have needed it).
+      if (_programmaticHexEdit) return;
+      convertHexEditText(text);
+    },
+    onCursorMoved: () => {},
+  },
+  [
+    hexEditModelField,
+    hexEditHighlight,
+    hexEditHoverTooltip,
+    placeholder('83 01 02 03'),
+  ]
 );
+
+/** Set hexEditEditor's document without triggering its own onDocChanged
+ * reconversion — see _programmaticHexEdit. */
+function syncHexEditText(text: string): void {
+  _programmaticHexEdit = true;
+  setEditorText(hexEditEditor, text);
+  _programmaticHexEdit = false;
+}
 
 // Pasting hex/dump text directly onto the rendered hex view also converts.
 hexviewEl.addEventListener('paste', (e) => {

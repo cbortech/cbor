@@ -692,7 +692,18 @@ select.ctl {
 
 .hex-table {
   display: grid;
-  grid-template-columns: max-content 1fr;
+  /* max-content alone sizes this column to the *widest row's* bytes across
+     the whole table (grid tracks are shared across rows, not per-row) — a
+     single long byte/text span (no longer truncated, see hexview.ts) could
+     then claim so much width that the 1fr comment column next to *every*
+     row collapsed to 0 and disappeared entirely. fit-content(50%) — track
+     sizing's own built-in "max-content capped at a limit" (unlike
+     minmax(0, min(max-content, 50%)), which isn't valid track-sizing syntax
+     and silently drops the whole declaration, collapsing to a single
+     implicit column) — bounds that; .hex-bytes' own overflow-x lets just
+     that one row scroll to see the rest of its bytes, instead of blowing
+     out every row's layout. */
+  grid-template-columns: fit-content(50%) 1fr;
   width: 100%;
 }
 /* Hover: highlight both cells via adjacent-sibling and :has(). */
@@ -720,6 +731,7 @@ select.ctl {
   white-space: nowrap;
   padding-right: 2ch;
   cursor: pointer;
+  overflow-x: auto;
 }
 .hex-comment {
   color: var(--fg-dim);
@@ -790,17 +802,31 @@ select.ctl {
   margin: 0 0 8px;
 }
 
-#bytes-edit {
-  width: 100%;
-  height: calc(100% - 48px);
-  resize: none;
-  background: var(--bg-editor);
-  color: var(--fg);
+/* display:flex would defeat the hidden attribute, same as .pane[hidden]
+   above — #bytes-edit-wrap's own ID-selector specificity otherwise beats
+   the [hidden] UA rule, so it stayed visible under whichever tab was
+   actually selected. */
+#bytes-edit-wrap[hidden] {
+  display: none;
+}
+#bytes-edit-wrap {
+  display: flex;
+  flex-direction: column;
+}
+#bytes-edit-host {
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 8px;
-  font-family: var(--mono);
-  font-size: 13px;
+  overflow: hidden;
+}
+
+/* CodeMirror wraps hoverTooltip's returned DOM in its own .cm-tooltip
+   (bg/border/color already themed in editor/theme.ts) — this just sizes
+   the text inside to match the read-only Hex tab's native-title hints. */
+.cm-hex-tooltip {
+  padding: 6px 8px;
+  max-width: 340px;
+  font-size: 0.78rem;
+  line-height: 1.4;
 }
 
 .bytes-status {

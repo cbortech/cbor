@@ -56,12 +56,17 @@ export class HexView {
       for (const span of row.spans) {
         const spanEl = document.createElement('span');
         spanEl.className = `hex-span mt${span.majorType} role-${span.role}`;
-        const displayEnd = Math.min(span.byteEnd, span.byteStart + 16);
-        spanEl.textContent = hexPairs(bytes, span.byteStart, displayEnd);
+        // Full span, never truncated with an "…" placeholder: that used to
+        // be real DOM text past 16 bytes, so selecting and copying the
+        // rendered view (as opposed to the "Copy bytes" button, which goes
+        // through toHexDump() and was never affected) produced a byte
+        // sequence with a literal "…" spliced into it — CBOR.fromHexDumpSeq
+        // then rejected it as an invalid hex token when pasted into the
+        // Edit tab. A long span just makes its row wide; #hexview already
+        // scrolls horizontally (.hex-bytes: white-space: nowrap).
+        spanEl.textContent = hexPairs(bytes, span.byteStart, span.byteEnd);
         bytesCell.appendChild(spanEl);
-        if (displayEnd < span.byteEnd)
-          bytesCell.appendChild(document.createTextNode('… '));
-        else bytesCell.appendChild(document.createTextNode(' '));
+        bytesCell.appendChild(document.createTextNode(' '));
       }
 
       const commentCell = document.createElement('span');
