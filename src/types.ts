@@ -918,9 +918,25 @@ export interface ToCDNOptions {
    * Numeric format for floating-point values in CDN output.
    * - `'decimal'`: standard decimal notation (e.g. `1.5`, `145544.0_3`)
    * - `'hex'`: C99-style hex float notation (e.g. `0x1.8p+0`, `0x1.1c54p+17_3`)
+   * - `'app-extension'`: `float'...'` app-string notation carrying the
+   *   value's exact IEEE 754 bit pattern (e.g. `float'3fc00000'`), per §3.8
+   *   of draft-ietf-cbor-edn-literals-27. Unlike `'decimal'`/`'hex'`, this
+   *   is derived from the value's actual encoded bytes rather than its
+   *   numeric text, so it losslessly represents NaN payloads and
+   *   ±Infinity too (not just finite values). Falls back to `'decimal'`
+   *   when `appPrefix` is `false`, matching how other built-in extensions
+   *   fall back to raw notation.
+   *
+   * A value originally parsed from a `float'...'`/`float<<...>>` literal
+   * normally re-emits that exact source spelling regardless of this option
+   * (so its own encoding-width choice, or a non-canonical bit pattern, isn't
+   * silently normalized away) — leaving `floatFormat` unset, or setting it
+   * to `'app-extension'`, keeps that round-trip. Explicitly requesting
+   * `'decimal'` or `'hex'` opts out of it and reformats the value like any
+   * other float, since that's the point of asking for a different format.
    * @default 'decimal'
    */
-  floatFormat?: 'decimal' | 'hex';
+  floatFormat?: 'decimal' | 'hex' | 'app-extension';
 
   /**
    * Split long text strings using CDN string concatenation syntax (`"a" + "b"`).
