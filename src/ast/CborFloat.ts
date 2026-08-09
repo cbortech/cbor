@@ -31,7 +31,7 @@ export class CborFloat extends CborItem {
   /**
    * Original app-string source (e.g. `float'7e00'`), set by the parser when
    * this float is the result of a `float'...'` app-string.  Used by toCDN()
-   * to round-trip the literal when `appStrings` is not false.
+   * to round-trip the literal when `appPrefix` is not false.
    */
   ednSource?: string;
 
@@ -98,7 +98,7 @@ export class CborFloat extends CborItem {
     // multiple lines (e.g. a `float<<...>>` app-sequence written across
     // lines) cannot be re-emitted, so it falls back to normal serialization.
     if (
-      options?.appStrings !== false &&
+      options?.appPrefix !== false &&
       this.ednSource !== undefined &&
       (resolveIndent(options) !== null || !/[\r\n]/.test(this.ednSource))
     ) {

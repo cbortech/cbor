@@ -638,7 +638,7 @@ function criItemsToUri(items: readonly CborItem[]): string {
  */
 export class CborCriExt extends CborArray {
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toCDN(options, depth);
+    if (options?.appPrefix === false) return super._toCDN(options, depth);
     const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(BigInt(this.items.length))
     );
@@ -674,7 +674,7 @@ export class CborTaggedCriExt extends CborTag {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toCDN(options, depth);
+    if (options?.appPrefix === false) return super._toCDN(options, depth);
     const decision = decideTaggedAppSeqRendering(
       options,
       this.appSeqSource,
@@ -691,9 +691,9 @@ export class CborTaggedCriExt extends CborTag {
         this.appSeqEncodingEdits
       );
     // Like dt's content classes, cri's content (CborCriExt) re-switches to
-    // its own app-string notation unless `appStrings` is forced false here.
+    // its own app-string notation unless `appPrefix` is forced false here.
     if (decision === 'structural')
-      return super._toCDN({ ...options, appStrings: false }, depth);
+      return super._toCDN({ ...options, appPrefix: false }, depth);
     try {
       const inner = this.content as CborArray;
       // CRI'...'_N only encodes the tag's width. If the inner array uses a
@@ -750,7 +750,7 @@ export const cri: CborExtension = {
   tagNumbers: [TAG_CRI],
   // cri/CRI results always have a dedicated subclass (CborCriExt /
   // CborTaggedCriExt) that regenerates its notation by default; 'optional'
-  // preserves the source spelling only when ToCDNOptions.preserveAppSequence
+  // preserves the source spelling only when ToCDNOptions.preserveAppPrefix
   // is set, without changing the returned node's class/identity.
   preserveAppSeqSource: 'optional',
 

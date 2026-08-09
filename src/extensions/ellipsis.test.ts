@@ -2,7 +2,7 @@
  * Tests for the core CPA888 ellipsis decode extension:
  *  - tag 888 reconstruction to CborEllipsis during fromCBOR / integer-tag EDN,
  *  - compile → decompile round-trip of `...` notation,
- *  - appStrings: false fallback to raw 888(…) tag notation,
+ *  - appPrefix: false fallback to raw 888(…) tag notation,
  *  - malformed 888 shapes left as plain CborTag.
  */
 
@@ -75,23 +75,23 @@ describe('ellipsis — compile/decompile round-trip', () => {
   });
 });
 
-describe('ellipsis — appStrings: false falls back to tag notation', () => {
+describe('ellipsis — appPrefix: false falls back to tag notation', () => {
   test('subtree elision → 888(null)', () => {
     const bin = CBOR.compile('{...:...}');
-    expect(CBOR.decompile(bin, { appStrings: false })).toBe(
+    expect(CBOR.decompile(bin, { appPrefix: false })).toBe(
       '{888(null):888(null)}'
     );
   });
 
   test('string elision → 888([...]) with nested 888(null)', () => {
     const bin = CBOR.compile('"He" + ... + "ob"');
-    expect(CBOR.decompile(bin, { appStrings: false })).toBe(
+    expect(CBOR.decompile(bin, { appPrefix: false })).toBe(
       '888(["He",888(null),"ob"])'
     );
   });
 
-  test('parsed `...` also honours appStrings: false', () => {
-    expect(CBOR.fromCDN('...').toCDN({ appStrings: false })).toBe('888(null)');
+  test('parsed `...` also honours appPrefix: false', () => {
+    expect(CBOR.fromCDN('...').toCDN({ appPrefix: false })).toBe('888(null)');
   });
 });
 

@@ -1565,7 +1565,7 @@ describe('parseCDN — encoding indicators on app-sequences', () => {
 
   test("dt<<'1970-01-01T00:01:00Z'>>_1 toCDN auto round-trips EI", () => {
     const n = parseCDN("dt<<'1970-01-01T00:01:00Z'>>_1", { extensions: [dt] });
-    expect(n.toCDN({ appStrings: true })).toBe("dt'1970-01-01T00:01:00Z'_1");
+    expect(n.toCDN({ appPrefix: true })).toBe("dt'1970-01-01T00:01:00Z'_1");
   });
 
   test("DT<<'2026-06-14T00:00:00Z'>>_3 → encodingWidth=3 on tag per §4.1", () => {
@@ -1579,7 +1579,7 @@ describe('parseCDN — encoding indicators on app-sequences', () => {
 
   test("DT<<'2026-06-14T00:00:00Z'>>_3 toCDN auto round-trips EI", () => {
     const n = parseCDN("DT<<'2026-06-14T00:00:00Z'>>_3", { extensions: [dt] });
-    expect(n.toCDN({ appStrings: true })).toBe("DT'2026-06-14T00:00:00Z'_3");
+    expect(n.toCDN({ appPrefix: true })).toBe("DT'2026-06-14T00:00:00Z'_3");
   });
 
   test("IP<<'192.0.2.1'>>_3 → encodingWidth=3 on tag per §4.1", () => {
@@ -1593,7 +1593,7 @@ describe('parseCDN — encoding indicators on app-sequences', () => {
 
   test("IP<<'192.0.2.1'>>_3 toCDN auto round-trips EI", () => {
     const n = parseCDN("IP<<'192.0.2.1'>>_3", { extensions: [ip] });
-    expect(n.toCDN({ appStrings: true })).toBe("IP'192.0.2.1'_3");
+    expect(n.toCDN({ appPrefix: true })).toBe("IP'192.0.2.1'_3");
   });
 
   test('user extension: myext<<42>>_2 → CborUint with encodingWidth=2', () => {

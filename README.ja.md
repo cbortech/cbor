@@ -399,8 +399,8 @@ CBOR.format("h'68' + b64'aQ'", {
 `` DT`1969-07-21T02:56:16Z` `` も `DT<<'1969-07-21T02:56:16Z'>>` も、生の
 タグ記法 `1(1749772800)` さえも、すべて `DT'...'` 記法に正規化され、さら
 に非正規な `DT'...'` の表記(例えば `Z` の代わりに `+00:00` を使った場合
-など)も書き換えられます。`preserveAppSequence` を指定すると、実際に使わ
-れていた表記のまま保持します。`appStrings: false` を同時に指定した場合は
+など)も書き換えられます。`preserveAppPrefix` を指定すると、実際に使わ
+れていた表記のまま保持します。`appPrefix: false` を同時に指定した場合は
 効果がありません(どちらにせよ元の表記に関わらず生のタグ記法になるため)。
 これらの記法からパースされていない値にも効果はありません。
 
@@ -410,15 +410,49 @@ import { CBOR } from '@cbortech/cbor';
 CBOR.format('1(1749772800)');
 // "DT'2025-06-13T00:00:00Z'"
 
-CBOR.format('1(1749772800)', { preserveAppSequence: true });
+CBOR.format('1(1749772800)', { preserveAppPrefix: true });
 // "1(1749772800)"
 
-CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", { preserveAppSequence: true });
+CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", { preserveAppPrefix: true });
 // "DT<<'1969-07-21T02:56:16Z'>>"
 
-CBOR.format('DT`1969-07-21T02:56:16Z`', { preserveAppSequence: true });
+CBOR.format('DT`1969-07-21T02:56:16Z`', { preserveAppPrefix: true });
 // "DT`1969-07-21T02:56:16Z`"
 ```
+
+### コメントを保持する
+
+デフォルトでは、`CBOR.fromCDN()` はコメントを破棄し、`CBOR.format()` も
+コメントを出力しません。`preserveComments: true` を指定すると、パース時に
+コメントを取り込み、元々書かれていたマーカー(`#`・`//`・`/* */`・`/ /`)の
+まま再出力します。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const text = '{ "a": 1 } # trailing comment';
+
+CBOR.format(text, { indent: 2 });
+// '{\n  "a": 1\n}'
+
+CBOR.format(text, { indent: 2, preserveComments: true });
+// '{\n  "a": 1\n} # trailing comment'
+```
+
+書かれていたマーカーを混在させたまま保持するのではなく、すべてのコメントの
+マーカーを正規化したい場合は `comments` を使います — `'c-style'` は
+`//` と `/* */`、`'cdn-style'` は `#` と `/ /` に正規化します。
+`preserveComments: true` が指定されている場合は効果がありません(verbatim
+が優先されます)。コメントを完全に削除するには `comments: 'strip'` を
+明示的に指定するか(あるいは両方とも未指定のままにするか)します。
+
+```ts
+CBOR.format(text, { indent: 2, comments: 'c-style' });
+// '{\n  "a": 1\n} // trailing comment'
+```
+
+`indent` を指定して整形出力する場合のみ効果があります。1 行出力では改行で
+終端する必要がある行コメントの性質上、コメントは常に取り除かれます。
 
 ### 空行を保持する
 
@@ -687,11 +721,11 @@ draft-ietf-cbor-edn-literals-27(§3.5 / §3.6)の app-extension
 import { CBOR } from '@cbortech/cbor';
 
 const text = CBOR.fromCDN('t1<<"Hello ", "world">>');
-console.log(text.toCDN({ appStrings: false }));
+console.log(text.toCDN({ appPrefix: false }));
 // "Hello world"
 
 const bytes = CBOR.fromCDN("b1<<'Hello ', h'776f726c64'>>");
-console.log(bytes.toCDN({ appStrings: false }));
+console.log(bytes.toCDN({ appPrefix: false }));
 // 'Hello world'
 ```
 
@@ -705,7 +739,7 @@ streamstring 構文の置き換えですが、本ライブラリは従来構文�
 import { CBOR } from '@cbortech/cbor';
 
 const v = CBOR.fromCDN("ilbs<<'Hello ', 'world'>>");
-console.log(v.toCDN({ appStrings: false }));
+console.log(v.toCDN({ appPrefix: false }));
 // (_ 'Hello ','world')
 ```
 
@@ -716,7 +750,7 @@ console.log(v.toCDN({ appStrings: false }));
 (`preserveConcatenation`)は従来どおり `+` で、不定長文字列は従来どおり
 `(_ ...)` streamstring 形式でレンダリングされます。`modernConcat` と
 `modernStreamSyntax` を `true` にすると draft-27 の記法での出力を選択でき
-ます。どちらもデフォルトは `false`(従来構文)で、`appStrings` が `false`
+ます。どちらもデフォルトは `false`(従来構文)で、`appPrefix` が `false`
 の場合は従来構文にフォールバックします。
 
 ```ts
@@ -741,12 +775,12 @@ CBOR.format('(_ "a", "b")', { modernStreamSyntax: true });
 
 > [!NOTE]
 > どちらのオプションも `t1`/`b1`/`ilbs`/`ilts` のソースを従来記法に
-> **変換**するものではありません。`t1<<...>>`(や `ilbs<<...>>` など)
-> からパースされた値は、`appStrings` が `false` でなく、
+> 変換するものではありません。`t1<<...>>`(や `ilbs<<...>>` など)
+> からパースされた値は、`appPrefix` が `false` でなく、
 > `encodingIndicators` が `'auto'`(どちらもデフォルト)であり、かつ
 > ソースが単一行、または `indent` 指定時であれば、`modernConcat` /
 > `modernStreamSyntax` の値に関わらずそのままの記法で出力されます。
-> `encodingIndicators: 'always'`/`'never'` や `appStrings: false` を指定
+> `encodingIndicators: 'always'`/`'never'` や `appPrefix: false` を指定
 > した場合は、他の app-string 値と同様に正規化されます(例:
 > `encodingIndicators: 'always'` では `t1<<"a", "b">>` が `"ab"_i` に
 > なります)。また、複数行のソースは `indent` 未指定(1行出力)の場合、
@@ -775,12 +809,12 @@ CBOR.format('(_ "a", "b")', { modernStreamSyntax: true });
 import { CBOR } from '@cbortech/cbor';
 
 const v = CBOR.fromCDN("float'7e00'");
-console.log(v.toCDN({ appStrings: false }));
+console.log(v.toCDN({ appPrefix: false }));
 // NaN
 
 // バイト列から解釈する場合
 const v2 = CBOR.fromCDN("float<<h'3f800000'>>");
-console.log(v2.toCDN({ appStrings: false }));
+console.log(v2.toCDN({ appPrefix: false }));
 // 1.0_2
 ```
 
@@ -802,11 +836,11 @@ extension があります。必要なものを `import` し、
 import { CBOR, b32, h32 } from '@cbortech/cbor';
 
 const v1 = CBOR.fromCDN("b32'AEBAGBA'", { extensions: [b32] });
-console.log(v1.toCDN({ appStrings: false }));
+console.log(v1.toCDN({ appPrefix: false }));
 // h'01020304'
 
 const v2 = CBOR.fromCDN("h32'00P00'", { extensions: [h32] });
-console.log(v2.toCDN({ appStrings: false }));
+console.log(v2.toCDN({ appPrefix: false }));
 // h'003200'
 ```
 
@@ -821,12 +855,12 @@ console.log(v2.toCDN({ appStrings: false }));
 import { CBOR, same } from '@cbortech/cbor';
 
 const v = CBOR.fromCDN("same<<h'0102', h'0102'>>", { extensions: [same] });
-console.log(v.toCDN({ appStrings: false }));
+console.log(v.toCDN({ appPrefix: false }));
 // h'0102'
 
 // 要素が 1 つでも有効（常にパスする）
 const v2 = CBOR.fromCDN('same<<42>>', { extensions: [same] });
-console.log(v2.toCDN({ appStrings: false }));
+console.log(v2.toCDN({ appPrefix: false }));
 // 42
 ```
 

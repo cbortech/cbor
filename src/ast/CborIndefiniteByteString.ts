@@ -70,10 +70,10 @@ export class CborIndefiniteByteString extends CborItem {
       return new CborByteString(merged)._toCDN(options, depth);
     }
     // `ilbs<<...>>` (draft-27 §3.6) replaces the legacy `(_ ...)` marker
-    // notation; falls back to it when `appStrings` disables app-string
+    // notation; falls back to it when `appPrefix` disables app-string
     // notation entirely.
     const useIlbs =
-      !!options?.modernStreamSyntax && options?.appStrings !== false;
+      !!options?.modernStreamSyntax && options?.appPrefix !== false;
     if (!useIlbs && this.chunks.length === 0) return "''_";
     return serializeContainer({
       node: this,

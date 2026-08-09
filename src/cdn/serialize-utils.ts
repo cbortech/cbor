@@ -141,6 +141,51 @@ export function hasContainerLayoutComments(item: Commented): boolean {
 }
 
 /**
+ * Subset of `ToCDNOptions` needed to resolve comment on/off + style —
+ * accepted structurally so callers with a narrower/wider options type (or a
+ * plain `FromCDNOptions`, which shares both fields) don't need a cast.
+ */
+interface CommentOptions {
+  preserveComments?: boolean | 'c-style' | 'cdn-style';
+  comments?: 'strip' | 'c-style' | 'cdn-style';
+}
+
+/**
+ * Whether comments should be emitted for freshly-regenerated output (as
+ * opposed to a preserved app-sequence/raw-tag source — see
+ * `decideTaggedAppSeqRendering`'s own comment handling for that case, which
+ * has a different "nothing set" default).
+ *
+ * `preserveComments: true` always emits (verbatim); otherwise, comments are
+ * emitted only when `comments` requests a real style (not `'strip'`,
+ * the default when unset) — matching the deprecated `preserveComments:
+ * 'c-style'/'cdn-style'` shorthand, which behaves the same as `comments`
+ * set to that value.
+ */
+export function shouldEmitComments(
+  options: CommentOptions | undefined
+): boolean {
+  if (options?.preserveComments === true) return true;
+  if (typeof options?.preserveComments === 'string') return true;
+  return options?.comments !== undefined && options.comments !== 'strip';
+}
+
+/**
+ * The marker style to normalize emitted comments to, or `undefined` for
+ * verbatim (original markers kept as-is). Only meaningful when
+ * `shouldEmitComments` is `true`; see its doc for the on/off precedence.
+ */
+export function resolveCommentStyle(
+  options: CommentOptions | undefined
+): 'c-style' | 'cdn-style' | undefined {
+  if (options?.preserveComments === true) return undefined;
+  if (typeof options?.preserveComments === 'string')
+    return options.preserveComments;
+  const style = options?.comments;
+  return style === 'strip' ? undefined : style;
+}
+
+/**
  * Convert a single comment's text to the requested marker style.
  *
  * Conversion table:
@@ -424,9 +469,8 @@ export function serializeContainer(p: {
 }): string {
   const { options, depth, openChar, closeChar, count } = p;
   const indentStr = resolveIndent(options);
-  const preserveComments = options?.preserveComments;
-  const commentStyle =
-    typeof preserveComments === 'string' ? preserveComments : undefined;
+  const preserveComments = shouldEmitComments(options);
+  const commentStyle = resolveCommentStyle(options);
   const hasComments =
     indentStr !== null &&
     preserveComments &&
@@ -603,14 +647,12 @@ export function renderSingleChildWithComments(
   closeChar: ')'
 ): string {
   const indentStr = resolveIndent(options);
-  const preserveComments = options?.preserveComments;
   const hasComments =
     indentStr !== null &&
-    !!preserveComments &&
+    shouldEmitComments(options) &&
     (hasPreservedComments(child) || hasContainerLayoutComments(wrapper));
   if (!hasComments) return `${openChar}${renderChild(depth)}${closeChar}`;
-  const commentStyle =
-    typeof preserveComments === 'string' ? preserveComments : undefined;
+  const commentStyle = resolveCommentStyle(options);
   const childIndent = indentOf(indentStr!, depth + 1);
   const closeIndent = indentOf(indentStr!, depth);
   const { ownLines, inlinePrefix } = splitLeadingComments(
@@ -1512,7 +1554,54 @@ export function resolveEiSuffix(
   return encodingWidth !== undefined ? `_${encodingWidth}` : '';
 }
 
-/** How a node should render under `preserveAppSequence`. */
+// ─── Comment handling for a preserved app-sequence/raw-tag source ────────────
+//
+// Different default than `shouldEmitComments`/`resolveCommentStyle` above:
+// leaving both `preserveComments` and `comments` unset here means "don't
+// touch this spelling's comments at all" (they stay exactly as originally
+// written, as part of the preserved text), not "strip them" — an *explicit*
+// request is required to edit them one way or the other.
+
+/** Whether the caller said anything at all about comments (either field set). */
+function hasExplicitCommentRequest(
+  options: CommentOptions | undefined
+): boolean {
+  return (
+    options?.preserveComments !== undefined || options?.comments !== undefined
+  );
+}
+
+/**
+ * Whether an explicit request asks to strip comments from a preserved
+ * source: not verbatim (`preserveComments !== true`, which always wins —
+ * same precedence as `shouldEmitComments`/`resolveCommentStyle` above) and
+ * no real style was requested via `comments`/the deprecated string
+ * shorthand either. Safe to call unconditionally — returns `false` (leave
+ * as-is) when nothing was requested at all, same as when `preserveComments`
+ * is `true`.
+ */
+function wantsCommentsStripped(options: CommentOptions | undefined): boolean {
+  if (!hasExplicitCommentRequest(options)) return false;
+  if (options?.preserveComments === true) return false;
+  return requestedCommentStyle(options) === undefined;
+}
+
+/**
+ * The normalization style an explicit request asks for, or `undefined` for
+ * verbatim (`preserveComments === true`, which always wins) / strip / no
+ * explicit style (including when nothing was requested at all).
+ */
+function requestedCommentStyle(
+  options: CommentOptions | undefined
+): 'c-style' | 'cdn-style' | undefined {
+  if (options?.preserveComments === true) return undefined;
+  if (typeof options?.preserveComments === 'string')
+    return options.preserveComments;
+  const style = options?.comments;
+  return style === 'strip' ? undefined : style;
+}
+
+/** How a node should render under `preserveAppPrefix`. */
 export type AppSeqRenderDecision =
   'verbatim' | 'adjusted' | 'source' | 'structural' | 'normal';
 
@@ -1520,7 +1609,7 @@ export type AppSeqRenderDecision =
  * Decide how an extension result node — from a `prefix'...'` /
  * `` prefix`...` `` / `prefix<<...>>` source, or (for a tag-wrapper node
  * that also has a generic `CborTag` fallback to delegate to) a raw tag
- * literal `N(...)` — should render under `ToCDNOptions.preserveAppSequence`.
+ * literal `N(...)` — should render under `ToCDNOptions.preserveAppPrefix`.
  *
  * A raw-tag source is recognised by `ednSource !== undefined`: the parser
  * only ever sets a tag-wrapper's `ednSource` (the tag *number's* digit
@@ -1555,7 +1644,7 @@ export type AppSeqRenderDecision =
  *   `preserveConcatenation` override.
  *   Verbatim raw-tag text inherently contains the nested literal spelling.
  * - `'normal'`: fall through to the class's own notation regeneration
- *   (`prefix'...'`), unaffected by `preserveAppSequence`. For `<<...>>`,
+ *   (`prefix'...'`), unaffected by `preserveAppPrefix`. For `<<...>>`,
  *   this is also used when replaying its sole inner item would defeat an
  *   explicitly disabled, relevant literal-preservation option.
  *
@@ -1574,7 +1663,7 @@ export function decideTaggedAppSeqRendering(
   sourceFeatures?: AppSeqSourceFeatures,
   editsComplete?: boolean
 ): AppSeqRenderDecision {
-  if (!options?.preserveAppSequence || appSeqSource === undefined)
+  if (!options?.preserveAppPrefix || appSeqSource === undefined)
     return 'normal';
   if (resolveIndent(options) === null && /[\r\n]/.test(appSeqSource))
     return 'normal';
@@ -1593,8 +1682,8 @@ export function decideTaggedAppSeqRendering(
     return innerSourceOverridden ? 'normal' : 'adjusted';
   }
   const commentsNeedEditing =
-    options?.preserveComments === false ||
-    typeof options?.preserveComments === 'string' ||
+    wantsCommentsStripped(options) ||
+    requestedCommentStyle(options) !== undefined ||
     (options?.preserveComments === true && resolveIndent(options) === null);
   const mode = options?.encodingIndicators ?? 'auto';
   const siblingOverridden =
@@ -1645,12 +1734,11 @@ function rewriteAppSeqComments(
   comments: readonly CborComment[] | undefined,
   removedAt?: number
 ): string {
-  const preserveComments = options?.preserveComments;
-  if (preserveComments === undefined || !comments?.length) return appSeqSource;
+  if (!hasExplicitCommentRequest(options) || !comments?.length)
+    return appSeqSource;
   const stripComments =
-    preserveComments === false || resolveIndent(options) === null;
-  const style =
-    typeof preserveComments === 'string' ? preserveComments : undefined;
+    wantsCommentsStripped(options) || resolveIndent(options) === null;
+  const style = requestedCommentStyle(options);
   let text = appSeqSource;
   // Apply replacements from right to left so an earlier comment's offsets
   // are unaffected by a later replacement. Account for characters already
@@ -1681,12 +1769,10 @@ export function adjustRawAppSeqSource(
     end: number;
     replacement: string;
   }[] = [];
-  const preserveComments = options?.preserveComments;
-  if (preserveComments !== undefined && comments?.length) {
+  if (hasExplicitCommentRequest(options) && comments?.length) {
     const stripComments =
-      preserveComments === false || resolveIndent(options) === null;
-    const style =
-      typeof preserveComments === 'string' ? preserveComments : undefined;
+      wantsCommentsStripped(options) || resolveIndent(options) === null;
+    const style = requestedCommentStyle(options);
     for (const comment of comments)
       replacements.push({
         start: comment.start,

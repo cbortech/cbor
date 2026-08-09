@@ -26,6 +26,8 @@ import {
   danglingCommentsByGap,
   joinConcatParts,
   joinAppSeqParts,
+  shouldEmitComments,
+  resolveCommentStyle,
   type ByteCommentSyntax,
 } from '../cdn/serialize-utils';
 
@@ -88,8 +90,9 @@ function joinElisionParts(
 
 /**
  * Resolve a preserved source spelling: strip any embedded comment unless
- * `preserveComments` is set — a preserved spelling should still drop
- * comments by default, the same as an unpreserved literal re-derived from
+ * comments are requested (`preserveComments`/`comments`) — a preserved
+ * spelling should still drop comments by default, the same as an
+ * unpreserved literal re-derived from
  * its decoded value would — then, only when the (possibly stripped) result
  * is safe to re-emit verbatim, return it. It's safe when `indent` enables
  * multi-line output, or it doesn't actually contain a newline itself
@@ -106,7 +109,7 @@ function preservedSource(
 ): string | undefined {
   if (source === undefined) return undefined;
   const stripped =
-    options?.preserveComments || commentSyntax === undefined
+    shouldEmitComments(options) || commentSyntax === undefined
       ? source
       : stripByteLiteralComments(source, commentSyntax);
   return isSafeForCurrentMode(stripped, indentStr) ? stripped : undefined;
@@ -193,7 +196,7 @@ export class CborEllipsis extends CborTag {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toCDN(options, depth);
+    if (options?.appPrefix === false) return super._toCDN(options, depth);
     if (this.content instanceof CborSimple) {
       // Subtree elision → "..."
       return '...';
@@ -242,11 +245,8 @@ export class CborEllipsis extends CborTag {
           ? this._renderFragment(item, options, depth)
           : item._toCDN(options, depth)
       );
-      const preserveComments = !!options?.preserveComments;
-      const style =
-        typeof options?.preserveComments === 'string'
-          ? options.preserveComments
-          : undefined;
+      const preserveComments = shouldEmitComments(options);
+      const style = resolveCommentStyle(options);
       const gapComments = items
         .slice(1)
         .map((item, i) =>
@@ -328,12 +328,9 @@ export class CborEllipsis extends CborTag {
     depth: number
   ): string {
     const indentStr = resolveIndent(options);
-    const preserveComments = !!options?.preserveComments;
-    const style =
-      typeof options?.preserveComments === 'string'
-        ? options.preserveComments
-        : undefined;
-    // `options?.appStrings === false` already returned via `super._toCDN`
+    const preserveComments = shouldEmitComments(options);
+    const style = resolveCommentStyle(options);
+    // `options?.appPrefix === false` already returned via `super._toCDN`
     // before any caller reaches `_renderFragment` — see this class's own
     // `_toCDN` — so `modernConcat` alone is sufficient here.
     const useT1B1 = !!options?.modernConcat;
@@ -343,7 +340,7 @@ export class CborEllipsis extends CborTag {
       item.ednParts.length > 1
     ) {
       const encoding =
-        options?.appStrings === false
+        options?.appPrefix === false
           ? 'hex'
           : (options?.bstrEncoding ?? item.ednEncoding);
       const literals = item.ednParts.map((part) => {
@@ -486,11 +483,8 @@ export class CborEllipsis extends CborTag {
       }
     };
 
-    const preserveComments = !!options?.preserveComments;
-    const style =
-      typeof options?.preserveComments === 'string'
-        ? options.preserveComments
-        : undefined;
+    const preserveComments = shouldEmitComments(options);
+    const style = resolveCommentStyle(options);
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i]!;
@@ -548,7 +542,7 @@ export class CborEllipsis extends CborTag {
     if (groups.length === 0) return undefined;
 
     const encoding =
-      options?.appStrings === false ? 'hex' : (options?.bstrEncoding ?? 'hex');
+      options?.appPrefix === false ? 'hex' : (options?.bstrEncoding ?? 'hex');
     // A preserved source spelling can itself contain embedded newlines
     // (interior whitespace, or a surviving `#`/`//` line comment) — those
     // are only safe to re-emit verbatim when `indent` enables multi-line

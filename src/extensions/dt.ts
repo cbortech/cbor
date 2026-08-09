@@ -170,7 +170,7 @@ export class CborEpochDtExtUint extends CborUint {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
-    if (options?.appStrings === false) return super._toCDN(options, _depth);
+    if (options?.appPrefix === false) return super._toCDN(options, _depth);
     const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(this.value)
     );
@@ -205,7 +205,7 @@ export class CborEpochDtExtNint extends CborNint {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
-    if (options?.appStrings === false) return super._toCDN(options, _depth);
+    if (options?.appPrefix === false) return super._toCDN(options, _depth);
     const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(this.argument)
     );
@@ -243,7 +243,7 @@ export class CborEpochDtExtFloat extends CborFloat {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
-    if (options?.appStrings === false) return super._toCDN(options, _depth);
+    if (options?.appPrefix === false) return super._toCDN(options, _depth);
     const autoSelected = autoSelectFloatPrecision(this.value);
     const eiSuffix = floatSuffix(
       this.value,
@@ -289,7 +289,7 @@ export class CborTaggedEpochDtExt extends CborTag {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toCDN(options, depth);
+    if (options?.appPrefix === false) return super._toCDN(options, depth);
     const decision = decideTaggedAppSeqRendering(
       options,
       this.appSeqSource,
@@ -306,7 +306,7 @@ export class CborTaggedEpochDtExt extends CborTag {
         this.appSeqEncodingEdits
       );
     if (decision === 'structural')
-      return super._toCDN({ ...options, appStrings: false }, depth);
+      return super._toCDN({ ...options, appPrefix: false }, depth);
     const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(TAG_EPOCH)
     );
@@ -329,7 +329,7 @@ export class CborTaggedEpochDtExt extends CborTag {
           c.precision !== autoSelectFloatPrecision(c.value)
         : (c as CborUint | CborNint).encodingWidth !== undefined;
     if (innerIsNonCanonical)
-      return super._toCDN({ ...options, appStrings: false }, depth);
+      return super._toCDN({ ...options, appPrefix: false }, depth);
     const epochSec = c instanceof CborFloat ? c.value : Number(c.value);
     return `${PREFIX_DT_TAGGED}'${epochToRfc3339(epochSec)}'${eiSuffix}`;
   }
@@ -387,7 +387,7 @@ export function createDtExtension(options?: {
     // dt/DT results always have a dedicated subclass (CborEpochDtExt* /
     // CborTaggedEpochDtExt) that regenerates its notation by default;
     // 'optional' preserves the <<...>> spelling only when
-    // ToCDNOptions.preserveAppSequence is set, without changing the
+    // ToCDNOptions.preserveAppPrefix is set, without changing the
     // returned node's class/identity (see preservedAppSeqSpelling above).
     preserveAppSeqSource: 'optional',
 

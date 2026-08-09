@@ -4,10 +4,10 @@
  *
  * Exposes the same lexer the parser uses, so tooling such as syntax
  * highlighters stays in exact agreement with parsing behavior. Also exposes
- * the `preserveAppSequence` source-preservation primitives that the built-in
+ * the `preserveAppSeqSource` source-preservation primitives that the built-in
  * `dt`/`ip`/`cri` extensions use, so a third-party `CborExtension` whose
  * result has its own dedicated notation (regenerated from a resolved value,
- * the way `dt'...'`/`ip'...'`/`cri'...'` do) can support `preserveAppSequence`
+ * the way `dt'...'`/`ip'...'`/`cri'...'` do) can support `preserveAppSeqSource`
  * too, instead of always discarding the original `` prefix`...` ``,
  * non-canonical `prefix'...'`, or raw-tag `N(...)` source spelling. See the
  * `dt`/`ip`/`cri` extension sources for the pattern these are meant to be

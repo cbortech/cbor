@@ -406,9 +406,9 @@ the resolved value on every `CBOR.format()` call — so
 `` DT`1969-07-21T02:56:16Z` ``, `DT<<'1969-07-21T02:56:16Z'>>`, and even the
 raw tag form `1(1749772800)` all normalize to `DT'...'` notation, and a
 non-canonical `DT'...'` spelling (e.g. a `+00:00` offset instead of `Z`)
-gets rewritten too. `preserveAppSequence` keeps the original spelling
+gets rewritten too. `preserveAppPrefix` keeps the original spelling
 instead — whichever form was used. It has no effect when
-`appStrings: false` is also set (raw tag notation is used either way
+`appPrefix: false` is also set (raw tag notation is used either way
 regardless of the original spelling), or on values not parsed from one of
 these forms.
 
@@ -418,15 +418,49 @@ import { CBOR } from '@cbortech/cbor';
 CBOR.format('1(1749772800)');
 // "DT'2025-06-13T00:00:00Z'"
 
-CBOR.format('1(1749772800)', { preserveAppSequence: true });
+CBOR.format('1(1749772800)', { preserveAppPrefix: true });
 // "1(1749772800)"
 
-CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", { preserveAppSequence: true });
+CBOR.format("DT<<'1969-07-21T02:56:16Z'>>", { preserveAppPrefix: true });
 // "DT<<'1969-07-21T02:56:16Z'>>"
 
-CBOR.format('DT`1969-07-21T02:56:16Z`', { preserveAppSequence: true });
+CBOR.format('DT`1969-07-21T02:56:16Z`', { preserveAppPrefix: true });
 // "DT`1969-07-21T02:56:16Z`"
 ```
+
+### Preserve comments
+
+By default, `CBOR.fromCDN()` discards comments and `CBOR.format()` emits
+none. `preserveComments: true` captures them while parsing and re-emits each
+comment verbatim, with whichever marker (`#`, `//`, `/* */`, `/ /`) it was
+originally written with.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const text = '{ "a": 1 } # trailing comment';
+
+CBOR.format(text, { indent: 2 });
+// '{\n  "a": 1\n}'
+
+CBOR.format(text, { indent: 2, preserveComments: true });
+// '{\n  "a": 1\n} # trailing comment'
+```
+
+To normalize every comment's marker instead of keeping the mix as originally
+written, use `comments` — `'c-style'` for `//` and `/* */`, or
+`'cdn-style'` for `#` and `/ /`. It has no effect when `preserveComments` is
+`true` (verbatim wins); explicitly set `comments: 'strip'` (or leave
+both options unset) to drop comments entirely.
+
+```ts
+CBOR.format(text, { indent: 2, comments: 'c-style' });
+// '{\n  "a": 1\n} // trailing comment'
+```
+
+Only effective when `indent` enables pretty-printing: single-line output
+strips all comments regardless, since line comments can only be terminated
+by a newline.
 
 ### Preserve blank lines
 
@@ -698,11 +732,11 @@ also be ellipses (`...`) to elide parts of a string.
 import { CBOR } from '@cbortech/cbor';
 
 const text = CBOR.fromCDN('t1<<"Hello ", "world">>');
-console.log(text.toCDN({ appStrings: false }));
+console.log(text.toCDN({ appPrefix: false }));
 // "Hello world"
 
 const bytes = CBOR.fromCDN("b1<<'Hello ', h'776f726c64'>>");
-console.log(bytes.toCDN({ appStrings: false }));
+console.log(bytes.toCDN({ appPrefix: false }));
 // 'Hello world'
 ```
 
@@ -715,7 +749,7 @@ documents; this library keeps accepting the legacy syntax on input.
 import { CBOR } from '@cbortech/cbor';
 
 const v = CBOR.fromCDN("ilbs<<'Hello ', 'world'>>");
-console.log(v.toCDN({ appStrings: false }));
+console.log(v.toCDN({ appPrefix: false }));
 // (_ 'Hello ','world')
 ```
 
@@ -727,7 +761,7 @@ concatenation (`preserveConcatenation`) still renders as `+`, and an
 indefinite-length string still renders as the legacy `(_ ...)` streamstring
 form. `modernConcat` and `modernStreamSyntax` opt into emitting the draft-27
 notation instead — both default to `false` (the legacy syntax), and both fall
-back to it when `appStrings` is `false`.
+back to it when `appPrefix` is `false`.
 
 ```ts
 import { CBOR } from '@cbortech/cbor';
@@ -749,13 +783,13 @@ happens regardless of `preserveConcatenation`, since an elision chain has no
 single-literal collapsed form to fall back to in the first place.
 
 > [!NOTE]
-> Neither option _converts_ `t1`/`b1`/`ilbs`/`ilts` source back to the
+> Neither option converts `t1`/`b1`/`ilbs`/`ilts` source back to the
 > legacy notation: a value parsed from `t1<<...>>` (or `ilbs<<...>>`, etc.)
 > keeps that exact spelling on output regardless of `modernConcat` /
-> `modernStreamSyntax` — as long as `appStrings` is not `false`,
+> `modernStreamSyntax` — as long as `appPrefix` is not `false`,
 > `encodingIndicators` is `'auto'` (both defaults), and the source is either
 > single-line or being rendered with `indent` enabled. `encodingIndicators:
-'always'`/`'never'` or `appStrings: false` still normalize it like any
+'always'`/`'never'` or `appPrefix: false` still normalize it like any
 > other app-string value (e.g. `t1<<"a", "b">>` becomes `"ab"_i`
 > under `encodingIndicators: 'always'`), and a multi-line source falls back
 > to normalized output in single-line mode (that layout can't be reproduced
@@ -784,12 +818,12 @@ Interprets a hex bit-pattern as an IEEE 754 floating-point value
 import { CBOR } from '@cbortech/cbor';
 
 const v = CBOR.fromCDN("float'7e00'");
-console.log(v.toCDN({ appStrings: false }));
+console.log(v.toCDN({ appPrefix: false }));
 // NaN
 
 // Interpret bytes as float bits
 const v2 = CBOR.fromCDN("float<<h'3f800000'>>");
-console.log(v2.toCDN({ appStrings: false }));
+console.log(v2.toCDN({ appPrefix: false }));
 // 1.0_2
 ```
 
@@ -812,11 +846,11 @@ Base32 encoding. These prefixes are described in §8 of
 import { CBOR, b32, h32 } from '@cbortech/cbor';
 
 const v1 = CBOR.fromCDN("b32'AEBAGBA'", { extensions: [b32] });
-console.log(v1.toCDN({ appStrings: false }));
+console.log(v1.toCDN({ appPrefix: false }));
 // h'01020304'
 
 const v2 = CBOR.fromCDN("h32'00P00'", { extensions: [h32] });
-console.log(v2.toCDN({ appStrings: false }));
+console.log(v2.toCDN({ appPrefix: false }));
 // h'003200'
 ```
 
@@ -830,12 +864,12 @@ identical CBOR bytes and returns the first item. This extension is described in
 import { CBOR, same } from '@cbortech/cbor';
 
 const v = CBOR.fromCDN("same<<h'0102', h'0102'>>", { extensions: [same] });
-console.log(v.toCDN({ appStrings: false }));
+console.log(v.toCDN({ appPrefix: false }));
 // h'0102'
 
 // A single-item sequence always passes
 const v2 = CBOR.fromCDN('same<<42>>', { extensions: [same] });
-console.log(v2.toCDN({ appStrings: false }));
+console.log(v2.toCDN({ appPrefix: false }));
 // 42
 ```
 
@@ -1153,7 +1187,6 @@ types).
   - [RFC 8742](https://www.rfc-editor.org/rfc/rfc8742)
 - CDN (CBOR-EDN)
   - [draft-ietf-cbor-edn-literals-25](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/)
-  - [draft-ietf-cbor-edn-literals-26](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/26/)
   - [draft-ietf-cbor-edn-literals-27](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/27/)
 - CDDL
   - [RFC 8610](https://www.rfc-editor.org/rfc/rfc8610)

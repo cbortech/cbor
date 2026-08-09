@@ -99,7 +99,7 @@ function expandToFull(truncated: Uint8Array, fullLen: number): Uint8Array {
  */
 export class CborIpExt extends CborByteString {
   override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
-    if (options?.appStrings === false) return super._toCDN(options, _depth);
+    if (options?.appPrefix === false) return super._toCDN(options, _depth);
     const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(BigInt(this.value.length))
     );
@@ -134,7 +134,7 @@ export class CborIpPrefixExt extends CborArray {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toCDN(options, depth);
+    if (options?.appPrefix === false) return super._toCDN(options, depth);
     const decision = decideTaggedAppSeqRendering(
       options,
       this.appSeqSource,
@@ -169,7 +169,7 @@ export class CborTaggedIpExt extends CborTag {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toCDN(options, depth);
+    if (options?.appPrefix === false) return super._toCDN(options, depth);
     const decision = decideTaggedAppSeqRendering(
       options,
       this.appSeqSource,
@@ -186,7 +186,7 @@ export class CborTaggedIpExt extends CborTag {
         this.appSeqEncodingEdits
       );
     // Unlike dt's content classes, ip's content (CborByteString / CborArray
-    // / CborUint) never self-switches on `appStrings`, so no need to force
+    // / CborUint) never self-switches on `appPrefix`, so no need to force
     // it false here — doing so would also force hex byte-string encoding
     // (see CborByteString._toCDN), overriding `bstrEncoding`/`sqstr`.
     if (decision === 'structural') return super._toCDN(options, depth);
@@ -300,7 +300,7 @@ export const ip: CborExtension = {
   // ip/IP results always have a dedicated subclass (CborIpExt /
   // CborIpPrefixExt / CborTaggedIpExt) that regenerates its notation by
   // default; 'optional' preserves the <<...>> spelling only when
-  // ToCDNOptions.preserveAppSequence is set, without changing the
+  // ToCDNOptions.preserveAppPrefix is set, without changing the
   // returned node's class/identity (see preservedAppSeqSpelling).
   preserveAppSeqSource: 'optional',
 

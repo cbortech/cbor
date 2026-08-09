@@ -56,10 +56,10 @@ export class CborIndefiniteTextString extends CborItem {
       return new CborTextString(merged)._toCDN(options, depth);
     }
     // `ilts<<...>>` (draft-27 §3.6) replaces the legacy `(_ ...)` marker
-    // notation; falls back to it when `appStrings` disables app-string
+    // notation; falls back to it when `appPrefix` disables app-string
     // notation entirely.
     const useIlts =
-      !!options?.modernStreamSyntax && options?.appStrings !== false;
+      !!options?.modernStreamSyntax && options?.appPrefix !== false;
     if (!useIlts && this.chunks.length === 0) return '""_';
     return serializeContainer({
       node: this,

@@ -157,15 +157,13 @@ describe('ilbs / ilts — round-trip', () => {
     expect(parseCDN("ilts'a\\'b'").toCDN()).toBe("ilts'a\\'b'");
   });
 
-  test('string shorthand forms fall back to streamstring with appStrings: false', () => {
-    expect(parseCDN("ilbs'foo'").toCDN({ appStrings: false })).toBe(
-      "(_ 'foo')"
-    );
+  test('string shorthand forms fall back to streamstring with appPrefix: false', () => {
+    expect(parseCDN("ilbs'foo'").toCDN({ appPrefix: false })).toBe("(_ 'foo')");
   });
 
-  test('appStrings: false falls back to the streamstring notation', () => {
+  test('appPrefix: false falls back to the streamstring notation', () => {
     expect(
-      parseCDN('ilts<<"Hello ", "world">>').toCDN({ appStrings: false })
+      parseCDN('ilts<<"Hello ", "world">>').toCDN({ appPrefix: false })
     ).toBe('(_ "Hello ","world")');
   });
 

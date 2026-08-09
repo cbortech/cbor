@@ -68,7 +68,7 @@ export class CborAppSeqResult extends CborItem {
   _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     const mode = options?.encodingIndicators ?? 'auto';
     if (
-      options?.appStrings !== false &&
+      options?.appPrefix !== false &&
       mode === 'auto' &&
       (resolveIndent(options) !== null || !/[\r\n]/.test(this.ednSource))
     )

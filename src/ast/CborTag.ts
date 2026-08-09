@@ -119,7 +119,7 @@ export class CborTag extends CborItem {
     ];
     pushAll(
       lines,
-      this.content._toHexDump(depth + 1, { ...options, appStrings: false })
+      this.content._toHexDump(depth + 1, { ...options, appPrefix: false })
     );
     return lines;
   }

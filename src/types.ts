@@ -429,14 +429,29 @@ export interface FromCDNOptions {
    *
    * Comments are metadata only: they are ignored by CBOR binary encoding and
    * JavaScript conversion. Use together with `ToCDNOptions.preserveComments`
-   * to include them when formatting back to CDN.
+   * (or `comments`) to include them when formatting back to CDN.
    *
-   * The string values `'c-style'` and `'cdn-style'` are treated as `true`
-   * for parsing purposes; they become meaningful when passed to `toCDN()`.
+   * Passing `'c-style'`/`'cdn-style'` directly is a deprecated shorthand for
+   * `true` plus the equivalent `comments` — still accepted, but prefer
+   * `comments` for the output style going forward.
    *
    * @default false
    */
   preserveComments?: boolean | 'c-style' | 'cdn-style';
+
+  /**
+   * Companion to `preserveComments` for a single options object shared with
+   * `toCDN()` (as `CBOR.format()` does internally) — see
+   * `ToCDNOptions.comments` for what each value means there. On the
+   * parse side, only *whether* a style other than `'strip'` was requested
+   * matters: comments are captured when `preserveComments` is `true`, or
+   * when `comments` is set to anything other than `'strip'`. Left
+   * unset alongside an unset/`false` `preserveComments`, nothing is
+   * captured.
+   *
+   * @default undefined
+   */
+  comments?: 'strip' | 'c-style' | 'cdn-style';
 
   /**
    * Shorthand for `ToCDNOptions.preserveAll`, so a single option enables
@@ -597,7 +612,7 @@ export interface ToCDNOptions {
    * Master switch that turns on every `preserve*` option below at once,
    * except the deprecated `preserveTextString` — `preserveComments`,
    * `preserveByteString`, `preserveRawString`, `preserveConcatenation`,
-   * `preserveNumberFormat`, `preserveAppSequence`, and
+   * `preserveNumberFormat`, `preserveAppPrefix`, and
    * `preserveBlankLines` — for reformatting CDN text (e.g. on save in an
    * editor) with minimal changes: only whitespace/indentation, plus
    * anything an explicitly-set individual option overrides.
@@ -605,7 +620,11 @@ export interface ToCDNOptions {
    * An option explicitly set to a value (including `false`) is left as-is;
    * `preserveAll` only fills in the ones left `undefined`. So
    * `{ preserveAll: true, preserveNumberFormat: false }` preserves
-   * everything except number literal spelling.
+   * everything except number literal spelling. `preserveComments` is filled
+   * in with `true` only when `comments` is *also* left unset — an
+   * explicit `comments` with no `preserveComments` still normalizes
+   * comments to that style under `preserveAll`, instead of being overridden
+   * by the verbatim fill-in.
    *
    * When parsing via `CBOR.fromCDN()` separately from `toCDN()` (rather
    * than through `CBOR.format()`, which passes the same options to both),
@@ -619,24 +638,46 @@ export interface ToCDNOptions {
   preserveAll?: boolean;
 
   /**
-   * Emit comments previously captured by `FromCDNOptions.preserveComments`.
+   * Emit comments previously captured by `FromCDNOptions.preserveComments`,
+   * with their original markers kept as-is (no normalization) — takes
+   * precedence over `comments` when `true`.
    *
-   * - `true`: emit comments with their original markers.
+   * - `true`: emit comments verbatim, with whichever marker each one was
+   *   originally written with.
+   * - `false` / omitted: defer to `comments` (see below) — `'strip'` (the
+   *   default when that's also unset) or unset means no comments are
+   *   emitted.
+   * - `'c-style'` / `'cdn-style'`: deprecated shorthand for `false` plus the
+   *   equivalent `comments`; still accepted, but prefer setting
+   *   `comments` directly.
+   *
+   * Only effective when `indent` enables pretty-printing: single-line
+   * output strips all comments regardless, since line comments (`#`, `//`)
+   * can only be terminated by a newline.
+   *
+   * @default false
+   */
+  preserveComments?: boolean | 'c-style' | 'cdn-style';
+
+  /**
+   * Style to normalize comment markers to when emitting comments previously
+   * captured by `FromCDNOptions.preserveComments` — only consulted when
+   * `preserveComments` is not `true` (see there).
+   *
+   * - `'strip'` / omitted: don't emit comments at all.
    * - `'c-style'`: emit comments, normalising line comments to `//` and block
    *   comments to `/* … *\/`.
    * - `'cdn-style'`: emit comments, normalising line comments to `#` and block
    *   comments to `/ … /`. When a `/* … *\/` comment's content contains `/`
    *   (which cannot be represented inside `/ … /`), the `/* … *\/` form is
    *   kept as-is.
-   * - `false` / omitted: strip all comments from the output.
    *
-   * Only effective when `indent` enables pretty-printing: single-line
-   * output strips all comments, since line comments (`#`, `//`) can only
-   * be terminated by a newline.
+   * Only effective when `indent` enables pretty-printing; see
+   * `preserveComments`.
    *
-   * @default false
+   * @default 'strip'
    */
-  preserveComments?: boolean | 'c-style' | 'cdn-style';
+  comments?: 'strip' | 'c-style' | 'cdn-style';
 
   /**
    * Re-emit a blank line above an array/map entry (or indefinite-length
@@ -787,11 +828,25 @@ export interface ToCDNOptions {
   sqstr?: 'printable-string' | 'string' | 'none';
 
   /**
-   * Whether to use app-string / app-sequence notation for built-in
-   * extensions (e.g. `dt'...'`, `DT'...'`, `ip'...'`, `IP'...'`).
+   * Whether to use app-prefix notation — app-string (`dt'...'`, `` dt`...` ``)
+   * or app-sequence (`dt<<...>>`) — for built-in extensions.
    * - `true`: emit extension notation (`DT'2023-01-01T12:00:00Z'`)
    * - `false`: emit raw CBOR notation (`1(-14159024)`, `52(h'c000022a')`)
+   *
+   * Named after `app-prefix` (§6.1 of draft-ietf-cbor-edn-literals-27), the
+   * identifier both notations are built from — not just the app-string form,
+   * despite the old `appStrings` name (`false` also falls back to raw tag
+   * notation for a preserved app-sequence spelling; see `preserveAppPrefix`).
+   *
    * @default true
+   */
+  appPrefix?: boolean;
+
+  /**
+   * @deprecated Renamed to `appPrefix` — the old name only described the
+   *   app-string form even though this option also gates app-sequence
+   *   (`<<...>>`) notation. Still honoured when `appPrefix` is left unset,
+   *   but `appPrefix` wins if both are set.
    */
   appStrings?: boolean;
 
@@ -807,10 +862,10 @@ export interface ToCDNOptions {
    * `` DT`1969-07-21T02:56:16Z` ``, `DT<<'1969-07-21T02:56:16Z'>>`, and even
    * the raw tag form `1(1749772800)` all become
    * `DT'2025-06-13T00:00:00Z'`-style `prefix'...'` notation, even though all
-   * of these denote the same value. `preserveAppSequence` keeps the
+   * of these denote the same value. `preserveAppPrefix` keeps the
    * original spelling instead — whichever quoting (`'...'` vs `` `...` ``),
    * bracketing (`<<...>>`), or raw tag form was used. Has no effect when
-   * `appStrings` is `false` (raw tag notation is used either way regardless
+   * `appPrefix` is `false` (raw tag notation is used either way regardless
    * of the original spelling), or on values not parsed from one of these
    * forms.
    *
@@ -818,12 +873,34 @@ export interface ToCDNOptions {
    * lines falls back to normal (regenerated) notation; single-line
    * spellings are kept.
    *
-   * An explicit `preserveComments` setting is still applied to comments
-   * inside a preserved app-sequence spelling: marker styles are
-   * normalised without changing the notation family, and `false` removes
-   * the comments while retaining the surrounding source spelling.
+   * An explicit `preserveComments`/`comments` setting is still applied
+   * to comments inside a preserved app-sequence spelling: marker styles are
+   * normalised without changing the notation family, and stripping comments
+   * (`preserveComments: false` with `comments` unset or `'strip'`)
+   * removes them while retaining the surrounding source spelling. Leaving
+   * *both* unset keeps the spelling's comments exactly as originally
+   * written, since nothing was explicitly requested.
+   *
+   * Named after `app-prefix` (§6.1 of draft-ietf-cbor-edn-literals-27; e.g.
+   * `dt`, `DT`, `ip`, `IP`), the identifier that `app-string`/`app-sequence`
+   * notation is built from. The raw tag literal case is still covered: it's
+   * the source spelling that used *no* app-prefix at all, and this option
+   * preserves that choice too, not just spellings that did use one.
+   * `preserveAppSequence` was the old, narrower name for this same option,
+   * since it also preserves app-string and raw-tag spellings, not just
+   * `<<...>>` sequences.
    *
    * @default false
+   */
+  preserveAppPrefix?: boolean;
+
+  /**
+   * @deprecated Renamed to `preserveAppPrefix` — the old name only
+   *   described the `<<...>>` form even though this option also preserves
+   *   `prefix'...'` / `` prefix`...` `` and raw tag (`N(...)`) spellings.
+   *   Still honoured when `preserveAppPrefix` is left unset, but
+   *   `preserveAppPrefix` wins if both are set, and it no longer
+   *   participates in `preserveAll` (use `preserveAppPrefix` for that).
    */
   preserveAppSequence?: boolean;
 
@@ -939,7 +1016,7 @@ export interface ToCDNOptions {
    *
    * - `false` (default): `"a" + "b"` / `'test' + h'1234...abcd' + ...`.
    * - `true`: `t1<<"a", "b">>` / `b1<<h'1234', h'..abcd'>>`. Falls back to
-   *   `false`'s rendering when `appStrings` is `false`, since this notation
+   *   `false`'s rendering when `appPrefix` is `false`, since this notation
    *   is itself an app-string form.
    *
    * For a plain (non-elision) concatenation, only changes the spelling used
@@ -954,7 +1031,7 @@ export interface ToCDNOptions {
    * whether the chain itself is shown as multiple parts).
    *
    * Has no effect on a value that was itself parsed from `t1<<...>>` /
-   * `b1<<...>>` source: when `appStrings` is not `false`, `encodingIndicators`
+   * `b1<<...>>` source: when `appPrefix` is not `false`, `encodingIndicators`
    * is `'auto'` (both defaults), and the source is either single-line or
    * being rendered with `indent` enabled, that spelling is kept verbatim
    * regardless of `modernConcat` (see `t1`/`b1` in
@@ -975,7 +1052,7 @@ export interface ToCDNOptions {
    *
    * - `false` (default): `(_ "a", "b")`.
    * - `true`: `ilts<<"a", "b">>` / `ilbs<<h'..', h'..'>>`. Falls back to
-   *   `false`'s rendering when `appStrings` is `false`, since this notation
+   *   `false`'s rendering when `appPrefix` is `false`, since this notation
    *   is itself an app-string form.
    *
    * Applies whenever an indefinite-length string is rendered as chunks;
@@ -983,7 +1060,7 @@ export interface ToCDNOptions {
    * into a single definite-length literal regardless of this option.
    *
    * Has no effect on a value that was itself parsed from `ilts<<...>>` /
-   * `ilbs<<...>>` source: when `appStrings` is not `false`, `encodingIndicators`
+   * `ilbs<<...>>` source: when `appPrefix` is not `false`, `encodingIndicators`
    * is `'auto'` (both defaults), and the source is either single-line or
    * being rendered with `indent` enabled, that spelling is kept verbatim
    * regardless of `modernStreamSyntax`. A multi-line source falls back to
@@ -1198,13 +1275,13 @@ export interface ValidateResult {
   cddlWarnings?: CddlValidationWarning[];
 }
 
-/** `fromCBORSeq()` の options（`offset`/`allowTrailing` はジェネレータが管理するため除外）。 */
+/** Options for `fromCBORSeq()` (`offset`/`allowTrailing` are excluded — the generator manages them). */
 export type FromCBORSeqOptions = Omit<
   FromCBOROptions,
   'offset' | 'allowTrailing'
 >;
 
-/** `fromCDNSeq()` の options（`offset`/`allowTrailing` はジェネレータが管理するため除外）。 */
+/** Options for `fromCDNSeq()` (`offset`/`allowTrailing` are excluded — the generator manages them). */
 export type FromCDNSeqOptions = Omit<
   FromCDNOptions,
   'offset' | 'allowTrailing'

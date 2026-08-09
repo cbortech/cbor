@@ -37,6 +37,7 @@ import {
 import {
   canonicalEncodingWidth,
   pushAll,
+  shouldEmitComments,
   type ByteCommentSyntax,
 } from './serialize-utils';
 import { b32, h32 } from '../extensions/b32';
@@ -70,7 +71,7 @@ export function parseCDN(text: string, options?: FromCDNOptions): CborItem {
   });
   const parser = new CDNParser(tokenizer, options ?? {});
   const node = parser.parse();
-  if (options?.preserveComments || options?.preserveAll) {
+  if (shouldEmitComments(options) || options?.preserveAll) {
     attachComments(node, tokenizer.comments, text);
     promoteEllipsisTailComments(node);
   }
@@ -112,7 +113,7 @@ function parseBigInt(raw: string): bigint {
  * `structuralAppSeqSourceFeatures` finds nothing byte-string-like in it
  * structurally) still carries its own inner byte-string literal's features
  * on itself, and an explicitly disabled sibling `preserve*` option must see
- * that when this node is nested inside an outer `preserveAppSequence`
+ * that when this node is nested inside an outer `preserveAppPrefix`
  * raw-tag/`<<...>>` source (e.g. `ip`'s array content).
  */
 function appSeqSourceFeatures(
@@ -898,13 +899,13 @@ class CDNParser {
               this._applyEiToResult(result, appStrEw, tok);
             if (ext.preserveAppSeqSource === 'optional') {
               // Same rationale as the APP_SEQUENCE case below: tack the
-              // source onto the same result node so preserveAppSequence can
+              // source onto the same result node so preserveAppPrefix can
               // round-trip prefix`...` (and non-canonical prefix'...')
               // spellings without changing the node's class/identity.
               result.appSeqSource = tok.raw + appStrEiRaw;
               return result;
             }
-            // Propagate ednSource so preserveByteString / appStrings round-trips correctly.
+            // Propagate ednSource so preserveByteString / appPrefix round-trips correctly.
             // instanceof narrows the type; getPrototypeOf excludes subclasses like CborIpExt.
             if (
               result instanceof CborByteString &&
@@ -997,7 +998,7 @@ class CDNParser {
             if (seqExt.preserveAppSeqSource === 'optional') {
               // Tack the source onto the same result node (preserving its
               // class/identity) rather than wrapping it; the node's own
-              // _toCDN() decides whether to use it (see preserveAppSequence).
+              // _toCDN() decides whether to use it (see preserveAppPrefix).
               result.appSeqSource = rawSource;
               result.appSeqComments = relativeComments(
                 this.t.comments,
@@ -1129,7 +1130,7 @@ class CDNParser {
               result.appSeqSource === undefined
             ) {
               // Raw tag notation (e.g. 1(1749772800)) is itself a spelling
-              // that preserveAppSequence should be able to keep instead of
+              // that preserveAppPrefix should be able to keep instead of
               // upgrading it to regenerated DT'...' notation.
               result.appSeqSource = this.t.source.slice(
                 tok.offset,

@@ -23,7 +23,7 @@ export type {
 } from './types';
 
 // Encoding-width type used by `encodingWidth` fields on CborItem subclasses,
-// and by the `preserveAppSequence` primitives exposed from `@cbortech/cbor/cdn`.
+// and by the `preserveAppSeqSource` primitives exposed from `@cbortech/cbor/cdn`.
 export type { EncodingWidth } from './cbor/encode';
 
 // Structured syntax error thrown by fromCDN/parse

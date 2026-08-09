@@ -269,9 +269,9 @@ export function readFormatOptions(): FromCDNOptions & ToCDNOptions {
   )
     options.preserveNumberFormat = true;
   if ((document.getElementById('opt-app-sequence') as HTMLInputElement).checked)
-    options.preserveAppSequence = true;
+    options.preserveAppPrefix = true;
   if (!(document.getElementById('opt-app-strings') as HTMLInputElement).checked)
-    options.appStrings = false;
+    options.appPrefix = false;
   if ((document.getElementById('opt-concat-t1b1') as HTMLInputElement).checked)
     options.modernConcat = true;
   if (

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import type { ToCDNOptions } from '../types';
+import type { ToCDNOptions, FromCDNOptions } from '../types';
 import { toCDN } from './serializer';
 import { parseCDN } from './parser';
 import { CborUint } from '../ast/CborUint';
@@ -193,8 +193,8 @@ describe('CborIndefiniteByteString.toCDN() — modernStreamSyntax: true', () => 
     ).toBe('ilbs<<>>');
   });
 
-  test('falls back to (_ ...) when appStrings is false', () => {
-    expect(toCDN(node, { modernStreamSyntax: true, appStrings: false })).toBe(
+  test('falls back to (_ ...) when appPrefix is false', () => {
+    expect(toCDN(node, { modernStreamSyntax: true, appPrefix: false })).toBe(
       "(_ h'0102',h'030405')"
     );
   });
@@ -278,8 +278,8 @@ describe('CborIndefiniteTextString.toCDN() — modernStreamSyntax: true', () => 
     ).toBe('ilts<<>>');
   });
 
-  test('falls back to (_ ...) when appStrings is false', () => {
-    expect(toCDN(node, { modernStreamSyntax: true, appStrings: false })).toBe(
+  test('falls back to (_ ...) when appPrefix is false', () => {
+    expect(toCDN(node, { modernStreamSyntax: true, appPrefix: false })).toBe(
       '(_ "strea","ming")'
     );
   });
@@ -1233,6 +1233,26 @@ function fmt(
   });
 }
 
+/** Like `fmt`, but drives the split `comments` option instead of the
+ *  deprecated `preserveComments: 'c-style'/'cdn-style'` shorthand. */
+function fmtFormat(
+  src: string,
+  comments: 'strip' | 'c-style' | 'cdn-style',
+  indent = 2
+): string {
+  return parseCDN(src, { preserveComments: true }).toCDN({
+    comments,
+    indent,
+  });
+}
+
+/** Mirrors `CBOR.format()`: parses and re-serializes with the same shared
+ *  options object, the way a caller relying on `comments` alone (with
+ *  no explicit `preserveComments`) to trigger capture-on-parse would. */
+function format(src: string, options: FromCDNOptions & ToCDNOptions): string {
+  return parseCDN(src, options).toCDN(options);
+}
+
 describe("preserveComments: 'c-style'", () => {
   test('# line → //', () =>
     expect(fmt('[\n  # comment\n  1\n]', 'c-style')).toBe(
@@ -1299,6 +1319,87 @@ describe('preserveComments: true (preserve markers as-is)', () => {
   test('mixed markers are kept unchanged', () => {
     const src = '[\n  # hash\n  1,\n  2 // line\n]';
     expect(fmt(src, true)).toBe(src);
+  });
+});
+
+describe('comments (split from preserveComments)', () => {
+  test("'c-style' matches the deprecated preserveComments: 'c-style' shorthand", () => {
+    const src = '[\n  # comment\n  1\n]';
+    expect(fmtFormat(src, 'c-style')).toBe(fmt(src, 'c-style'));
+  });
+
+  test("'cdn-style' matches the deprecated preserveComments: 'cdn-style' shorthand", () => {
+    const src = '[\n  // comment\n  1\n]';
+    expect(fmtFormat(src, 'cdn-style')).toBe(fmt(src, 'cdn-style'));
+  });
+
+  test("'strip' explicitly removes comments, same as preserveComments: false", () => {
+    const src = '[\n  # comment\n  1\n]';
+    expect(fmtFormat(src, 'strip')).toBe(fmt(src, false));
+    expect(fmtFormat(src, 'strip')).toBe('[\n  1\n]');
+  });
+
+  test('comments alone (preserveComments left unset) still normalizes', () => {
+    const src = '{ "a": 1 } # trailing';
+    expect(
+      parseCDN(src, { preserveComments: true }).toCDN({
+        comments: 'c-style',
+        indent: 2,
+      })
+    ).toBe('{\n  "a": 1\n} // trailing');
+  });
+
+  test('preserveComments: true wins over comments when both are set', () => {
+    const src = '{ "a": 1 } # trailing';
+    const parsed = parseCDN(src, { preserveComments: true });
+    expect(
+      parsed.toCDN({
+        preserveComments: true,
+        comments: 'strip',
+        indent: 2,
+      })
+    ).toBe('{\n  "a": 1\n} # trailing');
+  });
+
+  test('format() shared options: comments alone captures on the parse side too', () => {
+    const src = '{ "a": 1 } # trailing';
+    expect(format(src, { comments: 'c-style', indent: 2 })).toBe(
+      '{\n  "a": 1\n} // trailing'
+    );
+  });
+
+  test('neither preserveComments nor comments set: comments are dropped', () => {
+    const src = '{ "a": 1 } # trailing';
+    expect(format(src, { indent: 2 })).toBe('{\n  "a": 1\n}');
+  });
+
+  describe('preserveAll interaction', () => {
+    test('preserveAll alone keeps comments verbatim', () => {
+      const src = '{\n  # hash\n  "a": 1 // line\n}';
+      expect(format(src, { preserveAll: true, indent: 2 })).toBe(src);
+    });
+
+    test('preserveAll + explicit comments normalizes instead of verbatim', () => {
+      const src = '{\n  # hash\n  "a": 1\n}';
+      expect(
+        format(src, {
+          preserveAll: true,
+          comments: 'c-style',
+          indent: 2,
+        })
+      ).toBe('{\n  // hash\n  "a": 1\n}');
+    });
+
+    test('preserveAll + explicit preserveComments: false still strips', () => {
+      const src = '{\n  # hash\n  "a": 1\n}';
+      expect(
+        format(src, {
+          preserveAll: true,
+          preserveComments: false,
+          indent: 2,
+        })
+      ).toBe('{\n  "a": 1\n}');
+    });
   });
 });
 

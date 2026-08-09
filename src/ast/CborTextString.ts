@@ -21,6 +21,8 @@ import {
   isMultiWordText,
   joinAppSeqParts,
   pushAll,
+  shouldEmitComments,
+  resolveCommentStyle,
 } from '../cdn/serialize-utils';
 import { hexToBytes } from '../utils/hex';
 import { base64ToBytes } from '../utils/base64';
@@ -199,13 +201,11 @@ function formatTextString(
     // its own to attach to — it lands as `dangling` on this whole node
     // instead (see `ednPartSpans`'s doc) — so re-derive which gap each one
     // belongs to from each part's own source span.
-    const gapComments = options?.preserveComments
+    const gapComments = shouldEmitComments(options)
       ? danglingCommentsByGap(
           dangling,
           ednPartSpans,
-          typeof options.preserveComments === 'string'
-            ? options.preserveComments
-            : undefined
+          resolveCommentStyle(options)
         )
       : undefined;
     const parts: StringPart[] = [];
@@ -233,7 +233,7 @@ function formatTextString(
         parts[parts.length - 1]!.commentsAfter = comments;
       }
     }
-    if (options?.modernConcat && options?.appStrings !== false) {
+    if (options?.modernConcat && options?.appPrefix !== false) {
       const literals = parts.map(
         ({ text, source }) => source ?? escapeString(text)
       );

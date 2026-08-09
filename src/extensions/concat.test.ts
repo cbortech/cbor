@@ -171,9 +171,9 @@ describe('t1 / b1 — round-trip and errors', () => {
     expect(parseCDN('t1<<"a", "b">>').toCDN()).toBe('t1<<"a", "b">>');
   });
 
-  test('appStrings: false serializes the resolved value', () => {
+  test('appPrefix: false serializes the resolved value', () => {
     expect(
-      parseCDN('t1<<"Hello ", "world">>').toCDN({ appStrings: false })
+      parseCDN('t1<<"Hello ", "world">>').toCDN({ appPrefix: false })
     ).toBe('"Hello world"');
   });
 
