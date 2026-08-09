@@ -8,6 +8,7 @@ import {
   resolveIndent,
 } from '../cdn/serialize-utils';
 import { floatToHexFloat } from '../utils/hexfloat';
+import { bytesToHex } from '../utils/hex';
 
 export type FloatPrecision = 'half' | 'single' | 'double';
 
@@ -131,6 +132,21 @@ export class CborFloat extends CborItem {
       return literalSource;
     }
     const autoSelected = autoSelectFloatPrecision(this.value);
+    if (
+      options?.floatFormat === 'app-extension' &&
+      options?.appPrefix !== false
+    ) {
+      // Derived from the value's actual encoded bytes (via toCBOR(), which
+      // honors a _toCBOR() override for e.g. a NaN-payload-preserving
+      // subclass) rather than reimplementing bit-pattern logic here — the
+      // first byte is the major-7 initial byte, not part of the payload.
+      const bytes = this.toCBOR();
+      const hex = bytesToHex(bytes.subarray(1));
+      return (
+        `float'${hex}'` +
+        floatSuffix(this.value, this.precision, autoSelected, mode)
+      );
+    }
     const numStr =
       options?.floatFormat === 'hex'
         ? floatToHexFloat(this.value)
