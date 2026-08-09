@@ -1142,6 +1142,104 @@ describe("CborFloat.toCDN() — floatFormat: 'hex'", () => {
   });
 });
 
+// ─── floatFormat: 'app-extension' ─────────────────────────────────────────────
+
+describe("CborFloat.toCDN() — floatFormat: 'app-extension'", () => {
+  const app = (value: number, opts?: ToCDNOptions) =>
+    toCDN(new CborFloat(value), { floatFormat: 'app-extension', ...opts });
+
+  test("1.5 → float'3e00' (auto-selects half)", () => {
+    expect(app(1.5)).toBe("float'3e00'");
+  });
+  test("1.0 → float'3c00'", () => {
+    expect(app(1.0)).toBe("float'3c00'");
+  });
+  test("-1.5 → float'be00'", () => {
+    expect(app(-1.5)).toBe("float'be00'");
+  });
+  test("+0 → float'0000'", () => {
+    expect(app(0.0)).toBe("float'0000'");
+  });
+  test("-0 → float'8000'", () => {
+    expect(app(-0.0)).toBe("float'8000'");
+  });
+
+  // Unlike 'decimal'/'hex', non-finite values are still spelled out as their
+  // real bit pattern rather than the "Infinity"/"NaN" identifier text.
+  test("Infinity → float'7c00'", () => {
+    expect(app(Infinity)).toBe("float'7c00'");
+  });
+  test("-Infinity → float'fc00'", () => {
+    expect(app(-Infinity)).toBe("float'fc00'");
+  });
+  test("NaN → float'7e00' (canonical quiet NaN)", () => {
+    expect(app(NaN)).toBe("float'7e00'");
+  });
+
+  // A NaN's original bit-exact payload (not just its identity as NaN) is
+  // preserved, since the hex comes from the item's actual encoded bytes.
+  test('NaN with a non-canonical payload keeps that exact payload', () => {
+    const f = new CborFloat(NaN, {
+      precision: 'half',
+      rawBits: new Uint8Array([0x7e, 0xf0]),
+    });
+    expect(toCDN(f, { floatFormat: 'app-extension' })).toBe("float'7ef0'");
+  });
+
+  // Precision suffix is still emitted, same as 'decimal'/'hex'
+  test("1.0 precision=single → float'3f800000'_2", () => {
+    expect(
+      toCDN(new CborFloat(1.0, { precision: 'single' }), {
+        floatFormat: 'app-extension',
+      })
+    ).toBe("float'3f800000'_2");
+  });
+  test("1.0 precision=double → float'3ff0000000000000'_3", () => {
+    expect(
+      toCDN(new CborFloat(1.0, { precision: 'double' }), {
+        floatFormat: 'app-extension',
+      })
+    ).toBe("float'3ff0000000000000'_3");
+  });
+
+  // appPrefix: false falls back to decimal notation, matching how other
+  // built-in extensions (dt/ip/...) fall back to raw notation.
+  test('appPrefix: false falls back to decimal', () => {
+    expect(app(1.5, { appPrefix: false })).toBe('1.5');
+  });
+
+  // A value already parsed from `float'...'` keeps its own original
+  // spelling when floatFormat is left unset or set to 'app-extension'.
+  test("a value parsed from float'...' keeps its own ednSource spelling with floatFormat unset", () => {
+    const parsed = parseCDN("float'7ef0'") as CborFloat;
+    expect(toCDN(parsed)).toBe("float'7ef0'");
+  });
+  test("a value parsed from float'...' keeps its own ednSource spelling with floatFormat: 'app-extension'", () => {
+    const parsed = parseCDN("float'7ef0'") as CborFloat;
+    expect(toCDN(parsed, { floatFormat: 'app-extension' })).toBe("float'7ef0'");
+  });
+
+  // A plain decimal literal (no ednSource) regenerates as app-extension
+  // notation once requested.
+  test('a plain decimal literal regenerates as app-extension notation', () => {
+    const parsed = parseCDN('1.5') as CborFloat;
+    expect(toCDN(parsed, { floatFormat: 'app-extension' })).toBe("float'3e00'");
+  });
+
+  // An explicit 'decimal'/'hex' request opts a float'...'-sourced value out
+  // of the ednSource round-trip and reformats it like any other float —
+  // 0.5 parsed as `float'3800'` reformats to '0.5' / '0x1p-1' rather than
+  // staying pinned to its original app-extension spelling.
+  test("floatFormat: 'decimal' reformats a value parsed from float'...'", () => {
+    const parsed = parseCDN("float'3800'") as CborFloat;
+    expect(toCDN(parsed, { floatFormat: 'decimal' })).toBe('0.5');
+  });
+  test("floatFormat: 'hex' reformats a value parsed from float'...'", () => {
+    const parsed = parseCDN("float'3800'") as CborFloat;
+    expect(toCDN(parsed, { floatFormat: 'hex' })).toBe('0x1p-1');
+  });
+});
+
 // ─── intFormat ────────────────────────────────────────────────────────────────
 
 describe('CborUint.toCDN() — intFormat', () => {

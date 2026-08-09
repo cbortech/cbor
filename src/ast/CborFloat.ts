@@ -8,6 +8,7 @@ import {
   resolveIndent,
 } from '../cdn/serialize-utils';
 import { floatToHexFloat } from '../utils/hexfloat';
+import { bytesToHex } from '../utils/hex';
 
 export type FloatPrecision = 'half' | 'single' | 'double';
 
@@ -97,8 +98,15 @@ export class CborFloat extends CborItem {
     // In single-line output (no `indent`), a source spelling that spans
     // multiple lines (e.g. a `float<<...>>` app-sequence written across
     // lines) cannot be re-emitted, so it falls back to normal serialization.
+    // An explicit `floatFormat` request (anything other than leaving it
+    // unset, or asking for the app-extension form it's already in) opts out
+    // of this round-trip too — the whole point of asking for `'decimal'`/
+    // `'hex'` is to reformat every float, including one that started out as
+    // a `float'...'` literal.
     if (
       options?.appPrefix !== false &&
+      (options?.floatFormat === undefined ||
+        options?.floatFormat === 'app-extension') &&
       this.ednSource !== undefined &&
       (resolveIndent(options) !== null || !/[\r\n]/.test(this.ednSource))
     ) {
@@ -131,6 +139,21 @@ export class CborFloat extends CborItem {
       return literalSource;
     }
     const autoSelected = autoSelectFloatPrecision(this.value);
+    if (
+      options?.floatFormat === 'app-extension' &&
+      options?.appPrefix !== false
+    ) {
+      // Derived from the value's actual encoded bytes (via toCBOR(), which
+      // honors a _toCBOR() override for e.g. a NaN-payload-preserving
+      // subclass) rather than reimplementing bit-pattern logic here — the
+      // first byte is the major-7 initial byte, not part of the payload.
+      const bytes = this.toCBOR();
+      const hex = bytesToHex(bytes.subarray(1));
+      return (
+        `float'${hex}'` +
+        floatSuffix(this.value, this.precision, autoSelected, mode)
+      );
+    }
     const numStr =
       options?.floatFormat === 'hex'
         ? floatToHexFloat(this.value)
