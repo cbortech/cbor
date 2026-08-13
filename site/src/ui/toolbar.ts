@@ -402,6 +402,7 @@ export function initModeTabs(onChange: (mode: BytesMode) => void): void {
 
       event.preventDefault();
       const nextTab = tabs[nextIndex];
+      if (!nextTab) return;
       nextTab.focus();
       selectTab(nextTab);
     });

@@ -216,7 +216,7 @@ export function initCddlPane(opts: CddlPaneOptions): CddlPane {
   }
 
   toggleBtn.addEventListener('click', () => {
-    const open = paneEl.hidden;
+    const open = paneEl.hidden !== false;
     setOpen(open);
     opts.onToggle?.(open);
   });
