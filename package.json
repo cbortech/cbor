@@ -118,7 +118,6 @@
     "site:test": "npm run build && npm run --workspace site test"
   },
   "devDependencies": {
-    "@cbortech/hash-extension": "^0.2.3",
     "@types/node": "^24.13.3",
     "@typescript/typescript6": "^6.0.2",
     "@vitest/browser": "^4.1.10",
