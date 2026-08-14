@@ -36,6 +36,8 @@ import {
 } from '../cbor/encode';
 import {
   canonicalEncodingWidth,
+  pushAll,
+  shouldEmitComments,
   type ByteCommentSyntax,
 } from './serialize-utils';
 import { b32, h32 } from '../extensions/b32';
@@ -69,7 +71,7 @@ export function parseCDN(text: string, options?: FromCDNOptions): CborItem {
   });
   const parser = new CDNParser(tokenizer, options ?? {});
   const node = parser.parse();
-  if (options?.preserveComments || options?.preserveAll) {
+  if (shouldEmitComments(options) || options?.preserveAll) {
     attachComments(node, tokenizer.comments, text);
     promoteEllipsisTailComments(node);
   }
@@ -111,7 +113,7 @@ function parseBigInt(raw: string): bigint {
  * `structuralAppSeqSourceFeatures` finds nothing byte-string-like in it
  * structurally) still carries its own inner byte-string literal's features
  * on itself, and an explicitly disabled sibling `preserve*` option must see
- * that when this node is nested inside an outer `preserveAppSequence`
+ * that when this node is nested inside an outer `preserveAppPrefix`
  * raw-tag/`<<...>>` source (e.g. `ip`'s array content).
  */
 function appSeqSourceFeatures(
@@ -139,7 +141,7 @@ function structuralAppSeqSourceFeatures(
       item.ednPartSources?.filter((source) => source !== undefined).length ?? 0;
     // A part with no preserved raw source is ambiguous by itself — it could
     // be an unpreservable double-quoted literal (textString) or a
-    // byte-string literal decoded to text per §5.1 (byteString); only
+    // byte-string literal decoded to text per draft-25 §5.1 (byteString); only
     // ednPartIsByteString distinguishes them.
     const byteStringPartCount = hasParts
       ? item.ednParts!.reduce((count, _text, i) => {
@@ -401,7 +403,7 @@ function collectContentEncodingEdits(
     for (const item of node.items) {
       const itemEdits = collectContentEncodingEdits(source, sourceStart, item);
       if (itemEdits === undefined) return undefined;
-      edits.push(...itemEdits);
+      pushAll(edits, itemEdits);
     }
     return edits;
   }
@@ -897,13 +899,13 @@ class CDNParser {
               this._applyEiToResult(result, appStrEw, tok);
             if (ext.preserveAppSeqSource === 'optional') {
               // Same rationale as the APP_SEQUENCE case below: tack the
-              // source onto the same result node so preserveAppSequence can
+              // source onto the same result node so preserveAppPrefix can
               // round-trip prefix`...` (and non-canonical prefix'...')
               // spellings without changing the node's class/identity.
               result.appSeqSource = tok.raw + appStrEiRaw;
               return result;
             }
-            // Propagate ednSource so preserveByteString / appStrings round-trips correctly.
+            // Propagate ednSource so preserveByteString / appPrefix round-trips correctly.
             // instanceof narrows the type; getPrototypeOf excludes subclasses like CborIpExt.
             if (
               result instanceof CborByteString &&
@@ -996,7 +998,7 @@ class CDNParser {
             if (seqExt.preserveAppSeqSource === 'optional') {
               // Tack the source onto the same result node (preserving its
               // class/identity) rather than wrapping it; the node's own
-              // _toCDN() decides whether to use it (see preserveAppSequence).
+              // _toCDN() decides whether to use it (see preserveAppPrefix).
               result.appSeqSource = rawSource;
               result.appSeqComments = relativeComments(
                 this.t.comments,
@@ -1128,7 +1130,7 @@ class CDNParser {
               result.appSeqSource === undefined
             ) {
               // Raw tag notation (e.g. 1(1749772800)) is itself a spelling
-              // that preserveAppSequence should be able to keep instead of
+              // that preserveAppPrefix should be able to keep instead of
               // upgrading it to regenerated DT'...' notation.
               result.appSeqSource = this.t.source.slice(
                 tok.offset,
@@ -1266,7 +1268,7 @@ class CDNParser {
         this.t.consume();
         parts.push({
           text: this._decodeUtf8(this._decodeBytesToken(next), next),
-          // §5.1: this part is a byte-string literal decoded to text, not a
+          // draft-25 §5.1: this part is a byte-string literal decoded to text, not a
           // double-quoted literal — appSeqSourceFeatures must attribute it
           // to `byteString`, not the unpreservable `textString`, since both
           // leave `source` undefined here.
@@ -1521,7 +1523,7 @@ class CDNParser {
         this.t.consume();
         const sub = this._elidedHexAtoms(next.value, next);
         if (sub.length > 0) sub[0]!.real = true;
-        atoms.push(...sub);
+        pushAll(atoms, sub);
       } else if (this._isBytesToken(next.type)) {
         this.t.consume();
         atoms.push({
@@ -1533,7 +1535,7 @@ class CDNParser {
           end: next.endOffset,
         });
       } else if (next.type === 'TSTR' || next.type === 'RAWSTRING') {
-        // §5.1: when a byte string leads, the right-hand side must also be a
+        // draft-25 §5.1: when a byte string leads, the right-hand side must also be a
         // byte string.  Text strings are only allowed on the right of a
         // text-leading concatenation.  In non-strict mode we UTF-8 encode
         // the text and continue; in strict mode this is a hard error.
@@ -1926,7 +1928,7 @@ class CDNParser {
 
     const first = chunks[0];
     // All chunks must be the same type — mixing byte and text strings is
-    // a SyntaxError per draft §2.5.4.
+    // a SyntaxError per draft §4.3.
     if (first instanceof CborByteString) {
       const byteChunks = chunks.map((c, i) => {
         if (c instanceof CborByteString) return c;
@@ -2075,7 +2077,7 @@ class CDNParser {
         if (ewv !== undefined) result.encodingWidth = ewv;
       }
     } else if (result instanceof CborTag) {
-      // Per draft-ietf-cbor-edn-literals-25 §2.3.1, the EI applies to
+      // Per draft-ietf-cbor-edn-literals-27 §4.1, the EI applies to
       // the tag number, not to the content (e.g. 1_1(4711) → 2-byte tag).
       if (result.encodingWidth === undefined) {
         const ewv = this._validateEncodingFit(result.tag, ew, tok);

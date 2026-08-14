@@ -19,6 +19,8 @@ import {
 import {
   convertCommentText,
   hasPreservedComments,
+  isPrefixedLiteralText,
+  pushAll,
   serializeContainer,
 } from '../cdn/serialize-utils';
 import { byteToHexUpper, bytesToSpacedHexUpper } from '../utils/hex';
@@ -61,6 +63,22 @@ export class CborMap extends CborItem {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
+    // `entryIsMultiWordText` needs each side's own rendering (not just the
+    // combined "key: value" string serializeContainer sees — see its
+    // comment below), and `renderEntry` needs the exact same strings right
+    // after — cached per index so a custom key/value's `_toCDN()` is never
+    // called twice for the same render, matching serializeContainer's own
+    // "never serialize more than once per parent render" invariant.
+    const kvCache: ([string, string] | undefined)[] = [];
+    const renderKV = (i: number): [string, string] => {
+      let kv = kvCache[i];
+      if (!kv) {
+        const [k, v] = this.entries[i];
+        kv = [k._toCDN(options, depth + 1), v._toCDN(options, depth + 1)];
+        kvCache[i] = kv;
+      }
+      return kv;
+    };
     return serializeContainer({
       node: this,
       options,
@@ -76,12 +94,25 @@ export class CborMap extends CborItem {
             hasPreservedComments(key) || hasPreservedComments(value)
         ),
       renderEntry: (i, colSep) => {
-        const [k, v] = this.entries[i];
-        return `${k._toCDN(options, depth + 1)}${colSep}${v._toCDN(options, depth + 1)}`;
+        const [kStr, vStr] = renderKV(i);
+        return `${kStr}${colSep}${vStr}`;
       },
       entryIsLeaf: (i) => {
         const [k, v] = this.entries[i];
         return !k._containsCdnContainer && !v._containsCdnContainer;
+      },
+      entryIsMultiWordText: (i) => {
+        const [k, v] = this.entries[i];
+        if (k._isMultiWordText(options) || v._isMultiWordText(options))
+          return true;
+        // serializeContainer's own isPrefixedLiteralText check only sees a
+        // map entry's combined "key: value" rendering, which can't tell a
+        // prefixed literal in the value (or a non-leading key) apart from
+        // one embedded inside the other's own quoted content — so check
+        // each side's own rendering here instead, same as the multi-word
+        // check above already does for text/byte strings.
+        const [kStr, vStr] = renderKV(i);
+        return isPrefixedLiteralText(kStr) || isPrefixedLiteralText(vStr);
       },
       // Leading comments come from the key; the value's leading comments
       // render inline after the entry (see entryTrailing).
@@ -110,8 +141,8 @@ export class CborMap extends CborItem {
         },
       ];
       for (const [k, v] of this.entries) {
-        lines.push(...k._toHexDump(depth + 1, options));
-        lines.push(...v._toHexDump(depth + 1, options));
+        pushAll(lines, k._toHexDump(depth + 1, options));
+        pushAll(lines, v._toHexDump(depth + 1, options));
       }
       lines.push({
         depth,
@@ -130,8 +161,8 @@ export class CborMap extends CborItem {
       },
     ];
     for (const [k, v] of this.entries) {
-      lines.push(...k._toHexDump(depth + 1, options));
-      lines.push(...v._toHexDump(depth + 1, options));
+      pushAll(lines, k._toHexDump(depth + 1, options));
+      pushAll(lines, v._toHexDump(depth + 1, options));
     }
     return lines;
   }

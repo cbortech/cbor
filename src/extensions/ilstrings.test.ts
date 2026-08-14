@@ -1,9 +1,9 @@
 /**
  * Tests for the `ilbs` / `ilts` indefinite-length string app-extensions
- * (§3.5 of draft-ietf-cbor-edn-literals-26).
+ * (§3.6 of draft-ietf-cbor-edn-literals-27).
  *
  * Covers:
- *  - Spec §3.5 examples (including per-argument encoding indicators)
+ *  - Spec §3.6 examples (including per-argument encoding indicators)
  *  - One chunk per argument; text/byte argument mixing
  *  - Zero-chunk forms ilbs<<>> / ilts<<>>
  *  - Shorthand string forms
@@ -25,9 +25,9 @@ function cborHex(text: string): string {
   return hex(parseCDN(text).toCBOR());
 }
 
-// ─── Spec §3.5 examples ───────────────────────────────────────────────────────
+// ─── Spec §3.6 examples ───────────────────────────────────────────────────────
 
-describe('ilbs / ilts — spec §3.5 examples', () => {
+describe('ilbs / ilts — spec §3.6 examples', () => {
   test("'Hello world' → 4b 48656c6c6f20776f726c64 (definite, for contrast)", () => {
     expect(cborHex("'Hello world'")).toBe('4b48656c6c6f20776f726c64');
   });
@@ -101,7 +101,7 @@ describe('ilbs / ilts — chunk semantics', () => {
 
 // ─── Shorthand string forms ───────────────────────────────────────────────────
 
-describe('ilbs / ilts — string shorthand forms (§2.1)', () => {
+describe('ilbs / ilts — string shorthand forms (§3)', () => {
   test("ilbs'foo' → single byte chunk", () => {
     expect(cborHex("ilbs'foo'")).toBe('5f43666f6fff');
   });
@@ -157,15 +157,13 @@ describe('ilbs / ilts — round-trip', () => {
     expect(parseCDN("ilts'a\\'b'").toCDN()).toBe("ilts'a\\'b'");
   });
 
-  test('string shorthand forms fall back to streamstring with appStrings: false', () => {
-    expect(parseCDN("ilbs'foo'").toCDN({ appStrings: false })).toBe(
-      "(_ 'foo')"
-    );
+  test('string shorthand forms fall back to streamstring with appPrefix: false', () => {
+    expect(parseCDN("ilbs'foo'").toCDN({ appPrefix: false })).toBe("(_ 'foo')");
   });
 
-  test('appStrings: false falls back to the streamstring notation', () => {
+  test('appPrefix: false falls back to the streamstring notation', () => {
     expect(
-      parseCDN('ilts<<"Hello ", "world">>').toCDN({ appStrings: false })
+      parseCDN('ilts<<"Hello ", "world">>').toCDN({ appPrefix: false })
     ).toBe('(_ "Hello ","world")');
   });
 

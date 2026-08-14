@@ -30,13 +30,16 @@ actual CDN text (used to embed inputs with control characters).
 
 ## Running the optional tests
 
-Clone the upstream fixture repository and copy the CSV files into this
-directory:
+Fetch the CSV files with:
 
 ```sh
-git clone https://github.com/hildjj/edn-test-vectors.git /tmp/edn-test-vectors
-cp /tmp/edn-test-vectors/*.csv src/cdn/test-vectors/edn-test-vectors/
+npm run fetch-test-vectors -- edn-test-vectors
 ```
+
+This clones the upstream fixture repository into a temporary directory and
+copies the CSV files into this directory. (Equivalent to cloning
+https://github.com/hildjj/edn-test-vectors.git and copying its `*.csv` files
+here by hand.)
 
 Then run:
 

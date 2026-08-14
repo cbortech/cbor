@@ -1,7 +1,7 @@
 /**
- * §4.1 of draft-ietf-cbor-edn-literals-25 — Stand-in for unknown app-extensions.
+ * §5.1 of draft-ietf-cbor-edn-literals-27 — Stand-in for unknown app-extensions.
  *
- * When the CDN parser encounters an unrecognised application-extension
+ * When the CDN parser encounters an unrecognised app-extension
  * identifier (the default `unresolvedExtension: 'cpa999'` behaviour), it wraps
  * the literal in a CPA999 tag instead of throwing a SyntaxError.
  *
@@ -27,11 +27,11 @@ import { CborTextString } from './CborTextString';
 import type { CborItem } from './CborItem';
 import { escapeAppString } from '../cdn/serialize-utils';
 
-/** Provisional tag number for the Unresolved Application-Extension stand-in. */
+/** Provisional tag number for the Unresolved App-Extension stand-in. */
 export const CPA999_TAG = 999n;
 
 /**
- * Stand-in for an unrecognised EDN application-extension literal.
+ * Stand-in for an unrecognised EDN app-extension literal.
  *
  * Structure:
  *   App-string:  CPA999([prefix, text])
@@ -49,7 +49,7 @@ export class CborUnresolvedAppExt extends CborTag {
   }
 
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toCDN(options, depth);
+    if (options?.appPrefix === false) return super._toCDN(options, depth);
 
     const arr = this.content as CborArray;
     const prefix = (arr.items[0] as CborTextString).value;

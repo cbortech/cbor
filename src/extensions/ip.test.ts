@@ -115,7 +115,7 @@ describe("ip — ip'…' (lowercase, untagged)", () => {
 
   test("ip'…/prefix' falls back to plain array notation", () => {
     const v = CBOR.fromCDN("ip'192.0.2.0/24'");
-    expect(v.toCDN({ appStrings: false })).toBe("[24,h'c00002']");
+    expect(v.toCDN({ appPrefix: false })).toBe("[24,h'c00002']");
   });
 
   test("ip'...' toCBOR() produces bare byte string (no tag)", () => {
@@ -159,44 +159,44 @@ describe('ip — ip<<…>> / IP<<…>> (app-sequence form)', () => {
   });
 });
 
-describe('ip — preserveAppSequence', () => {
+describe('ip — preserveAppPrefix', () => {
   // By design, ip/IP regenerate their notation from the resolved address on
   // every format() call — so <<...>> normally collapses to '...' even
-  // though both spell the same address. preserveAppSequence keeps the
+  // though both spell the same address. preserveAppPrefix keeps the
   // original bracketed spelling instead, without changing the parsed
   // node's class (CborIpExt / CborIpPrefixExt / CborTaggedIpExt).
 
   test("ip<<'...'>> keeps its bracketed notation when requested", () => {
-    expect(
-      CBOR.format("ip<<'192.0.2.42'>>", { preserveAppSequence: true })
-    ).toBe("ip<<'192.0.2.42'>>");
+    expect(CBOR.format("ip<<'192.0.2.42'>>", { preserveAppPrefix: true })).toBe(
+      "ip<<'192.0.2.42'>>"
+    );
     // Default output normalises to the ip'...' form.
     expect(CBOR.format("ip<<'192.0.2.42'>>")).toBe("ip'192.0.2.42'");
   });
 
   test("IP<<'...'>> (tagged) keeps its bracketed notation when requested", () => {
-    expect(
-      CBOR.format("IP<<'192.0.2.42'>>", { preserveAppSequence: true })
-    ).toBe("IP<<'192.0.2.42'>>");
+    expect(CBOR.format("IP<<'192.0.2.42'>>", { preserveAppPrefix: true })).toBe(
+      "IP<<'192.0.2.42'>>"
+    );
   });
 
   test("ip<<'.../prefix'>> (CIDR, untagged) keeps its bracketed notation", () => {
     expect(
-      CBOR.format("ip<<'2001:db8::/32'>>", { preserveAppSequence: true })
+      CBOR.format("ip<<'2001:db8::/32'>>", { preserveAppPrefix: true })
     ).toBe("ip<<'2001:db8::/32'>>");
   });
 
   test("IP<<'.../prefix'>> (CIDR, tagged) keeps its bracketed notation", () => {
     expect(
-      CBOR.format("IP<<'2001:db8::/32'>>", { preserveAppSequence: true })
+      CBOR.format("IP<<'2001:db8::/32'>>", { preserveAppPrefix: true })
     ).toBe("IP<<'2001:db8::/32'>>");
   });
 
-  test('appStrings:false still wins over preserveAppSequence', () => {
+  test('appPrefix:false still wins over preserveAppPrefix', () => {
     expect(
       CBOR.format("IP<<'192.0.2.42'>>", {
-        preserveAppSequence: true,
-        appStrings: false,
+        preserveAppPrefix: true,
+        appPrefix: false,
       })
     ).toBe("52(h'c000022a')");
   });
@@ -205,17 +205,17 @@ describe('ip — preserveAppSequence', () => {
     // A leading zero and full (non-compressed) form are both valid IPv6
     // spellings of the same address that formatAddress() would normally
     // regenerate as the compressed canonical form.
-    expect(CBOR.format("ip'2001:0db8::1'", { preserveAppSequence: true })).toBe(
+    expect(CBOR.format("ip'2001:0db8::1'", { preserveAppPrefix: true })).toBe(
       "ip'2001:0db8::1'"
     );
     expect(CBOR.format("ip'2001:0db8::1'")).toBe("ip'2001:db8::1'");
   });
 
   test('keeps prefix`...` (backtick app-rstring) notation when requested', () => {
-    expect(CBOR.format('ip`192.0.2.42`', { preserveAppSequence: true })).toBe(
+    expect(CBOR.format('ip`192.0.2.42`', { preserveAppPrefix: true })).toBe(
       'ip`192.0.2.42`'
     );
-    expect(CBOR.format('IP`192.0.2.42`', { preserveAppSequence: true })).toBe(
+    expect(CBOR.format('IP`192.0.2.42`', { preserveAppPrefix: true })).toBe(
       'IP`192.0.2.42`'
     );
     // Default output normalises to the single-quoted form.
@@ -228,18 +228,18 @@ describe('ip — preserveAppSequence', () => {
   });
 
   test('keeps raw tag notation (52(...)) instead of upgrading to IP notation', () => {
-    expect(CBOR.format("52(h'c000022a')", { preserveAppSequence: true })).toBe(
+    expect(CBOR.format("52(h'c000022a')", { preserveAppPrefix: true })).toBe(
       "52(h'c000022a')"
     );
     // Default output normalises to the regenerated IP'...' form.
     expect(CBOR.format("52(h'c000022a')")).toBe("IP'192.0.2.42'");
   });
 
-  test('appStrings:false still wins over preserveAppSequence for raw tag notation', () => {
+  test('appPrefix:false still wins over preserveAppPrefix for raw tag notation', () => {
     expect(
       CBOR.format("52(h'c000022a')", {
-        preserveAppSequence: true,
-        appStrings: false,
+        preserveAppPrefix: true,
+        appPrefix: false,
       })
     ).toBe("52(h'c000022a')");
   });
@@ -252,13 +252,13 @@ describe('ip — preserveAppSequence', () => {
   test('encodingIndicators applies to both items in raw tag notation', () => {
     expect(
       CBOR.format("52_1(h'c000022a'_2)", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         encodingIndicators: 'never',
       })
     ).toBe("52(h'c000022a')");
     expect(
       CBOR.format("52(h'c000022a')", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         encodingIndicators: 'always',
       })
     ).toBe("52_0(h'c000022a'_i)");
@@ -267,13 +267,13 @@ describe('ip — preserveAppSequence', () => {
   test('encodingIndicators edits raw-tag source without changing unrelated spelling/layout', () => {
     expect(
       CBOR.format("0x34_1( b64'wAACKg=='_1 )", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         encodingIndicators: 'never',
       })
     ).toBe("0x34( b64'wAACKg==' )");
     expect(
       CBOR.format("0x34( b64'wAACKg==' )", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         encodingIndicators: 'always',
       })
     ).toBe("0x34_0( b64'wAACKg=='_i )");
@@ -282,13 +282,13 @@ describe('ip — preserveAppSequence', () => {
   test('encodingIndicators edits every nested item in raw CIDR tag source', () => {
     expect(
       CBOR.format("0x34_1([_1 24_1, h'c00002'_1])", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         encodingIndicators: 'never',
       })
     ).toBe("0x34([ 24, h'c00002'])");
     expect(
       CBOR.format("0x34([24,h'c00002'])", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         encodingIndicators: 'always',
       })
     ).toBe("0x34_0([_i 24_0,h'c00002'_i])");
@@ -297,7 +297,7 @@ describe('ip — preserveAppSequence', () => {
   test('encodingIndicators: always adds a missing indicator to <<...>> notation', () => {
     expect(
       CBOR.format("IP<<'192.0.2.42'>>", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         encodingIndicators: 'always',
       })
     ).toBe("IP<<'192.0.2.42'>>_0");
@@ -306,7 +306,7 @@ describe('ip — preserveAppSequence', () => {
   test('encodingIndicators: never also strips an inner (item-level) indicator', () => {
     expect(
       CBOR.format("IP<<'192.0.2.42'_1>>_1", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         encodingIndicators: 'never',
       })
     ).toBe("IP<<'192.0.2.42'>>");
@@ -315,7 +315,7 @@ describe('ip — preserveAppSequence', () => {
   test('encodingIndicators: never strips an inner indicator across whitespace/comma before >>', () => {
     expect(
       CBOR.format("IP<<'192.0.2.42'_1, >>_1", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         encodingIndicators: 'never',
       })
     ).toBe("IP<<'192.0.2.42', >>");
@@ -324,7 +324,7 @@ describe('ip — preserveAppSequence', () => {
   test('encodingIndicators: never strips an inner indicator across a comment before >>', () => {
     expect(
       CBOR.format("IP<<'192.0.2.42'_1 # x\n>>_1", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         encodingIndicators: 'never',
         indent: 2,
       })
@@ -334,14 +334,14 @@ describe('ip — preserveAppSequence', () => {
   test('comment style options preserve notation and normalise comments', () => {
     expect(
       CBOR.format("IP<<'192.0.2.42'>>", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         preserveComments: 'c-style',
         indent: 2,
       })
     ).toBe("IP<<'192.0.2.42'>>");
     expect(
       CBOR.format("IP<</note/ '192.0.2.42'>>", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         preserveComments: 'c-style',
         indent: 2,
       })
@@ -351,13 +351,13 @@ describe('ip — preserveAppSequence', () => {
   test('untagged ip<<...>> keeps its bracketed notation under always/never too', () => {
     expect(
       CBOR.format("ip<<'192.0.2.42'>>", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         encodingIndicators: 'never',
       })
     ).toBe("ip<<'192.0.2.42'>>");
     expect(
       CBOR.format("ip<<'192.0.2.42'>>", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         encodingIndicators: 'always',
       })
     ).toBe("ip<<'192.0.2.42'>>_i");
@@ -402,7 +402,7 @@ describe('ip — preserveAppSequence', () => {
     // untagged content, so it must not be used when that's explicitly off.
     expect(
       CBOR.format("52(h'c000022a')", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         preserveByteString: false,
         bstrEncoding: 'base64',
       })
@@ -418,7 +418,7 @@ describe('ip — preserveAppSequence', () => {
       })
     ).toBe("52( h'c000022a')");
     expect(
-      CBOR.format("52(/note/ h'c000022a')", { preserveAppSequence: true })
+      CBOR.format("52(/note/ h'c000022a')", { preserveAppPrefix: true })
     ).toBe("52(/note/ h'c000022a')");
   });
 
@@ -439,7 +439,7 @@ describe('ip — preserveAppSequence', () => {
     ).toBe("52(/note/ h'c000022a')");
     expect(
       CBOR.format("0x34(b64'wAACKg==')", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         preserveComments: 'c-style',
         indent: 2,
       })
@@ -504,10 +504,10 @@ describe('ip — preserveAppSequence', () => {
       })
     ).toBe('52(["x"])');
     // Unset, both keep the verbatim source.
-    expect(CBOR.format('52(["\\u0078"])', { preserveAppSequence: true })).toBe(
+    expect(CBOR.format('52(["\\u0078"])', { preserveAppPrefix: true })).toBe(
       '52(["\\u0078"])'
     );
-    expect(CBOR.format('52([`x`])', { preserveAppSequence: true })).toBe(
+    expect(CBOR.format('52([`x`])', { preserveAppPrefix: true })).toBe(
       '52([`x`])'
     );
   });
@@ -521,7 +521,7 @@ describe('ip — preserveAppSequence', () => {
     ).toBe("52([(_ 'a','b')])");
     expect(
       CBOR.format("52([(_ b64'YQ==', b64'Yg==')])", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe("52([(_ b64'YQ==', b64'Yg==')])");
   });
@@ -530,7 +530,7 @@ describe('ip — preserveAppSequence', () => {
     // DT<<b64'...'>> resolves to a plain epoch number, so there is nothing
     // byte-string-like in its *structural* content — the byte-string
     // literal only shows up in the DT node's own appSeqSourceFeatures, from
-    // when it was itself parsed as an application sequence.
+    // when it was itself parsed as an app-sequence.
     expect(
       CBOR.format("52([DT<<b64'MTk2OS0wNy0yMVQwMjo1NjoxNlo='>>])", {
         preserveAll: true,
@@ -539,7 +539,7 @@ describe('ip — preserveAppSequence', () => {
     ).toBe("52([DT'1969-07-21T02:56:16Z'])");
     expect(
       CBOR.format("52([DT<<b64'MTk2OS0wNy0yMVQwMjo1NjoxNlo='>>])", {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
       })
     ).toBe("52([DT<<b64'MTk2OS0wNy0yMVQwMjo1NjoxNlo='>>])");
   });
@@ -555,20 +555,20 @@ describe('ip — preserveAppSequence', () => {
       })
     ).toBe("52([{0:'ab'}])");
     expect(
-      CBOR.format("52([{0: h'61' + h'62'}])", { preserveAppSequence: true })
+      CBOR.format("52([{0: h'61' + h'62'}])", { preserveAppPrefix: true })
     ).toBe("52([{0: h'61' + h'62'}])");
   });
 
   test('encodingIndicators falls back to structural output for an unsupported node type nested in raw tag content', () => {
     expect(
       CBOR.format('52(["x"_1])', {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         encodingIndicators: 'never',
       })
     ).toBe('52(["x"])');
     expect(
       CBOR.format('52(["x"])', {
-        preserveAppSequence: true,
+        preserveAppPrefix: true,
         encodingIndicators: 'always',
       })
     ).toBe('52_0([_i"x"_i])');
@@ -793,27 +793,27 @@ describe('ip — fromJS round-trip', () => {
   });
 });
 
-// ─── appStrings: false ────────────────────────────────────────────────────────
+// ─── appPrefix: false ────────────────────────────────────────────────────────
 
-describe('ip — appStrings: false', () => {
+describe('ip — appPrefix: false', () => {
   test("ip'…' falls back to plain byte string notation", () => {
     const v = CBOR.fromCDN("ip'192.0.2.42'");
-    expect(v.toCDN({ appStrings: false })).toBe("h'c000022a'");
+    expect(v.toCDN({ appPrefix: false })).toBe("h'c000022a'");
   });
 
   test("IP'…' falls back to tag notation", () => {
     const v = CBOR.fromCDN("IP'192.0.2.42'");
-    expect(v.toCDN({ appStrings: false })).toBe("52(h'c000022a')");
+    expect(v.toCDN({ appPrefix: false })).toBe("52(h'c000022a')");
   });
 
   test("IP'…/prefix' (CIDR) falls back to tag notation", () => {
     const v = CBOR.fromCDN("IP'192.0.2.0/24'");
-    expect(v.toCDN({ appStrings: false })).toBe("52([24,h'c00002'])");
+    expect(v.toCDN({ appPrefix: false })).toBe("52([24,h'c00002'])");
   });
 
   test("IP'…' IPv6 falls back to tag notation", () => {
     const v = CBOR.fromCDN("IP'2001:db8::42'");
-    expect(v.toCDN({ appStrings: false })).toBe(
+    expect(v.toCDN({ appPrefix: false })).toBe(
       "54(h'20010db8000000000000000000000042')"
     );
   });
@@ -830,7 +830,7 @@ function hexBytes(s: string): Uint8Array {
 }
 
 describe('ip — non-canonical inner encoding falls back to generic tag notation', () => {
-  // Per §2.3.1: IP'...'_N encodes only the tag number's width.
+  // Per §4.1: IP'...'_N encodes only the tag number's width.
   // When the inner byte string has a non-canonical length header, _toCDN() falls back
   // to CborTag._toCDN() so the inner EI is preserved.
 

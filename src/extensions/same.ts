@@ -12,7 +12,7 @@
  *
  * The parsed result is wrapped in `CborAppSeqResult` so that `toCDN()` round-trips
  * the original `same<<...>>` notation.  `toCBOR()` and `toJS()` delegate
- * transparently to the inner item; `appStrings: false` produces the resolved value.
+ * transparently to the inner item; `appPrefix: false` produces the resolved value.
  * The result is not directly `instanceof` the inner item's class.
  *
  * This extension is a testing/validation construct from the cabo/edn-abnf

@@ -123,7 +123,7 @@ describe('parseCDN — floats', () => {
   });
 
   // ── positive sign ─────────────────────────────────────────────────────────
-  // Per draft-ietf-cbor-edn-literals-25 §2.4: 0, +0, -0 are all uint (00).
+  // Per draft-ietf-cbor-edn-literals-27 §2.2: 0, +0, -0 are all uint (00).
 
   test('+0 → uint 0 (same as 0)', () => {
     const n = parseCDN('+0') as CborUint;
@@ -319,7 +319,7 @@ describe('parseCDN — text strings', () => {
     );
   });
   test('byte-leading concat with double-quoted text → strict:true throws', () => {
-    // §5.1: text string on the right of a byte-leading concat is not allowed
+    // draft-25 §5.1: text string on the right of a byte-leading concat is not allowed
     expect(() => parseCDN('h\'48\' + "ello"')).toThrow(SyntaxError);
   });
   test('byte-leading concat with double-quoted text → strict:false warns + UTF-8 encodes', () => {
@@ -418,7 +418,7 @@ describe('parseCDN — text strings', () => {
 
   // ── Literal LF and CR in source ─────────────────────────────────────────────
 
-  test('literal LF inside string is allowed (spec §2.5.1)', () => {
+  test('literal LF inside string is allowed (spec §2.3.1)', () => {
     const val = (parseCDN('"hello\nworld"') as CborTextString).value;
     expect(val).toBe('hello\nworld');
   });
@@ -431,16 +431,16 @@ describe('parseCDN — text strings', () => {
     expect(val).toBe('hello\nworld');
   });
 
-  // ── Escaped newline (§5.1 escapable1: \ newline → swallow) ──────────────────
+  // ── Escaped newline (§6.1 escapable1: \ newline is not escapable) ───────────
 
-  // §5.1 escapable1 does not include backslash-newline.
-  test('backslash-LF is a SyntaxError (draft-25 §5.1)', () => {
+  // §6.1 escapable1 does not include backslash-newline.
+  test('backslash-LF is a SyntaxError (draft-27 §6.1)', () => {
     expect(() => parseCDN('"hello\\\nworld"')).toThrow(SyntaxError);
   });
-  test('backslash-CRLF is a SyntaxError (draft-25 §5.1)', () => {
+  test('backslash-CRLF is a SyntaxError (draft-27 §6.1)', () => {
     expect(() => parseCDN('"hello\\\r\nworld"')).toThrow(SyntaxError);
   });
-  test('backslash-CR is a SyntaxError (draft-25 §5.1)', () => {
+  test('backslash-CR is a SyntaxError (draft-27 §6.1)', () => {
     expect(() => parseCDN('"hello\\\rworld"')).toThrow(SyntaxError);
   });
 });
@@ -486,7 +486,7 @@ describe('parseCDN — raw string literals (backtick)', () => {
     expect(n.value).toBe('line1\nline2');
   });
 
-  // ── Leading newline stripping (§2.5.3) ───────────────────────────────────
+  // ── Leading newline stripping (§2.3.3) ───────────────────────────────────
 
   test('leading LF is stripped', () => {
     // `\nhello` → "hello"
@@ -504,7 +504,7 @@ describe('parseCDN — raw string literals (backtick)', () => {
 
   // ── Multi-backtick delimiter (N > 1) ─────────────────────────────────────
 
-  test('double-backtick delimiter allows single backtick in content (spec §2.5.3 example)', () => {
+  test('double-backtick delimiter allows single backtick in content (spec §2.3.3 example)', () => {
     // ``[^ \t\n\r"'`]`` from the spec
     const n = parseCDN('``[^ \\t\\n\\r"\'`]``') as CborTextString;
     expect(n).toBeInstanceOf(CborTextString);
@@ -517,14 +517,14 @@ describe('parseCDN — raw string literals (backtick)', () => {
     expect(n.value).toBe('a``b');
   });
 
-  test('backtick run longer than the delimiter throws (§2.5.4 alikerawdelim)', () => {
+  test('backtick run longer than the delimiter throws (§2.3.3 alikerawdelim)', () => {
     // Draft-25 allowed ```a = ``foo````` (excess closing backticks became
     // content); draft-26 requires the closing delimiter to be exactly as
     // long as the opening one, so a longer run is an error.
     expect(() => parseCDN('```a = ``foo`````')).toThrow(SyntaxError);
   });
 
-  test('trailing-backtick content is notated with the space rule (§2.5.4)', () => {
+  test('trailing-backtick content is notated with the space rule (§2.3.3)', () => {
     // ``` a = ``foo`` ``` → "a = ``foo``"
     const n = parseCDN('``` a = ``foo`` ```') as CborTextString;
     expect(n.value).toBe('a = ``foo``');
@@ -551,17 +551,17 @@ describe('parseCDN — raw string literals (backtick)', () => {
     expect(n.value).toBe(' x ');
   });
 
-  test('space rule applies to single-backtick delimiters too (§2.5.4)', () => {
+  test('space rule applies to single-backtick delimiters too (§2.3.3)', () => {
     const n = parseCDN('` x `') as CborTextString;
     expect(n.value).toBe('x');
   });
 
-  test('space rule requires both a leading and a trailing space (§2.5.4)', () => {
+  test('space rule requires both a leading and a trailing space (§2.3.3)', () => {
     expect((parseCDN('`` x``') as CborTextString).value).toBe(' x');
     expect((parseCDN('``x ``') as CborTextString).value).toBe('x ');
   });
 
-  test('space rule does not apply after the leading-newline rule (§2.5.4)', () => {
+  test('space rule does not apply after the leading-newline rule (§2.3.3)', () => {
     // Inner "\n`a` " — newline rule strips the LF; the space rule is skipped.
     const n = parseCDN('``\n`a` ``') as CborTextString;
     expect(n.value).toBe('`a` ');
@@ -602,7 +602,7 @@ describe('parseCDN — raw string literals (backtick)', () => {
     expect(() => parseCDN('``oops`')).toThrow(SyntaxError);
   });
 
-  // ── Empty raw strings are forbidden (§2.5.3) ─────────────────────────────
+  // ── Empty raw strings are forbidden (§2.3.3) ─────────────────────────────
 
   test('empty bare raw string `` throws SyntaxError', () => {
     expect(() => parseCDN('``')).toThrow(SyntaxError);
@@ -616,7 +616,7 @@ describe('parseCDN — raw string literals (backtick)', () => {
     expect(() => parseCDN('`\n`')).toThrow(SyntaxError);
   });
 
-  // rawchars forbids HT (draft-25 §2.5.3)
+  // rawchars forbids HT (draft-27 §2.3.3)
   test('raw string containing literal HT (tab) throws SyntaxError', () => {
     expect(() => parseCDN('`foo\tbar`')).toThrow(SyntaxError);
   });
@@ -654,7 +654,7 @@ describe('parseCDN — byte strings', () => {
     const n = parseCDN("b64'AQIDBA=='") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([1, 2, 3, 4]));
   });
-  test("b64'AQIDBA' (missing ==) is accepted — draft-25 allows omitting padding", () => {
+  test("b64'AQIDBA' (missing ==) is accepted — draft-27 allows omitting padding", () => {
     const n = parseCDN("b64'AQIDBA'") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([1, 2, 3, 4]));
   });
@@ -667,9 +667,9 @@ describe('parseCDN — byte strings', () => {
     const n = parseCDN("b64'3q2-7w'") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
   });
-  test('base64 mixed classic and URL-safe chars in one literal (b64dig, draft-25 §5.2.2)', () => {
+  test('base64 mixed classic and URL-safe chars in one literal (b64dig, draft-27 §6.2.2)', () => {
     // 3q2+7w== = 0xDE 0xAD 0xBE 0xEF in classic base64 (+ instead of -)
-    // draft-25 b64dig allows +, /, -, _ in any combination
+    // draft-27 b64dig allows +, /, -, _ in any combination
     const n = parseCDN("b64'3q2+7w=='") as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
   });
@@ -743,7 +743,7 @@ describe('parseCDN — byte strings', () => {
     expect(n.value).toEqual(new Uint8Array([1, 2, 3]));
   });
 
-  // ── h'...' comments (§2.5.5) ────────────────────────────────────────────────
+  // ── h'...' comments (§3.1) ────────────────────────────────────────────────
 
   test("h'...' with / block comment /", () => {
     const n = parseCDN("h'01 /first byte/ 02'") as CborByteString;
@@ -767,14 +767,14 @@ describe('parseCDN — byte strings', () => {
     expect(() => parseCDN("h'0g'")).toThrow(SyntaxError);
   });
 
-  // lblank = %x0A / %x20 only — HT forbidden (draft-25 §5.2.1)
+  // lblank = %x0A / %x20 only — HT forbidden (draft-27 §6.2.1)
   test("h'...' with HT (tab) throws SyntaxError", () => {
     expect(() => parseCDN("h'01\t02'")).toThrow(SyntaxError);
   });
 
   // ── b64'...' comments — only # line comment; / is a base64 char ─────────────
 
-  // lblank = %x0A / %x20 only — HT forbidden (draft-25 §5.2.2)
+  // lblank = %x0A / %x20 only — HT forbidden (draft-27 §6.2.2)
   test("b64'...' with HT (tab) throws SyntaxError", () => {
     expect(() => parseCDN("b64'AQID\tBA=='")).toThrow(SyntaxError);
   });
@@ -1211,13 +1211,13 @@ describe('parseCDN — errors', () => {
   test('\\/ is valid in double-quoted strings', () => {
     expect((parseCDN('"\\/url"') as CborTextString).value).toBe('/url');
   });
-  test('\\/ is invalid in single-quoted strings (§5.1)', () => {
+  test('\\/ is invalid in single-quoted strings (§6.1)', () => {
     expect(() => parseCDN("'\\/url'")).toThrow(SyntaxError);
   });
   test('\\\\ (backslash) is valid in double-quoted strings', () => {
     expect((parseCDN('"a\\\\b"') as CborTextString).value).toBe('a\\b');
   });
-  test('\\\\ (backslash) is valid in single-quoted strings (§5.1 escapable1)', () => {
+  test('\\\\ (backslash) is valid in single-quoted strings (§6.1 escapable1)', () => {
     const v = parseCDN("'a\\\\b'") as CborByteString;
     expect(v).toBeInstanceOf(CborByteString);
     expect(new TextDecoder().decode(v.value)).toBe('a\\b');
@@ -1528,7 +1528,7 @@ describe('parseCDN — encoding indicators on app-strings (generic post-processi
   });
 
   test("DT'2027-01-01T00:00:00Z'_3 → encodingWidth=3 on tag, inner uint canonical, toCDN round-trips", () => {
-    // Per §2.3.1, _3 applies to the tag number (tag 1), not to the inner content.
+    // Per §4.1, _3 applies to the tag number (tag 1), not to the inner content.
     const n = parseCDN("DT'2027-01-01T00:00:00Z'_3", { extensions: [dt] });
     // The tag itself should carry encodingWidth=3; inner uint is canonical.
     expect((n as CborTag).encodingWidth).toBe(3);
@@ -1565,11 +1565,11 @@ describe('parseCDN — encoding indicators on app-sequences', () => {
 
   test("dt<<'1970-01-01T00:01:00Z'>>_1 toCDN auto round-trips EI", () => {
     const n = parseCDN("dt<<'1970-01-01T00:01:00Z'>>_1", { extensions: [dt] });
-    expect(n.toCDN({ appStrings: true })).toBe("dt'1970-01-01T00:01:00Z'_1");
+    expect(n.toCDN({ appPrefix: true })).toBe("dt'1970-01-01T00:01:00Z'_1");
   });
 
-  test("DT<<'2026-06-14T00:00:00Z'>>_3 → encodingWidth=3 on tag per §2.3.1", () => {
-    // Per §2.3.1 the EI applies to the tag number (tag 1 with 8-byte header).
+  test("DT<<'2026-06-14T00:00:00Z'>>_3 → encodingWidth=3 on tag per §4.1", () => {
+    // Per §4.1 the EI applies to the tag number (tag 1 with 8-byte header).
     const n = parseCDN("DT<<'2026-06-14T00:00:00Z'>>_3", { extensions: [dt] });
     expect(n).toBeInstanceOf(CborTag);
     expect((n as CborTag).encodingWidth).toBe(3);
@@ -1579,10 +1579,10 @@ describe('parseCDN — encoding indicators on app-sequences', () => {
 
   test("DT<<'2026-06-14T00:00:00Z'>>_3 toCDN auto round-trips EI", () => {
     const n = parseCDN("DT<<'2026-06-14T00:00:00Z'>>_3", { extensions: [dt] });
-    expect(n.toCDN({ appStrings: true })).toBe("DT'2026-06-14T00:00:00Z'_3");
+    expect(n.toCDN({ appPrefix: true })).toBe("DT'2026-06-14T00:00:00Z'_3");
   });
 
-  test("IP<<'192.0.2.1'>>_3 → encodingWidth=3 on tag per §2.3.1", () => {
+  test("IP<<'192.0.2.1'>>_3 → encodingWidth=3 on tag per §4.1", () => {
     // Tag 52 (IPv4) with 8-byte header; content = 4-byte IPv4 address bytes
     const n = parseCDN("IP<<'192.0.2.1'>>_3", { extensions: [ip] });
     expect(n).toBeInstanceOf(CborTag);
@@ -1593,7 +1593,7 @@ describe('parseCDN — encoding indicators on app-sequences', () => {
 
   test("IP<<'192.0.2.1'>>_3 toCDN auto round-trips EI", () => {
     const n = parseCDN("IP<<'192.0.2.1'>>_3", { extensions: [ip] });
-    expect(n.toCDN({ appStrings: true })).toBe("IP'192.0.2.1'_3");
+    expect(n.toCDN({ appPrefix: true })).toBe("IP'192.0.2.1'_3");
   });
 
   test('user extension: myext<<42>>_2 → CborUint with encodingWidth=2', () => {
@@ -2386,7 +2386,7 @@ describe('parseCDN — CDN comments (always enabled)', () => {
   });
 });
 
-describe('parseCDN — comments (§2.2)', () => {
+describe('parseCDN — comments (§2.1)', () => {
   test('// line comment before value', () => {
     const n = parseCDN('// comment\n42') as CborUint;
     expect(n.value).toBe(42n);
@@ -2471,7 +2471,7 @@ describe('parseCDN — comments (§2.2)', () => {
   });
 });
 
-describe('parseCDN — embedded CBOR sequence (§2.5.6)', () => {
+describe('parseCDN — embedded CBOR sequence (§2.3.4)', () => {
   test('<<>> — empty sequence', () => {
     const n = parseCDN('<<>>') as CborEmbeddedCBOR;
     expect(n).toBeInstanceOf(CborEmbeddedCBOR);
@@ -2676,7 +2676,7 @@ describe('parseCDN — base32 / base32hex byte strings', () => {
   });
 });
 
-// ─── app-rstring: prefix + backtick raw string (§2.5.3 / app-rstring) ──────────
+// ─── app-rstring: prefix + backtick raw string (§2.3.3 / app-rstring) ──────────
 
 describe('parseCDN — app-rstring (prefix + backtick)', () => {
   test('h`0102` → CborByteString [0x01, 0x02]', () => {
@@ -2715,9 +2715,9 @@ describe('parseCDN — app-rstring (prefix + backtick)', () => {
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02]));
   });
 
-  // ── §5.3.3: h`` with block comments and ellipsis ──────────────────────────
+  // ── §6.3.3: h`` with block comments and ellipsis ──────────────────────────
 
-  test('h`` with / block comment / (§5.3.3)', () => {
+  test('h`` with / block comment / (§6.3.3)', () => {
     const n = parseCDN('h`01 /first byte/ 02`') as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02]));
   });
@@ -2727,17 +2727,17 @@ describe('parseCDN — app-rstring (prefix + backtick)', () => {
     expect(n.value).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
   });
 
-  test('h`` with # line comment (§5.3.3)', () => {
+  test('h`` with # line comment (§6.3.3)', () => {
     const n = parseCDN('h`01 # first byte\n02`') as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0x01, 0x02]));
   });
 
-  test('h`` with trailing # comment before closing delimiter (§5.3.3)', () => {
+  test('h`` with trailing # comment before closing delimiter (§6.3.3)', () => {
     const n = parseCDN('h`\n  deadbeef\n  # the bytes\n`') as CborByteString;
     expect(n.value).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
   });
 
-  test('h`` with ellipsis produces CborEllipsis (§5.3.3)', () => {
+  test('h`` with ellipsis produces CborEllipsis (§6.3.3)', () => {
     const n = parseCDN('h`01...ff`');
     expect(n).toBeInstanceOf(CborEllipsis);
   });
@@ -2747,9 +2747,9 @@ describe('parseCDN — app-rstring (prefix + backtick)', () => {
     expect(n).toBeInstanceOf(CborEllipsis);
   });
 
-  // ── §5.3.4: b64`` with # line comments ───────────────────────────────────
+  // ── §6.3.4: b64`` with # line comments ───────────────────────────────────
 
-  test('b64`` with # line comment (§5.3.4)', () => {
+  test('b64`` with # line comment (§6.3.4)', () => {
     const n = parseCDN('b64`AQID # first three\nBA==`') as CborByteString;
     expect(n.value).toEqual(new Uint8Array([1, 2, 3, 4]));
   });
@@ -2987,7 +2987,7 @@ describe('parseCDN — builtinExtensions option', () => {
     );
   });
 
-  test('false: disables every bundled application extension', () => {
+  test('false: disables every bundled app-extension', () => {
     expect(
       parseCDN("dt'2026-01-01T00:00:00Z'", { builtinExtensions: false })
     ).toBeInstanceOf(CborUnresolvedAppExt);

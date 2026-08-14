@@ -1,6 +1,6 @@
 {
   "name": "@cbortech/cbor",
-  "version": "0.26.8",
+  "version": "0.27.0",
   "description": "Convert between CBOR, CDN (CBOR-EDN), and JavaScript values with CDDL validation",
   "keywords": [
     "cbor",
@@ -89,12 +89,13 @@
     "build": "vite build",
     "prepack": "npm run build",
     "watch": "vite build --watch",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit",
     "start": "node dist/index.js",
     "dev": "npm run build && npm start",
     "clean": "node -e \"['dist','coverage'].forEach(d=>require('fs').rmSync(d,{recursive:true,force:true}))\"",
     "test": "vitest run --exclude src/cdn/edn-test-vectors.test.ts --exclude src/cdn/edn-abnf-vectors.test.ts --exclude src/cddl/cddl-corpus.test.ts --exclude src/cddl/cddl-validation-vectors.test.ts --exclude site/src/playground.browser.test.ts",
     "test:exports": "npm run build && node scripts/check-package-exports.mjs",
+    "fetch-test-vectors": "node scripts/fetch-test-vectors.mjs",
     "test:node": "vitest run --exclude src/cdn/edn-test-vectors.test.ts --exclude src/cdn/edn-abnf-vectors.test.ts --exclude src/cddl/cddl-corpus.test.ts --exclude src/cddl/cddl-validation-vectors.test.ts --exclude site/src/playground.browser.test.ts",
     "test:edn-vectors": "vitest run src/cdn/edn-test-vectors.test.ts",
     "test:edn-abnf": "vitest run src/cdn/edn-abnf-vectors.test.ts",
@@ -119,16 +120,17 @@
   "devDependencies": {
     "@cbortech/hash-extension": "^0.2.3",
     "@types/node": "^24.13.3",
+    "@typescript/typescript6": "^6.0.2",
     "@vitest/browser": "^4.1.10",
     "@vitest/browser-playwright": "^4.1.10",
     "@vitest/coverage-v8": "^4.1.10",
     "@vitest/ui": "^4.1.10",
     "cross-env": "^10.1.0",
-    "playwright": "^1.61.1",
+    "playwright": "^1.62.1",
     "prettier": "^3.9.6",
-    "typescript": "^5.9.3",
-    "vite": "^8.1.5",
-    "vite-plugin-dts": "^4.5.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1",
+    "vite-plugin-dts": "^5.0.3",
     "vitest": "^4.1.10"
   }
 }

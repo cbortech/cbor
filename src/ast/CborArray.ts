@@ -12,6 +12,7 @@ import {
 import {
   formatTrailingComments,
   hasPreservedComments,
+  pushAll,
   serializeContainer,
 } from '../cdn/serialize-utils';
 import { byteToHexUpper, bytesToSpacedHexUpper } from '../utils/hex';
@@ -60,6 +61,7 @@ export class CborArray extends CborItem {
       hasEntryComments: () => this.items.some(hasPreservedComments),
       renderEntry: (i) => this.items[i]._toCDN(options, depth + 1),
       entryIsLeaf: (i) => !this.items[i]._containsCdnContainer,
+      entryIsMultiWordText: (i) => this.items[i]._isMultiWordText(options),
       entryLeadingNode: (i) => this.items[i],
       entryTrailing: (i, style) => formatTrailingComments(this.items[i], style),
     });
@@ -75,7 +77,7 @@ export class CborArray extends CborItem {
         },
       ];
       for (const item of this.items)
-        lines.push(...item._toHexDump(depth + 1, options));
+        pushAll(lines, item._toHexDump(depth + 1, options));
       lines.push({
         depth,
         hex: byteToHexUpper(BREAK_CODE),
@@ -93,7 +95,7 @@ export class CborArray extends CborItem {
       },
     ];
     for (const item of this.items)
-      lines.push(...item._toHexDump(depth + 1, options));
+      pushAll(lines, item._toHexDump(depth + 1, options));
     return lines;
   }
 

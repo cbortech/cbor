@@ -22,12 +22,16 @@ test driver are tracked.
 
 ## Running the optional tests
 
-Clone the upstream repository and copy the corpus into this directory:
+Fetch the corpus with:
 
 ```sh
-git clone https://github.com/cabo/cddlc.git /tmp/cddlc
-cp -r /tmp/cddlc/data /tmp/cddlc/test src/cddl/test-vectors/cddlc/
+npm run fetch-test-vectors -- cddlc
 ```
+
+This clones the upstream repository into a temporary directory and copies
+its `data/` and `test/` directories into this directory. (Equivalent to
+cloning https://github.com/cabo/cddlc.git and copying those directories here
+by hand.)
 
 Then run:
 

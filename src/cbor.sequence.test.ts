@@ -348,6 +348,18 @@ describe('CBOR.fromCDNSeq', () => {
         ...CBOR.fromCDNSeq('1 /* unterminated', { preserveComments: true }),
       ]).toThrow(SyntaxError);
     });
+
+    test('preserveAll alone captures item-boundary comments, without preserveComments', () => {
+      // Regression: the capture check only consulted preserveComments/
+      // comments, not preserveAll, so a leading/between-item comment
+      // was skipped by the tokenizer before parseCDN() ever saw it.
+      const items = [
+        ...CBOR.fromCDNSeq('# top\n1\n# between\n2', { preserveAll: true }),
+      ];
+      expect(
+        items.map((i) => i.toCDN({ preserveAll: true, indent: 2 }))
+      ).toEqual(['# top\n1', '# between\n2']);
+    });
   });
 
   // ── Leading / trailing comma (ABNF: seq = S [item *(MSC item) SOC]) ──────────

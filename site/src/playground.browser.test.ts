@@ -231,49 +231,81 @@ describe('playground', () => {
       byId<HTMLInputElement>('opt-blank-lines').checked = true; // restore
     });
 
-    test('individual preserve options open in their own submenu popover', () => {
+    test('Keep blank lines preserves a blank line between CBOR Sequence items', async () => {
+      // Includes the blank line, unlike any formatted output this test
+      // produces below — `waitFor` on this exact text (not just a
+      // substring like "line", which the pre-import editor content already
+      // has) proves the async file import actually landed before Format
+      // runs, and specifically the version *with* the blank line.
+      const raw = '{ "line": 1 }\n\n{ "line": 2 }';
+      const importSeq = () =>
+        uploadTo(
+          'cdn-import-input',
+          new File([raw], 'seq-blank-lines.cdn', { type: 'text/plain' })
+        );
+
+      // Each item is a single-entry map, which the (default-on) "Inline leaf
+      // containers" option renders on one line regardless of indent; only
+      // the blank line *between* the two Sequence items is under test here.
+      await importSeq();
+      await vi.waitFor(() => expect(cmText('editor')).toBe(raw));
       byId('format-opts-btn').click();
-      const preserveBtn = byId<HTMLButtonElement>('preserve-opts-btn');
-      const preservePopover = byId('preserve-popover');
+      expect(byId<HTMLInputElement>('opt-blank-lines').checked).toBe(true);
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe('{"line": 1}\n\n{"line": 2}');
 
-      // Starts closed; the individual checkboxes live inside it.
-      expect(preservePopover.hidden).toBe(true);
-      expect(preserveBtn.getAttribute('aria-expanded')).toBe('false');
-      expect(preservePopover.contains(byId('opt-comments'))).toBe(true);
-
-      preserveBtn.click();
-      expect(preservePopover.hidden).toBe(false);
-      expect(preserveBtn.getAttribute('aria-expanded')).toBe('true');
-
-      // Clicking a checkbox inside the submenu doesn't close it or the
-      // parent format-popover.
-      byId('opt-comments').click();
-      expect(preservePopover.hidden).toBe(false);
-      expect(byId('format-popover').hidden).toBe(false);
-      byId('opt-comments').click(); // restore
-
-      // Clicking fully outside closes both.
-      byId('editor').click();
-      expect(preservePopover.hidden).toBe(true);
-      expect(byId('format-popover').hidden).toBe(true);
+      await importSeq();
+      await vi.waitFor(() => expect(cmText('editor')).toBe(raw));
+      byId<HTMLInputElement>('opt-blank-lines').checked = false;
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe('{"line": 1}\n{"line": 2}');
+      byId<HTMLInputElement>('opt-blank-lines').checked = true; // restore
     });
 
-    test('closing format-popover also force-closes the preserve submenu', () => {
+    test('Compact indent ignores Keep blank lines between CBOR Sequence items', async () => {
+      const raw = '{ "line": 1 }\n\n{ "line": 2 }';
+      await uploadTo(
+        'cdn-import-input',
+        new File([raw], 'seq-blank-lines.cdn', { type: 'text/plain' })
+      );
+      // Waiting for the exact raw (blank-line-containing) text, not just a
+      // substring like "line" that the pre-import editor content already
+      // contains, confirms the async import landed before Format runs.
+      await vi.waitFor(() => expect(cmText('editor')).toBe(raw));
       byId('format-opts-btn').click();
-      byId<HTMLButtonElement>('preserve-opts-btn').click();
-      expect(byId('preserve-popover').hidden).toBe(false);
+      expect(byId<HTMLInputElement>('opt-blank-lines').checked).toBe(true);
+      byId<HTMLSelectElement>('opt-indent').value = ''; // Compact
+      byId('format-btn').click();
+      // Compact mode ignores Keep blank lines, same as it does for blank
+      // lines inside a single item's own containers — the blank line
+      // between the two Sequence items does not survive.
+      expect(cmText('editor')).toBe('{"line":1}\n{"line":2}');
+      byId<HTMLSelectElement>('opt-indent').value = '2'; // restore
+    });
 
-      // Toggling format-popover closed stops propagation before it can
-      // reach the submenu's own document-level close listener, so
-      // initFormatPopover() force-closes it explicitly instead.
+    test('individual preserve options sit directly in format-popover, not a nested submenu', () => {
+      // Regression: these used to live inside their own "Individual preserve
+      // options" submenu popover (a separate hideable element that needed
+      // vertical room to open below the button). They're now plain checkboxes
+      // in format-popover's own "Preserve" column, so no submenu element
+      // exists at all.
+      expect(byId('preserve-popover')).toBeNull();
+      expect(byId('preserve-opts-btn')).toBeNull();
+
       byId('format-opts-btn').click();
-      expect(byId('format-popover').hidden).toBe(true);
-      expect(byId('preserve-popover').hidden).toBe(true);
-      expect(
-        byId<HTMLButtonElement>('preserve-opts-btn').getAttribute(
-          'aria-expanded'
-        )
-      ).toBe('false');
+      const formatPopover = byId('format-popover');
+      expect(formatPopover.hidden).toBe(false);
+      expect(formatPopover.contains(byId('opt-comments'))).toBe(true);
+      expect(formatPopover.contains(byId('opt-preserve-all'))).toBe(true);
+
+      // Clicking a preserve checkbox doesn't close format-popover.
+      byId('opt-comments').click();
+      expect(formatPopover.hidden).toBe(false);
+      byId('opt-comments').click(); // restore
+
+      // Clicking fully outside closes it.
+      byId('editor').click();
+      expect(formatPopover.hidden).toBe(true);
     });
 
     test('Preserve everything toggles all "Keep …" checkboxes together', () => {
@@ -506,14 +538,23 @@ describe('playground', () => {
       expect(dl.calls[0]!.blob.size).toBe(expectedLength);
     });
 
+    /**
+     * The Edit tab is a CodeMirror instance (see hex-edit-highlight.ts), not
+     * a plain <textarea>, so its content is driven through the same
+     * `page.elementLocator(...).fill()` user-event path real typing goes
+     * through — not `.value =` — to actually exercise CodeMirror's own
+     * change pipeline (and therefore the app's onDocChanged listener).
+     */
+    function hexEditContent(): Element {
+      return document.querySelector('#bytes-edit-host .cm-content')!;
+    }
+
     test('Edit mode decodes a typed hex dump back into CDN', async () => {
       document
         .querySelector<HTMLButtonElement>('.mode-tabs .tab[data-mode=edit]')!
         .click();
       const hex = bytesToHexString(CBOR.encode({ fromHex: 1 }));
-      const textarea = byId<HTMLTextAreaElement>('bytes-edit');
-      textarea.value = hex;
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      await page.elementLocator(hexEditContent()).fill(hex);
       await vi.waitFor(() => expect(cmText('editor')).toContain('fromHex'), {
         timeout: 2000,
       });
@@ -528,7 +569,6 @@ describe('playground', () => {
       document
         .querySelector<HTMLButtonElement>('.mode-tabs .tab[data-mode=edit]')!
         .click();
-      const textarea = byId<HTMLTextAreaElement>('bytes-edit');
       const hex = '84 18 74 19 03 af 18 ea 19 97 89';
 
       // A prior failed run of this test can leave opt-indent at Compact;
@@ -540,17 +580,20 @@ describe('playground', () => {
       // (The default sample's "IDs" field already contains this same array,
       // so wait for the exact single-line replacement rather than a substring
       // match, which the stale pre-conversion text would also satisfy.)
-      textarea.value = hex;
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      await page.elementLocator(hexEditContent()).fill(hex);
       await vi.waitFor(
         () => expect(cmText('editor')).toBe('[116, 943, 234, 38793]'),
         { timeout: 2000 }
       );
 
       // Compact indent must also flow through to the bytes → CDN conversion.
+      // Re-filling (rather than re-dispatching a bare 'input' event, which
+      // doesn't apply to a CodeMirror doc with no textual change) is what
+      // forces onDocChanged to re-run bytesToCdnText under the new option.
       byId('format-opts-btn').click();
       byId<HTMLSelectElement>('opt-indent').value = '';
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      await page.elementLocator(hexEditContent()).fill('');
+      await page.elementLocator(hexEditContent()).fill(hex);
       await vi.waitFor(
         () => expect(cmText('editor')).toBe('[116,943,234,38793]'),
         { timeout: 2000 }

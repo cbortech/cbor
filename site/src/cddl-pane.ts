@@ -25,6 +25,7 @@ import { rangeAtChar } from './mapping/lockstep';
 import {
   copyWithFeedback,
   initFileDrop,
+  wireHintFlip,
   wirePopoverToggle,
 } from './ui/toolbar';
 
@@ -215,7 +216,7 @@ export function initCddlPane(opts: CddlPaneOptions): CddlPane {
   }
 
   toggleBtn.addEventListener('click', () => {
-    const open = paneEl.hidden;
+    const open = paneEl.hidden !== false;
     setOpen(open);
     opts.onToggle?.(open);
   });
@@ -223,6 +224,7 @@ export function initCddlPane(opts: CddlPaneOptions): CddlPane {
   // ── Toolbar ─────────────────────────────────────────────────────────────────
 
   wirePopoverToggle('cddl-format-opts-btn', 'cddl-format-popover');
+  wireHintFlip('cddl-format-popover');
 
   function readCddlFormatOptions(): CddlFormatOptions {
     const options: CddlFormatOptions = {};

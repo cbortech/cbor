@@ -4,7 +4,7 @@
  * Hex float format:
  *   [-] 0x [hex digits] [. [hex digits]] p [+-] [decimal exponent]
  *
- * This notation appears in CDN (draft-ietf-cbor-edn-literals-25) as an
+ * This notation appears in CDN (draft-ietf-cbor-edn-literals-27) as an
  * alternative representation for floating-point values (major type 7).
  */
 

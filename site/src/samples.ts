@@ -81,9 +81,9 @@ cbor-types = {
 }`,
   },
   {
-    name: 'Comments (§2.2)',
+    name: 'Comments (§2.1)',
     cdn: `{
-  # Comments (§2.2) — four forms, all ignored while parsing.
+  # Comments (§2.1) — four forms, all ignored while parsing.
   "hash-comment":  1,   # end-of-line, starting with #
   "slash-slash":   2,   // end-of-line, starting with //
   /* a block comment
@@ -111,9 +111,9 @@ cbor-types = {
 }`,
   },
   {
-    name: 'Encoding indicators (§2.3)',
+    name: 'Encoding indicators (§4.1)',
     cdn: `{
-  # Encoding Indicators (§2.3) force a specific (often non-shortest) CBOR
+  # Encoding Indicators (§4.1) force a specific (often non-shortest) CBOR
   # header width for a value, independent of what the value itself needs.
   # AI = 24 + N, so _0/_1/_2/_3 pick a 1/2/4/8-byte header; _i forces the
   # immediate (in-header) form for small values. Open the bytes pane to
@@ -154,9 +154,9 @@ cbor-types = {
 }`,
   },
   {
-    name: 'Numbers (§2.4)',
+    name: 'Numbers (§2.2)',
     cdn: `{
-  # Numbers (§2.4) — integer bases, sign quirks, and float forms.
+  # Numbers (§2.2) — integer bases, sign quirks, and float forms.
   "decimal": 255,
   "hex":     0xff,
   "octal":   0o377,
@@ -198,9 +198,9 @@ cbor-types = {
 }`,
   },
   {
-    name: 'Strings (§2.5)',
+    name: 'Strings (§2.3)',
     cdn: `{
-  # Strings (§2.5) — double-quoted text, single-quoted bytes, and raw
+  # Strings (§2.3) — double-quoted text, single-quoted bytes, and raw
   # (backtick) literals that skip escaping altogether.
   "text":  "Hello",              # double-quoted -> text string (UTF-8)
   "bytes": 'Hello',               # single-quoted -> byte string (raw UTF-8 bytes)
@@ -242,10 +242,10 @@ cbor-types = {
 }`,
   },
   {
-    name: 'Arrays, Maps, Tags & Simple values (§2.6–§2.8)',
+    name: 'Arrays, Maps, Tags & Simple values (§2.4–§2.6)',
     cdn: `{
-  # Arrays and Maps (§2.6) — commas are optional; §2.7 Tags: n(item);
-  # §2.8 Simple values: true/false/null/undefined/simple(N) (see also
+  # Arrays and Maps (§2.4) — commas are optional; §2.5 Tags: n(item);
+  # §2.6 Simple values: true/false/null/undefined/simple(N) (see also
   # the "All CBOR types" sample).
   "array":          [1, 2, 3],
   "array-nested":   [1, [2, 3]],
@@ -275,8 +275,8 @@ cbor-types = {
   },
   {
     // Values follow the draft's own examples (draft-ietf-cbor-edn-literals
-    // §7.2/§7.3) — including its Apollo 11 splashdown timestamp for dt/DT.
-    name: 'App extensions: dt & ip (§3.1–§3.2)',
+    // §3.2/§3.3) — including its Apollo 11 splashdown timestamp for dt/DT.
+    name: 'App-extensions: dt & ip (§3.2–§3.3)',
     cdn: `{
   # dt gives a bare epoch number; an explicit .0/.N fraction forces float
   # even when the value is whole; DT wraps the epoch in tag(1)
@@ -294,7 +294,7 @@ cbor-types = {
   "v6-tagged": IP'2001:db8::42',
   "v6-prefix": IP'2001:db8::/64',
 }`,
-    cddl: `; App extensions are CDN spelling for ordinary CBOR data — CDDL types
+    cddl: `; App-extensions are CDN spelling for ordinary CBOR data — CDDL types
 ; describe what actually goes on the wire.
 app-extensions-dt-ip = {
   "epoch": int,               ; whole seconds → plain integer
@@ -310,7 +310,7 @@ app-extensions-dt-ip = {
 }`,
   },
   {
-    name: 'App extensions: hash (§3.3)',
+    name: 'App-extensions: hash (§3.4)',
     cdn: `{
   # hash'...' computes SHA-256 over UTF-8 text — shorthand for
   # hash<<'foo'>>, whose << >> form also accepts raw bytes and an
@@ -335,7 +335,7 @@ app-extensions-hash = {
 }`,
   },
   {
-    name: 'App extensions: t1/b1, ilbs/ilts (§3.4–§3.5)',
+    name: 'App-extensions: t1/b1, ilbs/ilts (§3.5–§3.6)',
     cdn: `{
   # t1 / b1 join (text or byte) strings into one
   "text":  t1<<"Hello ", "world">>,
@@ -358,7 +358,7 @@ app-extensions-hash = {
 }`,
   },
   {
-    name: 'App extensions: cri, float & others (§3.6–§3.7)',
+    name: 'App-extensions: cri, float & others (§3.7–§3.8)',
     cdn: `{
   # cri decomposes a URI into [scheme, host, path?, query?]; CRI wraps
   # that array in a tag
@@ -371,7 +371,7 @@ app-extensions-hash = {
   "f64": float'3ff0000000000000',     # float64 bits: 1.0
 
   # b32 / h32 — base32 / base32hex byte strings (not part of the CDN
-  # draft; bundled with this library as additional app extensions)
+  # draft; bundled with this library as additional app-extensions)
   "b32": b32'AEBAGBAF',
   "h32": h32'01A0C294',
   # same<<...>> asserts that two different encodings decode to the same
@@ -402,8 +402,8 @@ cri-array = [int, [* tstr], *[* tstr]]`,
     name: 'Indefinite lengths',
     cdn: `[_
   "streamed array",
-  (_ h'0011', h'2233'),     # deprecated in draft-26
-  (_ "chunked ", "text"),   # deprecated in draft-26
+  (_ h'0011', h'2233'),     # deprecated in draft-27
+  (_ "chunked ", "text"),   # deprecated in draft-27
   [_ 1, 2, 3],
   {_ "a": 1, "b": 2},
 ]`,

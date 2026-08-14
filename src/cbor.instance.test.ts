@@ -215,8 +215,8 @@ describe('per-call options override defaults', () => {
     expect(result).toBe(100n);
   });
 
-  test('decode() per-call appStrings:false disables DT notation in toJS', () => {
-    // With appStrings: false the extension's _toCDN falls back to raw notation,
+  test('decode() per-call appPrefix:false disables DT notation in toJS', () => {
+    // With appPrefix: false the extension's _toCDN falls back to raw notation,
     // but toJS() should still return a Date (extension is still active).
     const result = cbor.decode(DT_2024_CBOR);
     expect(result).toBeInstanceOf(Date);
@@ -279,27 +279,27 @@ describe('instance stringify() overloads', () => {
   });
 
   test('stringify(value, options) — options object form', () => {
-    const result = cbor.stringify(DT_2024_DATE, { appStrings: false });
-    // With appStrings: false, extension emits raw tag notation, not DT'...'
+    const result = cbor.stringify(DT_2024_DATE, { appPrefix: false });
+    // With appPrefix: false, extension emits raw tag notation, not DT'...'
     expect(result).not.toContain("DT'");
   });
 });
 
-// ─── appStrings default propagation ──────────────────────────────────────────
+// ─── appPrefix default propagation ──────────────────────────────────────────
 
-describe('appStrings default propagation via _defaults', () => {
-  test('appStrings:false in constructor suppresses DT notation in toCDN()', () => {
-    const cbor = new CBOR({ extensions: [dt_as_Date], appStrings: false });
+describe('appPrefix default propagation via _defaults', () => {
+  test('appPrefix:false in constructor suppresses DT notation in toCDN()', () => {
+    const cbor = new CBOR({ extensions: [dt_as_Date], appPrefix: false });
     const node = cbor.fromCDN(DT_2024_STR);
-    // toCDN() with no args should use _defaults which has appStrings:false
+    // toCDN() with no args should use _defaults which has appPrefix:false
     expect(node.toCDN()).not.toContain("DT'");
     expect(node.toCDN()).not.toContain("dt'");
   });
 
-  test('per-call appStrings:true overrides appStrings:false default', () => {
-    const cbor = new CBOR({ extensions: [dt_as_Date], appStrings: false });
+  test('per-call appPrefix:true overrides appPrefix:false default', () => {
+    const cbor = new CBOR({ extensions: [dt_as_Date], appPrefix: false });
     const node = cbor.fromCDN(DT_2024_STR);
-    expect(node.toCDN({ appStrings: true })).toContain("DT'");
+    expect(node.toCDN({ appPrefix: true })).toContain("DT'");
   });
 });
 

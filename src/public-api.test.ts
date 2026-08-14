@@ -4,7 +4,7 @@ import { CborByteString, CborItem } from './ast/index';
 
 class CborUuidExt extends CborByteString {
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    if (options?.appStrings === false) return super._toCDN(options, depth);
+    if (options?.appPrefix === false) return super._toCDN(options, depth);
     const hex = Array.from(this.value, (b) =>
       b.toString(16).padStart(2, '0')
     ).join('');

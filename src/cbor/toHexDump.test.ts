@@ -139,7 +139,7 @@ describe('toHexDump — CborTag', () => {
   });
 
   test('DT tag content shows raw integer, not app-string notation', () => {
-    // Bug: _toHexDump called content._toHexDump without { appStrings: false },
+    // Bug: _toHexDump called content._toHexDump without { appPrefix: false },
     // so dt extension returned "dt'...'" instead of the raw epoch integer.
     const node = new CborTaggedEpochDtExt('2026-06-14T00:00:00Z');
     const lines = node.toHexDump().split('\n');
@@ -218,5 +218,41 @@ describe('toHexDump — large inputs', () => {
     // widest prefix: depth-1 five-byte uint header, e.g. "   1A 00 03 0D 3F"
     // (3 + 14 = 17 chars) → comment column starts at 19
     expect(lines[1]).toBe('   00              -- 0');
+  });
+
+  test('a single large nested array does not overflow the call stack', () => {
+    // Regression: CborArray._toHexDump() (and the same pattern in
+    // CborMap/CborEmbeddedCBOR/CborIndefiniteTextString/ByteString) used
+    // `lines.push(...item._toHexDump(depth + 1, options))` per child. A
+    // *single* child whose own hex dump is huge (here: one inner array
+    // with 200k elements, nested one level down) still spreads that whole
+    // array as call arguments in one `push()` call and overflows the
+    // stack — the fix above (splitting the 200k items across many
+    // top-level `push()` calls) doesn't cover this case.
+    const inner = new CborArray(
+      Array.from({ length: 200_000 }, (_, i) => new CborUint(BigInt(i)))
+    );
+    const node = new CborArray([inner]);
+    const dump = node.toHexDump();
+    const lines = dump.split('\n');
+    // outer array open + inner array open + 200k elements = 200_002
+    expect(lines.length).toBe(200_002);
+    expect(lines[0]).toMatch(/-- Array of length 1$/);
+    expect(lines[1]).toMatch(/-- Array of length 200000$/);
+  });
+
+  test('a tag wrapping a large array does not overflow the call stack', () => {
+    // Regression: CborTag._toHexDump() had the same
+    // `lines.push(...content._toHexDump(...))` pattern as the container
+    // classes above, but wasn't covered by that fix.
+    const hugeArray = new CborArray(
+      Array.from({ length: 130_000 }, (_, i) => new CborUint(BigInt(i)))
+    );
+    const dump = new CborTag(1n, hugeArray).toHexDump();
+    const lines = dump.split('\n');
+    // tag line + array open + 130k elements = 130_002
+    expect(lines.length).toBe(130_002);
+    expect(lines[0]).toMatch(/-- Tag 1$/);
+    expect(lines[1]).toMatch(/-- Array of length 130000$/);
   });
 });
