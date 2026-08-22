@@ -115,18 +115,27 @@ describe('floatToHexFloat', () => {
       expect(floatToHexFloat(-145544)).toBe('-0x1.1c44p+17'));
   });
 
-  describe('subnormal numbers', () => {
-    test('smallest positive double (5e-324) → subnormal form', () => {
-      const s = floatToHexFloat(5e-324);
-      expect(s).toBe('0x0.0000000000001p-1022');
+  describe('subnormal numbers — renormalized to the same leading-"1" form as normal values', () => {
+    test('smallest positive double (5e-324 / Number.MIN_VALUE) → 0x1p-1074', () => {
+      expect(floatToHexFloat(5e-324)).toBe('0x1p-1074');
+      expect(floatToHexFloat(Number.MIN_VALUE)).toBe('0x1p-1074');
     });
-    test('smallest normal double (2^-1022) → normal form', () => {
+    test('largest subnormal double (just below 2^-1022) → 0x1.ffffffffffffep-1023', () => {
+      // 2^-1022 - 2^-1074, i.e. every stored mantissa bit set
+      const largestSubnormal = 2 ** -1022 - 5e-324;
+      expect(floatToHexFloat(largestSubnormal)).toBe('0x1.ffffffffffffep-1023');
+    });
+    test('smallest normal double (2^-1022) → 0x1p-1022', () => {
       expect(floatToHexFloat(2 ** -1022)).toBe('0x1p-1022');
     });
-    test('subnormal output starts with "0x0."', () => {
-      expect(floatToHexFloat(5e-324).startsWith('0x0.')).toBe(true);
+    test('a subnormal exactly on a power-of-two boundary (2^-1023, i.e. mantissa bit 51 only) → 0x1p-1023', () => {
+      expect(floatToHexFloat(2 ** -1023)).toBe('0x1p-1023');
     });
-    test('normal output starts with "0x1"', () => {
+    test('a subnormal with a fractional hex part (3 * 2^-1074) → 0x1.8p-1073', () => {
+      expect(floatToHexFloat(3 * 2 ** -1074)).toBe('0x1.8p-1073');
+    });
+    test('every finite value (subnormal included) starts with "0x1" or "0x0p"/"-0x0p" (zero only)', () => {
+      expect(floatToHexFloat(5e-324).startsWith('0x1')).toBe(true);
       expect(floatToHexFloat(1.5).startsWith('0x1')).toBe(true);
     });
   });
