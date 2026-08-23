@@ -768,6 +768,32 @@ itemOptions: (_node, ctx) => ({
 });
 ```
 
+`toCDN()` takes the same `itemOptions` option, formatting one part of a
+document differently from the rest:
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const item = CBOR.fromCDN('{"raw": 255, "count": 255}');
+
+const text = item.toCDN({
+  itemOptions: (_node, ctx) =>
+    ctx.path.length === 1 && ctx.path[0] === 'raw'
+      ? { intFormat: 'hex' }
+      : undefined,
+});
+
+console.log(text);
+// {"raw":0xff,"count":255}
+```
+
+There is no `reviver` for `toCDN()`, so it can't be called more than once for
+that reason — but it can still be called more than once for a node that's
+also a `toCDN()` layout decision (`inlineLeafContainers`'s one-line collapse
+check, or a tag/app-sequence value's own multi-word check re-render an entry
+purely to answer that question before the real render). Write it as a pure
+function here too.
+
 ## String Concatenation and Indefinite-Length Strings
 
 The `t1` / `b1` / `ilbs` / `ilts` app-extensions from

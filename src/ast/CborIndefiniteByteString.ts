@@ -1,5 +1,5 @@
 import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
-import { CborItem } from './CborItem';
+import { CborItem, needsCdnItemDispatch } from './CborItem';
 import type { AnnotatedLine } from './CborItem';
 import { CborByteString } from './CborByteString';
 import { MT_BYTES, AI_INDEFINITE, BREAK_CODE } from '../cbor/constants';
@@ -58,7 +58,11 @@ export class CborIndefiniteByteString extends CborItem {
     return this.chunks.some((c) => c._isMultiWordText(options));
   }
 
-  _toCDN(options: ToCDNOptions | undefined, depth: number): string {
+  _toCDN(
+    options: ToCDNOptions | undefined,
+    depth: number,
+    path?: readonly unknown[]
+  ): string {
     if ((options?.encodingIndicators ?? 'auto') === 'never') {
       const totalLen = this.chunks.reduce((sum, c) => sum + c.value.length, 0);
       const merged = new Uint8Array(totalLen);
@@ -69,6 +73,14 @@ export class CborIndefiniteByteString extends CborItem {
       }
       return new CborByteString(merged)._toCDN(options, depth);
     }
+    const basePath = path ?? [];
+    const dispatch = needsCdnItemDispatch(options);
+    const childOptions = (i: number): ToCDNOptions | undefined =>
+      dispatch
+        ? this.chunks[i]._resolveCdnOptions(options, [...basePath, i], {
+            parent: this,
+          })
+        : options;
     // `ilbs<<...>>` (draft-27 §3.6) replaces the legacy `(_ ...)` marker
     // notation; falls back to it when `appPrefix` disables app-string
     // notation entirely.
@@ -85,8 +97,13 @@ export class CborIndefiniteByteString extends CborItem {
       indefiniteLength: true,
       indefiniteMarker: !useIlbs,
       encodingWidth: undefined,
-      hasEntryComments: () => this.chunks.some(hasPreservedComments),
-      renderEntry: (i) => this.chunks[i]._toCDN(options, depth + 1),
+      hasEntryComments: (i) => hasPreservedComments(this.chunks[i]),
+      renderEntry: (i) =>
+        this.chunks[i]._toCDN(
+          childOptions(i),
+          depth + 1,
+          dispatch ? [...basePath, i] : undefined
+        ),
       // Unlike CborEmbeddedCBOR (`<<...>>`), the legacy `(_ ...)` group
       // follows the same strict rule as CborArray/CborMap, gated behind
       // inlineLeafContainers: entryIsLeaf is trivially always true (chunks
@@ -99,10 +116,15 @@ export class CborIndefiniteByteString extends CborItem {
       entryIsLeaf: useIlbs ? undefined : () => true,
       alwaysInlineLeaf: useIlbs,
       entryIsMultiWordText: (i) =>
-        this.chunks[i]._isMultiWordText(options, !useIlbs),
+        this.chunks[i]._isMultiWordText(
+          childOptions(i),
+          !useIlbs,
+          dispatch ? [...basePath, i] : undefined
+        ),
       entryLeadingNode: (i) => this.chunks[i],
       entryTrailing: (i, style) =>
         formatTrailingComments(this.chunks[i], style),
+      entryOptions: dispatch ? childOptions : undefined,
     });
   }
 

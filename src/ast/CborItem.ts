@@ -10,6 +10,8 @@ import type {
   ParseWarning,
   ItemContext,
   ReadonlyToJSNodeOptions,
+  CdnItemContext,
+  ReadonlyToCDNOptions,
 } from '../types';
 import { CBOR_OMIT } from '../types';
 import {
@@ -105,6 +107,43 @@ function resolveDeprecatedAppPrefixAliases(
     preserveAppPrefix: options.preserveAppPrefix ?? options.preserveAppSequence,
     appPrefix: options.appPrefix ?? options.appStrings,
   };
+}
+
+/**
+ * Resolve deprecated `ToCDNOptions` aliases within an `itemOptions` override
+ * *in isolation*, before it is merged onto the ambient effective options.
+ *
+ * `resolveDeprecatedAppPrefixAliases` only fills in a canonical name when
+ * that name is itself left `undefined` on the object it's given. An override
+ * like `{ appStrings: false }` must be resolved against *itself* — where
+ * `appPrefix` is absent — not against the already-merged effective options,
+ * where an ancestor's resolved `appPrefix: true` would already occupy
+ * that slot and win, silently discarding the child's own alias-based
+ * override (this is `_resolveCdnOptions`'s exact bug this guards against).
+ *
+ * Because `resolveDeprecatedAppPrefixAliases` unconditionally assigns
+ * `preserveAppPrefix`/`appPrefix` (via `??`) whenever either deprecated name
+ * is set, resolving against the override alone can introduce a literal
+ * `undefined` for a canonical key the override never mentioned (e.g.
+ * `preserveAppPrefix: undefined` from an override that only ever touched
+ * `appStrings`). Copying that back verbatim would overwrite an inherited
+ * value with `undefined` instead of leaving it untouched, so only a
+ * genuinely resolved (non-`undefined`) key is copied into the result.
+ */
+function normalizeCdnOverride(
+  override: Partial<ToCDNOptions>
+): Partial<ToCDNOptions> {
+  if (
+    override.preserveAppSequence === undefined &&
+    override.appStrings === undefined
+  )
+    return override;
+  const resolved = resolveDeprecatedAppPrefixAliases(override as ToCDNOptions);
+  const result: Partial<ToCDNOptions> = { ...override };
+  if (resolved.preserveAppPrefix !== undefined)
+    result.preserveAppPrefix = resolved.preserveAppPrefix;
+  if (resolved.appPrefix !== undefined) result.appPrefix = resolved.appPrefix;
+  return result;
 }
 
 /**
@@ -406,6 +445,88 @@ function recordOccurrence(
   else cache.set(node, [entry]);
 }
 
+// ─── toCDN() per-item dispatch ──────────────────────────────────────────────
+//
+// Much simpler than toJS()'s: there is no reviver, so no scenario ever
+// needs a node's itemOptions decision to be tied to *which* of two
+// differently-revived contexts produced it — the one thing DispatchCache's
+// whole occurrence/RAW_PASS_MARKER design exists for. toCDN() already has
+// its own, unrelated reason a node can be rendered more than once per
+// parent render (see `CdnItemContext`'s own doc), and the existing code's
+// own answer to that (see `serializeContainer` in cdn/serialize-utils.ts)
+// is to accept it rather than cache around it — a real, resolved
+// instance-level cache having already turned out unsafe there (see
+// `CborTag._isMultiWordText`). So `itemOptions` here just resolves fresh
+// on every call, with no cache at all.
+
+/**
+ * @internal
+ * Cheap upfront check for whether per-node option resolution is needed at
+ * all for a given `toCDN()` options object — the `toCDN()` analogue of
+ * `needsItemDispatch`.
+ */
+export function needsCdnItemDispatch(
+  options: ToCDNOptions | undefined
+): boolean {
+  return !!options?.itemOptions;
+}
+
+/**
+ * @internal
+ * Build the copied-`textStringFormat` view of `options` handed to
+ * `CdnItemContext.options` — the `toCDN()` analogue of
+ * `toReadonlyNodeOptions`; see `ReadonlyToCDNOptions`. Also strips
+ * `CDN_OVERRIDE_TRACKER` (see there) — `ctx.options` is documented as
+ * reflecting the current *effective options*, so it should never expose an
+ * internal, out-of-band bookkeeping key that isn't part of `ToCDNOptions` at
+ * all, even though it isn't otherwise observable through any named field.
+ */
+export function toReadonlyCdnOptions(
+  options: ToCDNOptions
+): ReadonlyToCDNOptions {
+  const { textStringFormat, ...rest } = options as ToCDNOptions & {
+    [CDN_OVERRIDE_TRACKER]?: CdnOverrideTrackerBox;
+  };
+  delete rest[CDN_OVERRIDE_TRACKER];
+  return textStringFormat
+    ? { ...rest, textStringFormat: [...textStringFormat] }
+    : rest;
+}
+
+/**
+ * @internal
+ * Out-of-band symbol key that lets a caller (currently only
+ * `CborAppSeqResult._toCDN`) track, across an entire `_resolveCdnOptions()`
+ * subtree, whether `itemOptions` ever actually returned an override —
+ * without touching `options.itemOptions` itself.
+ *
+ * `CborAppSeqResult` needs to know whether its preserved verbatim source is
+ * still exactly right after offering `itemOptions` a chance to override one
+ * of its descendants (see its own doc). Wrapping `options.itemOptions` in a
+ * tracking function was tried first, but that function becomes
+ * `ctx.options.itemOptions` for every descendant (`_resolveCdnOptions`
+ * builds `ctx.options` from the very `options` it was given) — a pure
+ * `itemOptions` callback could tell it apart from the caller's own function
+ * by identity, observing a difference between an ordinary subtree and one
+ * reached through an app-sequence wrapper that `ctx.options`'s "current
+ * effective options" contract never promises.
+ *
+ * A symbol-keyed property on `options` instead survives every
+ * `{...options, ...override}` merge `_resolveCdnOptions` performs exactly
+ * the same way `itemOptions` itself does (object spread copies symbol keys
+ * too, and by reference — the same tracker box is shared, never cloned, by
+ * every node in the subtree), while never being part of the public
+ * `ToCDNOptions` shape or observable through any named field — see
+ * `toReadonlyCdnOptions`, which explicitly strips it before building
+ * `ctx.options`.
+ */
+export const CDN_OVERRIDE_TRACKER: unique symbol = Symbol('cdnOverrideTracker');
+
+/** @internal Mutable box referenced (never copied) via `CDN_OVERRIDE_TRACKER`. */
+export interface CdnOverrideTrackerBox {
+  applied: boolean;
+}
+
 /**
  * Abstract base class for all CBOR AST nodes.
  *
@@ -572,10 +693,22 @@ export abstract class CborItem {
    * string's, or byte string's own sqstr-text, word count is unaffected by
    * it either way) — only `CborTag` (and, transitively, `CborAppSeqResult`
    * delegating to its inner value) actually consult it.
+   *
+   * `path` is this entry's own full path (see `CdnItemContext.path`),
+   * passed down by the same caller for the same reason `renderEntry`
+   * receives it: `CborTag`/`CborAppSeqResult` re-render `this` here (see
+   * their own overrides) purely to answer this method's question, and that
+   * re-render must resolve any of *its own* descendants' `itemOptions`
+   * against the entry's real path — not an empty one — or a descendant
+   * several levels inside a tag-wrapped entry could see a different
+   * `ctx.path` here than the real render further down gives it. Only
+   * `CborTag`/`CborAppSeqResult` consult it; every other override ignores
+   * it, the same as `strict`.
    */
   _isMultiWordText(
     _options: ToCDNOptions | undefined,
-    _strict = true
+    _strict = true,
+    _path?: readonly unknown[]
   ): boolean {
     return false;
   }
@@ -595,13 +728,13 @@ export abstract class CborItem {
     let merged = this._defaults ? { ...this._defaults, ...options } : options;
     if (merged) merged = resolveDeprecatedAppPrefixAliases(merged);
     if (merged?.preserveAll) merged = expandPreserveAll(merged);
-    const body = this._toCDN(merged, 0);
+    const eff = this._resolveCdnOptions(merged, EMPTY_PATH, {});
+    const body = this._toCDN(eff, 0, EMPTY_PATH);
     // Single-line output strips comments: `#`/`//` comments need a newline
     // to terminate, so they cannot be emitted without breaking the guarantee
     // that single-line output contains no newlines.
-    if (!shouldEmitComments(merged) || resolveIndent(merged) === null)
-      return body;
-    const style = resolveCommentStyle(merged);
+    if (!shouldEmitComments(eff) || resolveIndent(eff) === null) return body;
+    const style = resolveCommentStyle(eff);
     const { ownLines, inlinePrefix } = splitLeadingComments(this, '', style);
     const trailing = this.comments?.trailing ?? [];
     const bodyWithTrailing =
@@ -735,10 +868,65 @@ export abstract class CborItem {
    * @internal
    * Depth-aware CDN serialization.
    * Leaf nodes receive `depth` but may ignore it.
-   * Container nodes use `depth` for indentation and call
-   * `child._toCDN(options, depth + 1)` when recursing.
+   * Container nodes use `depth` for indentation and, when recursing, must
+   * resolve each child's options via `child._resolveCdnOptions()` first
+   * (rather than passing `options` straight through) so `itemOptions` is
+   * honored for every node, not just the root — see `_resolveCdnOptions`.
+   * `path` is this node's own full path from the root (see
+   * `CdnItemContext.path`); only meaningful when `needsCdnItemDispatch()`
+   * is `true` for the options in effect — leaf implementations that don't
+   * recurse can ignore it, as can any implementation when dispatch isn't
+   * in play.
    */
-  abstract _toCDN(options: ToCDNOptions | undefined, depth: number): string;
+  abstract _toCDN(
+    options: ToCDNOptions | undefined,
+    depth: number,
+    path?: readonly unknown[]
+  ): string;
+
+  /**
+   * @internal
+   * Resolve `options.itemOptions` for this node (if any), returning the
+   * options a caller should use for both this node's own `_toCDN()` call
+   * and (via `_isMultiWordText()`) any layout probe of it — see
+   * `CdnItemContext`. Unlike `toJS()`'s `_toJSChild()`, this never caches:
+   * see the "toCDN() per-item dispatch" note above `needsCdnItemDispatch`
+   * for why that's both unnecessary and, per this codebase's own prior
+   * experience with `CborTag._isMultiWordText`, unsafe here specifically.
+   *
+   * `ctx` follows the same "no `key`, derived from `path`'s last element"
+   * convention `_toJSChild()` uses (see there) — a caller passes
+   * `parent`/`keyNode`/`isMapKey` only; `key` is filled in here.
+   */
+  _resolveCdnOptions(
+    options: ToCDNOptions | undefined,
+    path: readonly unknown[],
+    ctx: Omit<CdnItemContext, 'path' | 'key' | 'options'>
+  ): ToCDNOptions | undefined {
+    if (!needsCdnItemDispatch(options)) return options;
+    const key =
+      ctx.isMapKey || path.length === 0 ? undefined : path[path.length - 1];
+    const override = options!.itemOptions!(this, {
+      ...ctx,
+      key,
+      path,
+      options: toReadonlyCdnOptions(options!),
+    });
+    if (!override) return options;
+    const tracker = (
+      options as ToCDNOptions & {
+        [CDN_OVERRIDE_TRACKER]?: CdnOverrideTrackerBox;
+      }
+    )[CDN_OVERRIDE_TRACKER];
+    if (tracker) tracker.applied = true;
+    // Normalize the override's own deprecated aliases *before* merging: see
+    // `normalizeCdnOverride` for why resolving them after merging would let
+    // an already-resolved, inherited canonical value silently outrank the
+    // child's own alias-based override.
+    let eff: ToCDNOptions = { ...options, ...normalizeCdnOverride(override) };
+    if (eff.preserveAll) eff = expandPreserveAll(eff);
+    return eff;
+  }
 
   /**
    * @internal

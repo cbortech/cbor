@@ -77,9 +77,10 @@ export class CborTag extends CborItem {
    */
   override _isMultiWordText(
     options: ToCDNOptions | undefined,
-    strict = true
+    strict = true,
+    path?: readonly unknown[]
   ): boolean {
-    return isMultiWordRenderedLiteral(this._toCDN(options, 0), strict);
+    return isMultiWordRenderedLiteral(this._toCDN(options, 0, path), strict);
   }
 
   override _encodeTo(writer: CborWriter, options?: ToCBOROptions): void {
@@ -87,7 +88,11 @@ export class CborTag extends CborItem {
     this.content._encode(writer, options);
   }
 
-  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
+  override _toCDN(
+    options: ToCDNOptions | undefined,
+    depth: number,
+    path?: readonly unknown[]
+  ): string {
     const suffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(this.tag)
     );
@@ -95,12 +100,22 @@ export class CborTag extends CborItem {
       options?.preserveNumberFormat && this.ednSource !== undefined
         ? this.ednSource
         : this.tag.toString();
+    // A tag wrapper adds no path segment of its own — the content shares
+    // this tag's own path (see CdnItemContext.path) and gets its own
+    // itemOptions resolved against it (`_resolveCdnOptions` is a no-op
+    // when itemOptions isn't in play, so this is always safe to call).
+    const contentOptions = this.content._resolveCdnOptions(
+      options,
+      path ?? [],
+      { parent: this }
+    );
     const wrapped = renderSingleChildWithComments(
       this.content,
       this,
       options,
+      contentOptions,
       depth,
-      (childDepth) => this.content._toCDN(options, childDepth),
+      (childDepth) => this.content._toCDN(contentOptions, childDepth, path),
       '(',
       ')'
     );

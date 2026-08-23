@@ -58,7 +58,11 @@ export class CborNint extends CborItem {
     writeHeadTo(writer, MT_NINT, this.argument, this.encodingWidth);
   }
 
-  _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
+  _toCDN(
+    options: ToCDNOptions | undefined,
+    _depth: number,
+    _path?: readonly unknown[]
+  ): string {
     const suffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(this.argument)
     );

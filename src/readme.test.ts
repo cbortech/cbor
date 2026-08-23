@@ -342,6 +342,19 @@ describe('README examples', () => {
     expect(value).toBeInstanceOf(Date);
   });
 
+  test('toCDN() itemOptions formats one part of a document differently', () => {
+    const item = CBOR.fromCDN('{"raw": 255, "count": 255}');
+
+    const text = item.toCDN({
+      itemOptions: (_node, ctx) =>
+        ctx.path.length === 1 && ctx.path[0] === 'raw'
+          ? { intFormat: 'hex' }
+          : undefined,
+    });
+
+    expect(text).toBe('{"raw":0xff,"count":255}');
+  });
+
   test('Tag.set() values stringify as CBOR tags', () => {
     const tagged = CBOR.Tag.set('hello', 42n);
     const text = CBOR.stringify(tagged);

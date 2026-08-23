@@ -1,5 +1,5 @@
 import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
-import { CborItem } from './CborItem';
+import { CborItem, needsCdnItemDispatch } from './CborItem';
 import type { AnnotatedLine } from './CborItem';
 import { MT_BYTES } from '../cbor/constants';
 import {
@@ -55,7 +55,19 @@ export class CborEmbeddedCBOR extends CborItem {
     writer.writeBytes(content);
   }
 
-  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
+  override _toCDN(
+    options: ToCDNOptions | undefined,
+    depth: number,
+    path?: readonly unknown[]
+  ): string {
+    const basePath = path ?? [];
+    const dispatch = needsCdnItemDispatch(options);
+    const childOptions = (i: number): ToCDNOptions | undefined =>
+      dispatch
+        ? this.items[i]._resolveCdnOptions(options, [...basePath, i], {
+            parent: this,
+          })
+        : options;
     return serializeContainer({
       node: this,
       options,
@@ -67,8 +79,13 @@ export class CborEmbeddedCBOR extends CborItem {
       encodingWidth: this.encodingWidth,
       eiPosition: 'close',
       canonicalCount: () => BigInt(this._content(options).length),
-      hasEntryComments: () => this.items.some(hasPreservedComments),
-      renderEntry: (i) => this.items[i]._toCDN(options, depth + 1),
+      hasEntryComments: (i) => hasPreservedComments(this.items[i]),
+      renderEntry: (i) =>
+        this.items[i]._toCDN(
+          childOptions(i),
+          depth + 1,
+          dispatch ? [...basePath, i] : undefined
+        ),
       // entryIsLeaf is intentionally omitted (defaults to "always a leaf"):
       // unlike CborArray/CborMap, an item that is itself an array/map still
       // inlines here as long as its own rendering fits on one line — <<...>>
@@ -78,9 +95,14 @@ export class CborEmbeddedCBOR extends CborItem {
       // spread a flat encoded-item sequence one item per line if it fits.
       alwaysInlineLeaf: true,
       entryIsMultiWordText: (i) =>
-        this.items[i]._isMultiWordText(options, false),
+        this.items[i]._isMultiWordText(
+          childOptions(i),
+          false,
+          dispatch ? [...basePath, i] : undefined
+        ),
       entryLeadingNode: (i) => this.items[i],
       entryTrailing: (i, style) => formatTrailingComments(this.items[i], style),
+      entryOptions: dispatch ? childOptions : undefined,
     });
   }
 

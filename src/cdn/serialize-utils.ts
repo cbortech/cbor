@@ -416,7 +416,15 @@ export function serializeContainer(p: {
    * this to its encoded content's byte length instead.
    */
   canonicalCount?: () => bigint;
-  hasEntryComments: () => boolean;
+  /**
+   * Whether entry `i` structurally has any captured comments (parse-time
+   * presence only — not whether they'll actually be shown; see `hasComments`
+   * in the implementation, which additionally consults `entryOptions(i)` so
+   * an entry whose own override hides its comments doesn't force multi-line
+   * layout, and an entry whose own override *shows* comments the container's
+   * own `preserveComments` would otherwise hide still gets the chance to).
+   */
+  hasEntryComments: (i: number) => boolean;
   /** Render entry `i` at child depth (`item` or `key: value`). */
   renderEntry: (i: number, colSep: string) => string;
   /**
@@ -466,15 +474,48 @@ export function serializeContainer(p: {
     i: number,
     style: 'c-style' | 'cdn-style' | undefined
   ) => string;
+  /**
+   * Per-entry options for entry `i`'s own comment handling (whether to
+   * emit its comments at all, and in which style) — distinct from
+   * `options` above, which still governs the container-wide layout
+   * decisions (single-line vs multi-line, `hasComments`'s own gate, the
+   * container's own dangling comments). Omitted when the caller never
+   * resolves per-entry options at all (`toCDN()`'s `itemOptions` isn't in
+   * play), in which case every entry falls back to `options` — identical
+   * to this parameter not existing.
+   */
+  entryOptions?: (i: number) => ToCDNOptions | undefined;
 }): string {
   const { options, depth, openChar, closeChar, count } = p;
   const indentStr = resolveIndent(options);
   const preserveComments = shouldEmitComments(options);
   const commentStyle = resolveCommentStyle(options);
+  // Whether *any* comment will actually end up visible — not merely
+  // captured — decides whether to go multi-line at all. The container's own
+  // layout comments (its dangling comments) follow the container-wide
+  // `options`, same as their own emission below; each entry's own captured
+  // comments are only counted when that entry's own resolved options (see
+  // `entryOptions`) would actually show them, so an override hiding the one
+  // entry that has comments doesn't force an otherwise-pointless multi-line
+  // layout, and an override showing comments for one entry still triggers
+  // multi-line layout even when the container-wide `preserveComments` alone
+  // would not have.
+  let anyEntryHasVisibleComments = false;
+  if (indentStr !== null) {
+    for (let i = 0; i < count; i++) {
+      if (
+        p.hasEntryComments(i) &&
+        shouldEmitComments(p.entryOptions ? p.entryOptions(i) : options)
+      ) {
+        anyEntryHasVisibleComments = true;
+        break;
+      }
+    }
+  }
   const hasComments =
     indentStr !== null &&
-    preserveComments &&
-    (hasContainerLayoutComments(p.node) || p.hasEntryComments());
+    ((preserveComments && hasContainerLayoutComments(p.node)) ||
+      anyEntryHasVisibleComments);
   const preserveBlankLines =
     indentStr !== null && !!options?.preserveBlankLines;
   let hasBlankLines = false;
@@ -595,12 +636,24 @@ export function serializeContainer(p: {
     if (preserveBlankLines && p.entryLeadingNode(i).blankLineBefore) {
       lines.push('');
     }
+    // Entry `i`'s own comment handling — whether to emit at all, and in
+    // which style — comes from *its own* resolved options (see
+    // `entryOptions`), not the container-wide `preserveComments`/
+    // `commentStyle` above, so an `itemOptions` override on this one entry
+    // (e.g. `{ preserveComments: false, comments: 'strip' }`) takes effect
+    // for it specifically.
+    const ePreserveComments = shouldEmitComments(
+      p.entryOptions ? p.entryOptions(i) : options
+    );
+    const eCommentStyle = resolveCommentStyle(
+      p.entryOptions ? p.entryOptions(i) : options
+    );
     let inlinePrefix = '';
-    if (preserveComments) {
+    if (ePreserveComments) {
       const { ownLines, inlinePrefix: prefix } = splitLeadingComments(
         p.entryLeadingNode(i),
         childIndent,
-        commentStyle
+        eCommentStyle
       );
       pushAll(lines, ownLines);
       inlinePrefix = prefix;
@@ -608,7 +661,7 @@ export function serializeContainer(p: {
     const sep = i < count - 1 ? multilineSep : trailSep;
     const entry = probed?.[i] ?? p.renderEntry(i, colSep);
     lines.push(
-      `${childIndent}${inlinePrefix}${entry}${sep}${preserveComments ? p.entryTrailing(i, commentStyle) : ''}`
+      `${childIndent}${inlinePrefix}${entry}${sep}${ePreserveComments ? p.entryTrailing(i, eCommentStyle) : ''}`
     );
   }
   if (preserveComments)
@@ -636,34 +689,55 @@ export function serializeContainer(p: {
  * rendering, `depth` otherwise (matching a plain value's existing
  * "transparent" nesting — `tag(content)` doesn't indent `content` an extra
  * level when there's nothing to justify going multi-line for).
+ *
+ * `childOptions` — the child's own resolved options, distinct from
+ * `options` (the wrapper's) when `toCDN()`'s `itemOptions` has overridden
+ * something for the child specifically (see `CborTag._toCDN`) — governs
+ * only the child's *own* leading/trailing comments (whether to show them
+ * at all, and in which style); `options` still governs whether to go
+ * multi-line at all and the wrapper's own dangling comments, the same way
+ * `serializeContainer`'s container-wide `options` does for its own
+ * dangling comments even when its `entryOptions` resolves per-entry ones.
  */
 export function renderSingleChildWithComments(
   child: Commented,
   wrapper: Commented,
   options: ToCDNOptions | undefined,
+  childOptions: ToCDNOptions | undefined,
   depth: number,
   renderChild: (childDepth: number) => string,
   openChar: '(',
   closeChar: ')'
 ): string {
   const indentStr = resolveIndent(options);
+  const preserveComments = shouldEmitComments(options);
+  const childShowsComments = shouldEmitComments(childOptions);
+  // Same "actually visible, not merely captured" gate as
+  // `serializeContainer`'s own `hasComments` — the wrapper's own (dangling)
+  // comments follow the wrapper-level `options`, while the child's own
+  // leading/trailing comments follow the child's own resolved `childOptions`
+  // (see `CborTag._toCDN`), so an override hiding the child's comments while
+  // the wrapper has none of its own collapses back to the single-line form,
+  // and one showing the child's comments still goes multi-line even when
+  // the wrapper-level `options` alone would not have.
   const hasComments =
     indentStr !== null &&
-    shouldEmitComments(options) &&
-    (hasPreservedComments(child) || hasContainerLayoutComments(wrapper));
+    ((childShowsComments && hasPreservedComments(child)) ||
+      (preserveComments && hasContainerLayoutComments(wrapper)));
   if (!hasComments) return `${openChar}${renderChild(depth)}${closeChar}`;
   const commentStyle = resolveCommentStyle(options);
+  const childCommentStyle = resolveCommentStyle(childOptions);
   const childIndent = indentOf(indentStr!, depth + 1);
   const closeIndent = indentOf(indentStr!, depth);
-  const { ownLines, inlinePrefix } = splitLeadingComments(
-    child,
-    childIndent,
-    commentStyle
-  );
+  const { ownLines, inlinePrefix } = childShowsComments
+    ? splitLeadingComments(child, childIndent, childCommentStyle)
+    : { ownLines: [] as string[], inlinePrefix: '' };
   const lines = [
     ...ownLines,
-    `${childIndent}${inlinePrefix}${renderChild(depth + 1)}${formatTrailingComments(child, commentStyle)}`,
-    ...formatDanglingComments(wrapper, childIndent, commentStyle),
+    `${childIndent}${inlinePrefix}${renderChild(depth + 1)}${childShowsComments ? formatTrailingComments(child, childCommentStyle) : ''}`,
+    ...(preserveComments
+      ? formatDanglingComments(wrapper, childIndent, commentStyle)
+      : []),
   ];
   return `${openChar}\n${lines.join('\n')}\n${closeIndent}${closeChar}`;
 }

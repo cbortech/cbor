@@ -756,6 +756,31 @@ itemOptions: (_node, ctx) => ({
 });
 ```
 
+`toCDN()` にも同じ `itemOptions` オプションがあり、ドキュメントの一部だけを
+他と異なる方法でフォーマットできます。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const item = CBOR.fromCDN('{"raw": 255, "count": 255}');
+
+const text = item.toCDN({
+  itemOptions: (_node, ctx) =>
+    ctx.path.length === 1 && ctx.path[0] === 'raw'
+      ? { intFormat: 'hex' }
+      : undefined,
+});
+
+console.log(text);
+// {"raw":0xff,"count":255}
+```
+
+`toCDN()` には `reviver` に相当するものがないため、それを理由に複数回呼ばれる
+ことはありません —— ただし `toCDN()` 自体のレイアウト判定（`inlineLeafContainers`
+の1行収まるかの判定、あるいはタグ/app-sequence 値自身の複数語判定）が実際の
+出力より前にエントリを再描画してその答えを得ることがあるため、その場合には
+やはり複数回呼ばれ得ます。こちらも純粋な関数として書いてください。
+
 ## 文字列連結と不定長文字列
 
 draft-ietf-cbor-edn-literals-27(§3.5 / §3.6)の app-extension

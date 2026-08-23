@@ -9,6 +9,7 @@ import { MapEntries } from '../mapEntries';
 import {
   CborItem,
   needsItemDispatch,
+  needsCdnItemDispatch,
   withoutReviver,
   ROOT_OCCURRENCE,
   RAW_PASS_MARKER,
@@ -68,19 +69,68 @@ export class CborMap extends CborItem {
     }
   }
 
-  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
+  override _toCDN(
+    options: ToCDNOptions | undefined,
+    depth: number,
+    path?: readonly unknown[]
+  ): string {
+    const basePath = path ?? [];
+    const dispatch = needsCdnItemDispatch(options);
     // `entryIsMultiWordText` needs each side's own rendering (not just the
     // combined "key: value" string serializeContainer sees — see its
     // comment below), and `renderEntry` needs the exact same strings right
     // after — cached per index so a custom key/value's `_toCDN()` is never
     // called twice for the same render, matching serializeContainer's own
-    // "never serialize more than once per parent render" invariant.
+    // "never serialize more than once per parent render" invariant. The
+    // resolved per-item options (and, for a non-text key, the `toCDN()`
+    // rendering used as its path label — see `ItemContext.path`'s CDN
+    // counterpart) are cached the same way, for the same reason: an
+    // `itemOptions` callback should not be asked twice for one entry
+    // within a single parent render just because both `renderEntry` and
+    // `entryIsMultiWordText` need its result.
+    const optsCache: (
+      [unknown, ToCDNOptions | undefined, ToCDNOptions | undefined] | undefined
+    )[] = [];
+    const resolveKV = (
+      i: number
+    ): [unknown, ToCDNOptions | undefined, ToCDNOptions | undefined] => {
+      let r = optsCache[i];
+      if (!r) {
+        const [k, v] = this.entries[i];
+        if (!dispatch) {
+          r = [undefined, options, options];
+        } else {
+          // Independent of `options`/depth — a stable label identifying
+          // this entry's key for path purposes, same derivation `toJS()`'s
+          // own object-mode key naming uses, not the entry's real render.
+          const key = k instanceof CborTextString ? k.value : k.toCDN();
+          r = [
+            key,
+            k._resolveCdnOptions(options, basePath, {
+              parent: this,
+              isMapKey: true,
+              keyNode: k,
+            }),
+            v._resolveCdnOptions(options, [...basePath, key], {
+              parent: this,
+              keyNode: k,
+            }),
+          ];
+        }
+        optsCache[i] = r;
+      }
+      return r;
+    };
     const kvCache: ([string, string] | undefined)[] = [];
     const renderKV = (i: number): [string, string] => {
       let kv = kvCache[i];
       if (!kv) {
         const [k, v] = this.entries[i];
-        kv = [k._toCDN(options, depth + 1), v._toCDN(options, depth + 1)];
+        const [key, kOpts, vOpts] = resolveKV(i);
+        kv = [
+          k._toCDN(kOpts, depth + 1, dispatch ? basePath : undefined),
+          v._toCDN(vOpts, depth + 1, dispatch ? [...basePath, key] : undefined),
+        ];
         kvCache[i] = kv;
       }
       return kv;
@@ -94,11 +144,10 @@ export class CborMap extends CborItem {
       count: this.entries.length,
       indefiniteLength: this.indefiniteLength,
       encodingWidth: this.encodingWidth,
-      hasEntryComments: () =>
-        this.entries.some(
-          ([key, value]) =>
-            hasPreservedComments(key) || hasPreservedComments(value)
-        ),
+      hasEntryComments: (i) => {
+        const [key, value] = this.entries[i];
+        return hasPreservedComments(key) || hasPreservedComments(value);
+      },
       renderEntry: (i, colSep) => {
         const [kStr, vStr] = renderKV(i);
         return `${kStr}${colSep}${vStr}`;
@@ -109,7 +158,13 @@ export class CborMap extends CborItem {
       },
       entryIsMultiWordText: (i) => {
         const [k, v] = this.entries[i];
-        if (k._isMultiWordText(options) || v._isMultiWordText(options))
+        const [key, kOpts, vOpts] = resolveKV(i);
+        const kPath = dispatch ? basePath : undefined;
+        const vPath = dispatch ? [...basePath, key] : undefined;
+        if (
+          k._isMultiWordText(kOpts, true, kPath) ||
+          v._isMultiWordText(vOpts, true, vPath)
+        )
           return true;
         // serializeContainer's own isPrefixedLiteralText check only sees a
         // map entry's combined "key: value" rendering, which can't tell a
@@ -134,6 +189,10 @@ export class CborMap extends CborItem {
           style
         );
       },
+      // The entry's own comment handling follows the key's resolved
+      // options — same as entryLeadingNode's own choice of the key as the
+      // entry's leading-comment anchor.
+      entryOptions: dispatch ? (i) => resolveKV(i)[1] : undefined,
     });
   }
 

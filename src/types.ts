@@ -783,6 +783,88 @@ export interface FromJSOptions {
   cddlValidationOptions?: CddlValidateOptions;
 }
 
+// ─── Per-item option overrides (toCDN) ─────────────────────────────────────────
+
+/**
+ * Context passed to a `toCDN()` `itemOptions` callback (see
+ * `ToCDNOptions.itemOptions`) describing where the node being visited sits
+ * in the tree. Structurally the same shape as `ItemContext` (`toJS()`'s
+ * own per-item context — see there for the full rationale behind each
+ * field), but `path`'s map-key segments are derived the CDN way: a
+ * text-string key contributes its string value, any other key contributes
+ * its own `toCDN()` rendering — there is no "JS value" for a CDN key to
+ * contribute instead, since converting to JS is not what this call is
+ * doing.
+ *
+ * Unlike `ItemContext`, a node's `toCDN()` `itemOptions` callback can run
+ * more than once for reasons `toJS()`'s never does: `inlineLeafContainers`
+ * (and a tag/app-sequence value's own multi-word check) render an entry a
+ * second time, at the *same* depth and options, purely to answer a layout
+ * question (does it fit on one line? is it multi-word?) before the real
+ * render — an existing, deliberate characteristic of `toCDN()` itself (see
+ * `serializeContainer` in `cdn/serialize-utils.ts`), not something
+ * `itemOptions` introduces. Write this callback as a pure function of
+ * `item`/`ctx`, the same guidance as `ItemContext`'s own, for the same
+ * reason: it must not assume, or count, how many times it runs.
+ */
+export interface CdnItemContext {
+  /** The direct parent AST node. `undefined` for the root value being converted. */
+  parent?: CborItem;
+
+  /**
+   * The path segment identifying this node: an array index (`number`), or
+   * a map key's string value/`toCDN()` rendering (see `CdnItemContext`'s
+   * own note). Always equal to the last element of `path`, except
+   * `undefined` for the root value and while converting a map key itself
+   * (`isMapKey: true`). A tag or app-sequence wrapper's content inherits
+   * the wrapper's own `key` (and `path`) unchanged, since the wrapper adds
+   * no segment of its own.
+   */
+  key?: unknown;
+
+  /** The map key's own AST node, present when this node is a map entry's key or value. */
+  keyNode?: CborItem;
+
+  /**
+   * `true` when this invocation is for converting a map key itself, rather
+   * than one of that key's sibling value's descendants.
+   */
+  isMapKey?: boolean;
+
+  /**
+   * Path from the root to this node, as a sequence of array indices and
+   * map key identifiers (see `CdnItemContext`'s own note). Empty for the
+   * root value. A tag or app-sequence wrapper does not add a segment of
+   * its own — its content shares the wrapper's own path.
+   */
+  readonly path: readonly unknown[];
+
+  /**
+   * The options in effect for this node going into this call — the root
+   * options merged with whatever overrides its ancestors already
+   * returned, *before* this callback's own return value is merged on top.
+   * A mutable-looking field here (currently just the deprecated
+   * `textStringFormat`) is a fresh copy, not the live array in effect
+   * elsewhere — mutating it in place has no effect on this node, its
+   * siblings, or the caller's own options; return an override instead.
+   */
+  readonly options: ReadonlyToCDNOptions;
+}
+
+/**
+ * `ToCDNOptions`, as handed to code that must not mutate it in place —
+ * `CdnItemContext.options` — the `toCDN()` counterpart of
+ * `ReadonlyToJSNodeOptions`. `textStringFormat` (the one field on
+ * `ToCDNOptions` that's an ordinary mutable array, and already deprecated)
+ * is narrowed to a readonly array for the same reason `extensions` is
+ * there; see `ReadonlyToJSNodeOptions`'s own doc for the full rationale.
+ */
+export type ReadonlyToCDNOptions = Readonly<
+  Omit<ToCDNOptions, 'textStringFormat'>
+> & {
+  readonly textStringFormat?: readonly TextStringFormat[];
+};
+
 export interface ToCDNOptions {
   /**
    * Indentation for pretty-printing.
@@ -1331,6 +1413,43 @@ export interface ToCDNOptions {
    * @default 'auto'
    */
   encodingIndicators?: 'always' | 'auto' | 'never';
+
+  /**
+   * Called for every node during `toCDN()`, before that node is rendered,
+   * to override the options used for its subtree. Return a partial options
+   * object to merge over the options in effect for this node (they apply to
+   * this node and are inherited by its descendants, who may override them
+   * again); return `undefined` to make no change.
+   *
+   * This is the mechanism for applying an option to only part of a
+   * document — e.g. rendering one array element in hex while the rest stay
+   * decimal — keyed off `ctx.path` or the node's own shape
+   * (`item instanceof ...`).
+   *
+   * **May be called more than once for the same AST node** — see
+   * `CdnItemContext`'s own note on why, and why this callback should be a
+   * pure function of `item`/`ctx` rather than relying on how many times it
+   * runs.
+   *
+   * Not called for keys of an indefinite-length string's chunks or a
+   * `<<...>>` sequence's items, which have no key of their own to convert
+   * (only array elements and map entries/keys have a `path` segment).
+   *
+   * @example
+   * // Render only the value at key "raw" using hex integers, leaving the
+   * // rest of the document in the default decimal format.
+   * item.toCDN({
+   *   indent: 2,
+   *   itemOptions: (_node, ctx) =>
+   *     ctx.path.length === 1 && ctx.path[0] === 'raw'
+   *       ? { intFormat: 'hex' }
+   *       : undefined,
+   * });
+   */
+  itemOptions?: (
+    item: CborItem,
+    ctx: CdnItemContext
+  ) => Partial<ToCDNOptions> | undefined;
 }
 
 export type TextStringFormat = 'newline' | 'cdn' | DeprecatedTextStringFormat;

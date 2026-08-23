@@ -3,6 +3,7 @@ import { CBOR_OMIT } from '../types';
 import {
   CborItem,
   needsItemDispatch,
+  needsCdnItemDispatch,
   withoutReviver,
   ROOT_OCCURRENCE,
   RAW_PASS_MARKER,
@@ -54,7 +55,24 @@ export class CborArray extends CborItem {
     for (const item of this.items) item._encode(writer, options);
   }
 
-  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
+  override _toCDN(
+    options: ToCDNOptions | undefined,
+    depth: number,
+    path?: readonly unknown[]
+  ): string {
+    const basePath = path ?? [];
+    const dispatch = needsCdnItemDispatch(options);
+    // Resolves itemOptions for element `i` fresh on each call — including
+    // when both `renderEntry` and `entryIsMultiWordText` ask for the same
+    // `i` during one parent render — rather than caching, matching this
+    // whole mechanism's design (see the "toCDN() per-item dispatch" note
+    // in CborItem.ts).
+    const childOptions = (i: number): ToCDNOptions | undefined =>
+      dispatch
+        ? this.items[i]._resolveCdnOptions(options, [...basePath, i], {
+            parent: this,
+          })
+        : options;
     return serializeContainer({
       node: this,
       options,
@@ -64,12 +82,23 @@ export class CborArray extends CborItem {
       count: this.items.length,
       indefiniteLength: this.indefiniteLength,
       encodingWidth: this.encodingWidth,
-      hasEntryComments: () => this.items.some(hasPreservedComments),
-      renderEntry: (i) => this.items[i]._toCDN(options, depth + 1),
+      hasEntryComments: (i) => hasPreservedComments(this.items[i]),
+      renderEntry: (i) =>
+        this.items[i]._toCDN(
+          childOptions(i),
+          depth + 1,
+          dispatch ? [...basePath, i] : undefined
+        ),
       entryIsLeaf: (i) => !this.items[i]._containsCdnContainer,
-      entryIsMultiWordText: (i) => this.items[i]._isMultiWordText(options),
+      entryIsMultiWordText: (i) =>
+        this.items[i]._isMultiWordText(
+          childOptions(i),
+          true,
+          dispatch ? [...basePath, i] : undefined
+        ),
       entryLeadingNode: (i) => this.items[i],
       entryTrailing: (i, style) => formatTrailingComments(this.items[i], style),
+      entryOptions: dispatch ? childOptions : undefined,
     });
   }
 
