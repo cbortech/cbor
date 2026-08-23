@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'vitest';
-import DefaultCBOR, { CBOR, CddlMismatchError } from './index';
+import DefaultCBOR, {
+  CBOR,
+  CddlMismatchError,
+  type CborExtension,
+} from './index';
 import { CDDL } from './cddl/index';
 
 describe('README examples', () => {
@@ -305,6 +309,50 @@ describe('README examples', () => {
     });
 
     expect(text).toBe("DT'2026-05-06T00:00:00Z'");
+  });
+
+  test('itemOptions overrides options for one node and its descendants', () => {
+    const item = CBOR.fromCDN(
+      `{"date1": DT'2026-08-23T00:00:00Z', "date2": DT'2026-08-23T00:00:00Z'}`
+    );
+
+    const value = item.toJS({
+      stripTags: true,
+      itemOptions: (_node, ctx) =>
+        ctx.path.length === 1 && ctx.path[0] === 'date1'
+          ? { extensions: [CBOR.dt_as_Date] }
+          : undefined,
+    }) as { date1: unknown; date2: unknown };
+
+    expect(value.date1).toBeInstanceOf(Date);
+    expect(value.date2).toBe(1787443200);
+  });
+
+  test('ctx.options builds on the currently effective options', () => {
+    const noop: CborExtension = { toJS: () => undefined };
+    const item = CBOR.fromCDN("DT'2026-08-23T00:00:00Z'");
+
+    const value = item.toJS({
+      extensions: [noop],
+      itemOptions: (_node, ctx) => ({
+        extensions: [...(ctx.options.extensions ?? []), CBOR.dt_as_Date],
+      }),
+    });
+
+    expect(value).toBeInstanceOf(Date);
+  });
+
+  test('toCDN() itemOptions formats one part of a document differently', () => {
+    const item = CBOR.fromCDN('{"raw": 255, "count": 255}');
+
+    const text = item.toCDN({
+      itemOptions: (_node, ctx) =>
+        ctx.path.length === 1 && ctx.path[0] === 'raw'
+          ? { intFormat: 'hex' }
+          : undefined,
+    });
+
+    expect(text).toBe('{"raw":0xff,"count":255}');
   });
 
   test('Tag.set() values stringify as CBOR tags', () => {

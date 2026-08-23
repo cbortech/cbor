@@ -93,7 +93,11 @@ export class CborFloat extends CborItem {
     }
   }
 
-  _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
+  _toCDN(
+    options: ToCDNOptions | undefined,
+    _depth: number,
+    _path?: readonly unknown[]
+  ): string {
     const mode = options?.encodingIndicators ?? 'auto';
     // In single-line output (no `indent`), a source spelling that spans
     // multiple lines (e.g. a `float<<...>>` app-sequence written across

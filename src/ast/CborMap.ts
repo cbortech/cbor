@@ -6,7 +6,14 @@ import type {
 } from '../types';
 import { CBOR_OMIT } from '../types';
 import { MapEntries } from '../mapEntries';
-import { CborItem } from './CborItem';
+import {
+  CborItem,
+  needsItemDispatch,
+  needsCdnItemDispatch,
+  withoutReviver,
+  ROOT_OCCURRENCE,
+  RAW_PASS_MARKER,
+} from './CborItem';
 import type { AnnotatedLine } from './CborItem';
 import { CborTextString } from './CborTextString';
 import { MT_MAP, AI_INDEFINITE, BREAK_CODE } from '../cbor/constants';
@@ -62,19 +69,68 @@ export class CborMap extends CborItem {
     }
   }
 
-  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
+  override _toCDN(
+    options: ToCDNOptions | undefined,
+    depth: number,
+    path?: readonly unknown[]
+  ): string {
+    const basePath = path ?? [];
+    const dispatch = needsCdnItemDispatch(options);
     // `entryIsMultiWordText` needs each side's own rendering (not just the
     // combined "key: value" string serializeContainer sees — see its
     // comment below), and `renderEntry` needs the exact same strings right
     // after — cached per index so a custom key/value's `_toCDN()` is never
     // called twice for the same render, matching serializeContainer's own
-    // "never serialize more than once per parent render" invariant.
+    // "never serialize more than once per parent render" invariant. The
+    // resolved per-item options (and, for a non-text key, the `toCDN()`
+    // rendering used as its path label — see `ItemContext.path`'s CDN
+    // counterpart) are cached the same way, for the same reason: an
+    // `itemOptions` callback should not be asked twice for one entry
+    // within a single parent render just because both `renderEntry` and
+    // `entryIsMultiWordText` need its result.
+    const optsCache: (
+      [unknown, ToCDNOptions | undefined, ToCDNOptions | undefined] | undefined
+    )[] = [];
+    const resolveKV = (
+      i: number
+    ): [unknown, ToCDNOptions | undefined, ToCDNOptions | undefined] => {
+      let r = optsCache[i];
+      if (!r) {
+        const [k, v] = this.entries[i];
+        if (!dispatch) {
+          r = [undefined, options, options];
+        } else {
+          // Independent of `options`/depth — a stable label identifying
+          // this entry's key for path purposes, same derivation `toJS()`'s
+          // own object-mode key naming uses, not the entry's real render.
+          const key = k instanceof CborTextString ? k.value : k.toCDN();
+          r = [
+            key,
+            k._resolveCdnOptions(options, basePath, {
+              parent: this,
+              isMapKey: true,
+              keyNode: k,
+            }),
+            v._resolveCdnOptions(options, [...basePath, key], {
+              parent: this,
+              keyNode: k,
+            }),
+          ];
+        }
+        optsCache[i] = r;
+      }
+      return r;
+    };
     const kvCache: ([string, string] | undefined)[] = [];
     const renderKV = (i: number): [string, string] => {
       let kv = kvCache[i];
       if (!kv) {
         const [k, v] = this.entries[i];
-        kv = [k._toCDN(options, depth + 1), v._toCDN(options, depth + 1)];
+        const [key, kOpts, vOpts] = resolveKV(i);
+        kv = [
+          k._toCDN(kOpts, depth + 1, dispatch ? basePath : undefined),
+          v._toCDN(vOpts, depth + 1, dispatch ? [...basePath, key] : undefined),
+        ];
         kvCache[i] = kv;
       }
       return kv;
@@ -88,11 +144,10 @@ export class CborMap extends CborItem {
       count: this.entries.length,
       indefiniteLength: this.indefiniteLength,
       encodingWidth: this.encodingWidth,
-      hasEntryComments: () =>
-        this.entries.some(
-          ([key, value]) =>
-            hasPreservedComments(key) || hasPreservedComments(value)
-        ),
+      hasEntryComments: (i) => {
+        const [key, value] = this.entries[i];
+        return hasPreservedComments(key) || hasPreservedComments(value);
+      },
       renderEntry: (i, colSep) => {
         const [kStr, vStr] = renderKV(i);
         return `${kStr}${colSep}${vStr}`;
@@ -103,7 +158,13 @@ export class CborMap extends CborItem {
       },
       entryIsMultiWordText: (i) => {
         const [k, v] = this.entries[i];
-        if (k._isMultiWordText(options) || v._isMultiWordText(options))
+        const [key, kOpts, vOpts] = resolveKV(i);
+        const kPath = dispatch ? basePath : undefined;
+        const vPath = dispatch ? [...basePath, key] : undefined;
+        if (
+          k._isMultiWordText(kOpts, true, kPath) ||
+          v._isMultiWordText(vOpts, true, vPath)
+        )
           return true;
         // serializeContainer's own isPrefixedLiteralText check only sees a
         // map entry's combined "key: value" rendering, which can't tell a
@@ -128,6 +189,10 @@ export class CborMap extends CborItem {
           style
         );
       },
+      // The entry's own comment handling follows the key's resolved
+      // options — same as entryLeadingNode's own choice of the key as the
+      // entry's leading-comment anchor.
+      entryOptions: dispatch ? (i) => resolveKV(i)[1] : undefined,
     });
   }
 
@@ -167,12 +232,42 @@ export class CborMap extends CborItem {
     return lines;
   }
 
-  _toJS(options?: ToJSOptions): unknown {
+  _toJS(
+    options?: ToJSOptions,
+    path?: readonly unknown[],
+    occurrence?: readonly unknown[]
+  ): unknown {
     const reviver = options?.reviver;
+    const dispatch = needsItemDispatch(options);
+    const basePath = path ?? [];
+    const occ = occurrence ?? ROOT_OCCURRENCE;
     const toEntries = () => {
-      const result = MapEntries.from(
-        this.entries,
-        ([k, v]) => [k._toJS(options), v._toJS(options)] as [unknown, unknown]
+      const convertPair = (
+        k: CborItem,
+        v: CborItem,
+        i: number,
+        opts: ToJSOptions | undefined
+      ): [unknown, unknown] => {
+        if (!dispatch) return [k._toJS(opts), v._toJS(opts)];
+        // The key has no path segment of its own — it names the value's —
+        // so it's converted first, against the parent's own path, and its
+        // result becomes the value's path segment. The occurrence chains
+        // (unlike path) are derived purely from this map's own occurrence
+        // plus this entry's own ordinal `i`, never from the key's converted
+        // JS value — see `Occurrence`.
+        const kJs = k._toJSChild(opts, basePath, [...occ, `k${i}`], {
+          parent: this,
+          isMapKey: true,
+          keyNode: k,
+        });
+        const vJs = v._toJSChild(opts, [...basePath, kJs], [...occ, `v${i}`], {
+          parent: this,
+          keyNode: k,
+        });
+        return [kJs, vJs];
+      };
+      const result = MapEntries.from(this.entries, ([k, v], i) =>
+        convertPair(k, v, i, options)
       );
       if (!reviver) return result;
       const uOmits = options?.undefinedOmits;
@@ -186,15 +281,47 @@ export class CborMap extends CborItem {
       return result;
     };
     const toObject = () => {
+      // `rawPass` marks a call as belonging to the raw pre-population pass
+      // below — its occurrence gets `RAW_PASS_MARKER` inserted (see
+      // `Occurrence`) so it can never be reused by the real, revived pass,
+      // even indirectly through some other, more deeply nested raw pass.
+      const convertValue = (
+        k: CborItem,
+        v: CborItem,
+        key: string,
+        i: number,
+        opts: ToJSOptions | undefined,
+        rawPass: boolean
+      ) =>
+        dispatch
+          ? v._toJSChild(
+              opts,
+              [...basePath, key],
+              // Derived from this map's own occurrence plus this entry's
+              // own ordinal `i`, not from `key` (a converted JS value) —
+              // see `Occurrence`.
+              rawPass ? [...occ, RAW_PASS_MARKER, `v${i}`] : [...occ, `v${i}`],
+              { parent: this, keyNode: k }
+            )
+          : v._toJS(opts);
       // First pass: pre-populate holder with unrevived values so all sibling
       // keys are visible in `this` when reviver runs (matches JSON.parse).
-      const optNoReviver = options
-        ? { ...options, reviver: undefined }
-        : undefined;
+      // `itemOptions`/`extensions` still apply here — see `withoutReviver`
+      // — since this holder is directly observable through `this[key]`
+      // inside an earlier sibling's own reviver call, not just internal
+      // scaffolding; the `RAW_PASS_MARKER` in each value's occurrence above
+      // keeps this pass's resolutions from being reused by the real,
+      // revived pass below. When there's no reviver, this loop's result
+      // *is* the final output (see `if (!reviver) return holder` below) —
+      // `withoutReviver` is then a no-op (`reviver` was already unset), and
+      // `rawPass` is `false` so no marker is inserted, matching that this
+      // loop is not throwaway in that case.
+      const optNoReviver = withoutReviver(options);
       const holder: Record<string, unknown> = {};
-      for (const [k, v] of this.entries) {
+      for (let i = 0; i < this.entries.length; i++) {
+        const [k, v] = this.entries[i];
         const key = k instanceof CborTextString ? k.value : k.toCDN();
-        const raw = v._toJS(optNoReviver);
+        const raw = convertValue(k, v, key, i, optNoReviver, !!reviver);
         if (key === '__proto__') {
           Object.defineProperty(holder, key, {
             value: raw,
@@ -219,7 +346,7 @@ export class CborMap extends CborItem {
         const [k, v] = this.entries[i];
         const key = k instanceof CborTextString ? k.value : k.toCDN();
         if (lastIdx.get(key) !== i) continue;
-        const val = v._toJS(options);
+        const val = convertValue(k, v, key, i, options, false);
         const rv = reviver.call(holder, key, val);
         const omit =
           rv === CBOR_OMIT || (options?.undefinedOmits && rv === undefined);

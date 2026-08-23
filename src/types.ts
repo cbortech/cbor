@@ -18,6 +18,11 @@ export const CBOR_OMIT: unique symbol = Symbol('cbor.omit');
 export type { CborExtension } from './extensions/types';
 import type { CborExtension } from './extensions/types';
 
+// Type-only; used only by ItemContext/itemOptions below. Safe despite the
+// reverse direction (ast/CborItem.ts imports types from here) because type
+// imports are erased at compile time — there is no runtime circular require.
+import type { CborItem } from './ast/CborItem';
+
 // ─── CDDL ─────────────────────────────────────────────────────────────────────
 // Type-only imports; note however that supporting CDDL source text as the
 // `cddl` option makes the facade (cbor.ts) import the compiler at runtime,
@@ -26,6 +31,126 @@ import type { CborExtension } from './extensions/types';
 import type { CddlSchema } from './cddl/schema';
 import type { ValidateOptions as CddlValidateOptions } from './cddl/validator';
 import type { CddlValidationError, CddlValidationWarning } from './cddl/errors';
+
+// ─── Per-item option overrides ─────────────────────────────────────────────────
+
+/**
+ * Context passed to an `itemOptions` callback (see `ToJSOptions.itemOptions`)
+ * describing where the node being visited sits in the tree.
+ */
+export interface ItemContext {
+  /**
+   * The direct parent AST node. `undefined` for the root value being
+   * converted. A tag or app-sequence wrapper is its content's `parent` —
+   * see `path` for how wrappers affect addressing.
+   */
+  parent?: CborItem;
+
+  /**
+   * The path segment identifying this node: an array index (`number`), or a
+   * map key's JS value (any type — CBOR keys are not limited to strings).
+   * Always equal to the last element of `path`, except `undefined` for the
+   * root value and while converting a map key itself (`isMapKey: true`),
+   * since a key has no path of its own — it names its sibling value's
+   * segment instead. A tag or app-sequence wrapper's content inherits the
+   * wrapper's own `key` (and `path`) unchanged, since the wrapper adds no
+   * segment of its own — see `path`.
+   */
+  key?: unknown;
+
+  /**
+   * The map key's own AST node, present when this node is a map entry's key
+   * or value — but *not* inherited into a tag/app-sequence wrapper's
+   * content the way `key`/`path` are, so it is only reliable at the map
+   * entry itself. Lets a callback inspect a non-scalar key structurally
+   * (e.g. via `keyNode._toCDN()`) instead of relying only on `key`'s
+   * computed JS value.
+   */
+  keyNode?: CborItem;
+
+  /**
+   * `true` when this invocation is for converting a map key itself, rather
+   * than one of that key's sibling value's descendants.
+   */
+  isMapKey?: boolean;
+
+  /**
+   * Path from the root to this node, as a sequence of array indices and map
+   * key JS values. Empty for the root value. A tag or app-sequence wrapper
+   * does not add a segment of its own — its content shares the wrapper's own
+   * path.
+   */
+  readonly path: readonly unknown[];
+
+  /**
+   * The options in effect for this node going into this call — i.e. the
+   * root options merged with whatever overrides its ancestors already
+   * returned, *before* this callback's own return value is merged on top.
+   * Read from this to build on the current value of an option (e.g. add an
+   * extension to whatever list is already in effect) instead of overriding
+   * it outright, or to make a decision based on an option's current value.
+   *
+   * A mutable-looking field here (currently just `extensions`) is a fresh
+   * copy, not the live array in effect elsewhere — mutating it in place
+   * (e.g. `ctx.options.extensions.push(ext)`) has no effect on this node,
+   * its siblings, or the caller's own options; return an override instead.
+   *
+   * Has no `reviver` — its type is `ReadonlyToJSNodeOptions`, not
+   * `ToJSOptions` — for the same reason this callback's own return value
+   * can't set one:
+   * since this callback may run more than once for the same node (see
+   * `ToJSOptions.itemOptions`), always reflecting only the reviver-
+   * independent options keeps what it reads consistent with what it can
+   * write, and keeps a callback that only inspects `options` pure across
+   * every one of those calls.
+   *
+   * @example
+   * // Add `dt_as_Date` to whatever extensions are already configured,
+   * // rather than replacing them.
+   * itemOptions: (_node, ctx) => ({
+   *   extensions: [...(ctx.options.extensions ?? []), dt_as_Date],
+   * })
+   */
+  readonly options: ReadonlyToJSNodeOptions;
+}
+
+/**
+ * `ToJSOptions` with `reviver` removed. Used wherever an API only ever
+ * needs to see the reviver-*independent* part of the options in effect for
+ * a node — an `itemOptions` callback's return value, and the `options`
+ * parameter of `CborExtension.toJS()` — because reviving the value a node
+ * converts to always happens afterwards, exactly once per visit, in the
+ * container holding it (see `CborArray`/`CborMap`); it is never something
+ * the conversion of the node itself should (or, for `CborExtension.toJS()`,
+ * even can) branch on. Keeping `reviver` out of both signatures — rather
+ * than merely documenting that it should be ignored — means neither can
+ * observe whether one is present, which is what makes it safe for a
+ * `reviver`-driven `CborArray`/`CborMap` to convert a child more than once
+ * (see `ToJSOptions.itemOptions`) without either one's result depending on
+ * *which* of those conversions it was called for.
+ */
+export type ToJSNodeOptions = Omit<ToJSOptions, 'reviver'>;
+
+/**
+ * `ToJSNodeOptions`, as handed to code that must not mutate it in place:
+ * `ItemContext.options` and the `options` parameter of
+ * `CborExtension.toJS()`. Both describe options actually in effect
+ * elsewhere in the tree, so mutating what's handed out here must not be
+ * able to reach that: reassigning a top-level property is a type error
+ * (`Readonly<...>`), and `extensions`, the one field on `ToJSOptions`
+ * that's an ordinary mutable array, is narrowed to a readonly array so an
+ * in-place mutation like `.push()` is one too. This only guards against
+ * *accidental* mutation via the type system — the implementation
+ * additionally hands out a fresh snapshot, with its own copy of
+ * `extensions`, on every call, so even a deliberate cast past this type
+ * can't corrupt what another node, sibling, hook, or pass sees (see
+ * `_toJSChild`'s `toReadonlyNodeOptions`).
+ */
+export type ReadonlyToJSNodeOptions = Readonly<
+  Omit<ToJSNodeOptions, 'extensions'>
+> & {
+  readonly extensions?: readonly CborExtension[];
+};
 
 // ─── Options ──────────────────────────────────────────────────────────────────
 
@@ -100,6 +225,71 @@ export interface ToJSOptions {
    * @default false
    */
   undefinedOmits?: boolean;
+
+  /**
+   * Extension plugins consulted during `toJS()`, tried in order for every
+   * node before its own default conversion. An extension takes part by
+   * implementing `CborExtension.toJS()`; the first one to return a result
+   * for a given node wins and that node's own `_toJS()` is not called.
+   *
+   * Unlike the `extensions` option on `FromCDNOptions`/`FromCBOROptions`,
+   * this does not affect parsing — it only lets `toJS()` reinterpret nodes
+   * that a *different* extension configuration already produced. For
+   * example, a tree parsed with the plain `dt` extension (`DT'...'` →
+   * `number`) can still be converted with `dt_as_Date` selected here
+   * (`DT'...'` → `Date`), and vice versa — see `itemOptions` below to apply
+   * this to only part of a tree.
+   *
+   * There is no `builtinExtensions` equivalent for `toJS()`: leaving this
+   * unset (the default) keeps every node's own built-in conversion
+   * behavior, so no bundled extension needs to be "re-added" here just to
+   * get default output.
+   */
+  extensions?: CborExtension[];
+
+  /**
+   * Called for every node during `toJS()`, before that node is converted,
+   * to override the options used for its subtree. Return a partial options
+   * object to merge over the options in effect for this node (they apply to
+   * this node and are inherited by its descendants, who may override them
+   * again); return `undefined` to make no change.
+   *
+   * This is the mechanism for applying an option — including `extensions`,
+   * to select a different conversion for one node without affecting its
+   * siblings — to only part of a document, keyed off `ctx.path` or the
+   * node's own shape (`item instanceof ...`).
+   *
+   * **May be called more than once for the same AST node.** With a
+   * `reviver` present, `CborArray`/`CborMap` convert each child at least
+   * twice: once (with `reviver` itself withheld from the options this
+   * callback sees, though its own return value is honoured as normal) to
+   * build a holder a `reviver` call can inspect via `this[j]` for a
+   * not-yet-processed sibling `j`, and once more, for real, to compute the
+   * value the container actually keeps — and a node several levels down
+   * can in principle be offered to this callback more than twice, if a
+   * container at some intermediate level runs a pre-population pass of its
+   * own while itself sitting inside an *outer* container's. Each call is
+   * independent and reflects only the state relevant to *that* particular
+   * conversion (e.g. `ctx.path` for a value under a composite map key
+   * shows whatever that key currently converts to, which can differ
+   * between an earlier, not-yet-revived call and a later one after the
+   * key's own `reviver` has run). Write this callback as a pure function of
+   * `item`/`ctx` — it must not assume, or count, how many times it runs.
+   *
+   * @example
+   * // Convert only `date1` with `dt_as_Date`, leaving other DT values as
+   * // the epoch numbers the tree was originally parsed with.
+   * item.toJS({
+   *   itemOptions: (node, ctx) =>
+   *     ctx.path.length === 1 && ctx.path[0] === 'date1'
+   *       ? { extensions: [dt_as_Date] }
+   *       : undefined,
+   * });
+   */
+  itemOptions?: (
+    item: CborItem,
+    ctx: ItemContext
+  ) => Partial<ToJSNodeOptions> | undefined;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
@@ -592,6 +782,88 @@ export interface FromJSOptions {
    */
   cddlValidationOptions?: CddlValidateOptions;
 }
+
+// ─── Per-item option overrides (toCDN) ─────────────────────────────────────────
+
+/**
+ * Context passed to a `toCDN()` `itemOptions` callback (see
+ * `ToCDNOptions.itemOptions`) describing where the node being visited sits
+ * in the tree. Structurally the same shape as `ItemContext` (`toJS()`'s
+ * own per-item context — see there for the full rationale behind each
+ * field), but `path`'s map-key segments are derived the CDN way: a
+ * text-string key contributes its string value, any other key contributes
+ * its own `toCDN()` rendering — there is no "JS value" for a CDN key to
+ * contribute instead, since converting to JS is not what this call is
+ * doing.
+ *
+ * Unlike `ItemContext`, a node's `toCDN()` `itemOptions` callback can run
+ * more than once for reasons `toJS()`'s never does: `inlineLeafContainers`
+ * (and a tag/app-sequence value's own multi-word check) render an entry a
+ * second time, at the *same* depth and options, purely to answer a layout
+ * question (does it fit on one line? is it multi-word?) before the real
+ * render — an existing, deliberate characteristic of `toCDN()` itself (see
+ * `serializeContainer` in `cdn/serialize-utils.ts`), not something
+ * `itemOptions` introduces. Write this callback as a pure function of
+ * `item`/`ctx`, the same guidance as `ItemContext`'s own, for the same
+ * reason: it must not assume, or count, how many times it runs.
+ */
+export interface CdnItemContext {
+  /** The direct parent AST node. `undefined` for the root value being converted. */
+  parent?: CborItem;
+
+  /**
+   * The path segment identifying this node: an array index (`number`), or
+   * a map key's string value/`toCDN()` rendering (see `CdnItemContext`'s
+   * own note). Always equal to the last element of `path`, except
+   * `undefined` for the root value and while converting a map key itself
+   * (`isMapKey: true`). A tag or app-sequence wrapper's content inherits
+   * the wrapper's own `key` (and `path`) unchanged, since the wrapper adds
+   * no segment of its own.
+   */
+  key?: unknown;
+
+  /** The map key's own AST node, present when this node is a map entry's key or value. */
+  keyNode?: CborItem;
+
+  /**
+   * `true` when this invocation is for converting a map key itself, rather
+   * than one of that key's sibling value's descendants.
+   */
+  isMapKey?: boolean;
+
+  /**
+   * Path from the root to this node, as a sequence of array indices and
+   * map key identifiers (see `CdnItemContext`'s own note). Empty for the
+   * root value. A tag or app-sequence wrapper does not add a segment of
+   * its own — its content shares the wrapper's own path.
+   */
+  readonly path: readonly unknown[];
+
+  /**
+   * The options in effect for this node going into this call — the root
+   * options merged with whatever overrides its ancestors already
+   * returned, *before* this callback's own return value is merged on top.
+   * A mutable-looking field here (currently just the deprecated
+   * `textStringFormat`) is a fresh copy, not the live array in effect
+   * elsewhere — mutating it in place has no effect on this node, its
+   * siblings, or the caller's own options; return an override instead.
+   */
+  readonly options: ReadonlyToCDNOptions;
+}
+
+/**
+ * `ToCDNOptions`, as handed to code that must not mutate it in place —
+ * `CdnItemContext.options` — the `toCDN()` counterpart of
+ * `ReadonlyToJSNodeOptions`. `textStringFormat` (the one field on
+ * `ToCDNOptions` that's an ordinary mutable array, and already deprecated)
+ * is narrowed to a readonly array for the same reason `extensions` is
+ * there; see `ReadonlyToJSNodeOptions`'s own doc for the full rationale.
+ */
+export type ReadonlyToCDNOptions = Readonly<
+  Omit<ToCDNOptions, 'textStringFormat'>
+> & {
+  readonly textStringFormat?: readonly TextStringFormat[];
+};
 
 export interface ToCDNOptions {
   /**
@@ -1141,6 +1413,43 @@ export interface ToCDNOptions {
    * @default 'auto'
    */
   encodingIndicators?: 'always' | 'auto' | 'never';
+
+  /**
+   * Called for every node during `toCDN()`, before that node is rendered,
+   * to override the options used for its subtree. Return a partial options
+   * object to merge over the options in effect for this node (they apply to
+   * this node and are inherited by its descendants, who may override them
+   * again); return `undefined` to make no change.
+   *
+   * This is the mechanism for applying an option to only part of a
+   * document — e.g. rendering one array element in hex while the rest stay
+   * decimal — keyed off `ctx.path` or the node's own shape
+   * (`item instanceof ...`).
+   *
+   * **May be called more than once for the same AST node** — see
+   * `CdnItemContext`'s own note on why, and why this callback should be a
+   * pure function of `item`/`ctx` rather than relying on how many times it
+   * runs.
+   *
+   * Not called for keys of an indefinite-length string's chunks or a
+   * `<<...>>` sequence's items, which have no key of their own to convert
+   * (only array elements and map entries/keys have a `path` segment).
+   *
+   * @example
+   * // Render only the value at key "raw" using hex integers, leaving the
+   * // rest of the document in the default decimal format.
+   * item.toCDN({
+   *   indent: 2,
+   *   itemOptions: (_node, ctx) =>
+   *     ctx.path.length === 1 && ctx.path[0] === 'raw'
+   *       ? { intFormat: 'hex' }
+   *       : undefined,
+   * });
+   */
+  itemOptions?: (
+    item: CborItem,
+    ctx: CdnItemContext
+  ) => Partial<ToCDNOptions> | undefined;
 }
 
 export type TextStringFormat = 'newline' | 'cdn' | DeprecatedTextStringFormat;

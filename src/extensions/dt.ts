@@ -9,13 +9,19 @@
  * from ./date instead.
  */
 
-import type { ToCDNOptions, ToJSOptions, FromJSOptions } from '../types';
+import type {
+  ToCDNOptions,
+  ToJSOptions,
+  ReadonlyToJSNodeOptions,
+  FromJSOptions,
+} from '../types';
 import type { CborExtension } from './types';
 import type { CborItem } from '../ast/CborItem';
 import { CborUint } from '../ast/CborUint';
 import { CborNint } from '../ast/CborNint';
 import { CborFloat } from '../ast/CborFloat';
 import { CborTag } from '../ast/CborTag';
+import { Tag } from '../tag';
 import type { EncodingWidth } from '../cbor/encode';
 import { autoSelectFloatPrecision } from '../cbor/encode';
 import { CborTextString } from '../ast/CborTextString';
@@ -169,8 +175,13 @@ export class CborEpochDtExtUint extends CborUint {
     super(value, options);
   }
 
-  override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
-    if (options?.appPrefix === false) return super._toCDN(options, _depth);
+  override _toCDN(
+    options: ToCDNOptions | undefined,
+    _depth: number,
+    path?: readonly unknown[]
+  ): string {
+    if (options?.appPrefix === false)
+      return super._toCDN(options, _depth, path);
     const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(this.value)
     );
@@ -204,8 +215,13 @@ export class CborEpochDtExtNint extends CborNint {
     super(value, options);
   }
 
-  override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
-    if (options?.appPrefix === false) return super._toCDN(options, _depth);
+  override _toCDN(
+    options: ToCDNOptions | undefined,
+    _depth: number,
+    path?: readonly unknown[]
+  ): string {
+    if (options?.appPrefix === false)
+      return super._toCDN(options, _depth, path);
     const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(this.argument)
     );
@@ -242,8 +258,13 @@ export class CborEpochDtExtFloat extends CborFloat {
     super(value, options);
   }
 
-  override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
-    if (options?.appPrefix === false) return super._toCDN(options, _depth);
+  override _toCDN(
+    options: ToCDNOptions | undefined,
+    _depth: number,
+    path?: readonly unknown[]
+  ): string {
+    if (options?.appPrefix === false)
+      return super._toCDN(options, _depth, path);
     const autoSelected = autoSelectFloatPrecision(this.value);
     const eiSuffix = floatSuffix(
       this.value,
@@ -288,8 +309,12 @@ export class CborTaggedEpochDtExt extends CborTag {
     );
   }
 
-  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    if (options?.appPrefix === false) return super._toCDN(options, depth);
+  override _toCDN(
+    options: ToCDNOptions | undefined,
+    depth: number,
+    path?: readonly unknown[]
+  ): string {
+    if (options?.appPrefix === false) return super._toCDN(options, depth, path);
     const decision = decideTaggedAppSeqRendering(
       options,
       this.appSeqSource,
@@ -306,7 +331,7 @@ export class CborTaggedEpochDtExt extends CborTag {
         this.appSeqEncodingEdits
       );
     if (decision === 'structural')
-      return super._toCDN({ ...options, appPrefix: false }, depth);
+      return super._toCDN({ ...options, appPrefix: false }, depth, path);
     const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(TAG_EPOCH)
     );
@@ -329,7 +354,7 @@ export class CborTaggedEpochDtExt extends CborTag {
           c.precision !== autoSelectFloatPrecision(c.value)
         : (c as CborUint | CborNint).encodingWidth !== undefined;
     if (innerIsNonCanonical)
-      return super._toCDN({ ...options, appPrefix: false }, depth);
+      return super._toCDN({ ...options, appPrefix: false }, depth, path);
     const epochSec = c instanceof CborFloat ? c.value : Number(c.value);
     return `${PREFIX_DT_TAGGED}'${epochToRfc3339(epochSec)}'${eiSuffix}`;
   }
@@ -355,6 +380,42 @@ export class CborTaggedEpochDtAsDateExt extends CborTaggedEpochDtExt {
       c instanceof CborFloat ? c.value * 1000 : Number(c.value) * 1000;
     return new Date(epochMs);
   }
+}
+
+/**
+ * `CborExtension.toJS()` hook shared by `dt` and `dt_as_Date`: lets `toJS()`
+ * reinterpret *any* `CborTaggedEpochDtExt` node (including the
+ * `CborTaggedEpochDtAsDateExt` subclass) as either a `number` or a `Date`,
+ * regardless of which variant produced it during parsing — see
+ * `ToJSOptions.extensions`/`itemOptions`.
+ *
+ * The `number` branch replicates `CborTag._toJS()`'s own default behaviour
+ * (honouring `stripTags`/`integerAs` and round-tripping via `Tag.set`)
+ * rather than assuming a tag wrapper is unwanted, so selecting the plain
+ * `dt` extension here for a subtree parsed with `dt_as_Date` reproduces
+ * exactly what parsing that subtree with `dt` would have produced.
+ */
+function dtToJSHook(
+  useDate: boolean
+): (
+  item: CborItem,
+  options: ReadonlyToJSNodeOptions
+) => { value: unknown } | undefined {
+  return (item, options) => {
+    if (!(item instanceof CborTaggedEpochDtExt)) return undefined;
+    const c = item.content as
+      CborEpochDtExtUint | CborEpochDtExtNint | CborEpochDtExtFloat;
+    if (useDate) {
+      const epochMs =
+        c instanceof CborFloat ? c.value * 1000 : Number(c.value) * 1000;
+      return { value: new Date(epochMs) };
+    }
+    // Read-only view (see ReadonlyToJSNodeOptions) passed straight through
+    // to a plain conversion that only ever reads it, same as `_toJS` does
+    // for its own `options` parameter elsewhere.
+    const value = c._toJS(options as ToJSOptions);
+    return { value: options.stripTags ? value : Tag.set(value, item.tag) };
+  };
 }
 
 // ─── Factory ──────────────────────────────────────────────────────────────────
@@ -390,6 +451,11 @@ export function createDtExtension(options?: {
     // ToCDNOptions.preserveAppPrefix is set, without changing the
     // returned node's class/identity (see preservedAppSeqSpelling above).
     preserveAppSeqSource: 'optional',
+
+    // Lets ToJSOptions.extensions/itemOptions select number-vs-Date output
+    // for a CborTaggedEpochDtExt node regardless of which of `dt`/
+    // `dt_as_Date` actually parsed it — see dtToJSHook.
+    toJS: dtToJSHook(useDate),
 
     parseAppString(
       prefix: string,

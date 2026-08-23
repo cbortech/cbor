@@ -79,8 +79,16 @@ export function parseHexFloat(s: string): number {
  * Convert a JS number to a normalized hex float string compatible with
  * CDN diagnostic notation.
  *
- * - Normal values: `0x1.[hex fraction]p[+-][exp]`  (e.g. `0x1.8p+0` for 1.5)
- * - Subnormal values: `0x0.[hex fraction]p-1022`
+ * - Every nonzero finite value: `0x1.[hex fraction]p[+-][exp]` (e.g.
+ *   `0x1.8p+0` for 1.5) — including a *subnormal* double, renormalized
+ *   into this same leading-`1` form rather than spelled out anchored to
+ *   its own stored field layout (`0x0.[hex fraction]p-1022`, still a
+ *   correct spelling of the same value, but needlessly longer: e.g.
+ *   `Number.MIN_VALUE` used to read `0x0.0000000000001p-1022`, equal to
+ *   but far longer than the normalized `0x1p-1074`. A hex-float literal
+ *   is just `significand * 2^exponent` — there's no reason its spelling
+ *   should vary by whether the *double* happened to run out of exponent
+ *   range, once it's just text.)
  * - Zero: `0x0p+0` / `-0x0p+0`
  * - Non-finite values (NaN, ±Infinity) are returned unchanged as EDN tokens.
  */
@@ -104,25 +112,41 @@ export function floatToHexFloat(v: number): string {
   // lo = lower 32 bits of mantissa
   const mantLo = lo;
 
-  // Format mantissa as 13 hex digits (52 bits / 4), strip trailing zeros
-  const hexMant =
-    mantHi.toString(16).padStart(5, '0') + mantLo.toString(16).padStart(8, '0');
-  const trimmed = hexMant.replace(/0+$/, '');
-  const mantPart = trimmed === '' ? '' : `.${trimmed}`;
-
-  let intPart: string;
+  let mantissa52: bigint; // the 52 fraction bits that go after "1."
   let exp: number;
   if (biasedExp === 0) {
-    // Subnormal: value = 0.[mantissa] * 2^-1022
-    intPart = '0';
-    exp = -1022;
+    // Subnormal: value = 0.[52-bit mantissa] * 2^-1022, with no implicit
+    // leading 1 of its own. Renormalize by finding the mantissa's own
+    // leading set bit (`mantHi`/`mantLo` can't both be zero here — that
+    // combination, with `biasedExp === 0`, would mean `abs === 0`,
+    // already returned above) and shifting it up to become the implicit
+    // "1", the same renormalization step CPU hardware performs when it
+    // promotes a subnormal operand.
+    const mantissa = (BigInt(mantHi) << 32n) | BigInt(mantLo);
+    const bitLength = mantissa.toString(2).length; // 1..52
+    const leadingBit = 1n << BigInt(bitLength - 1);
+    mantissa52 = (mantissa - leadingBit) << BigInt(52 - (bitLength - 1));
+    // value = (leadingBit + r)/2^52 * 2^-1022, with leadingBit = 2^(bitLength-1)
+    // and r = mantissa - leadingBit — factor out leadingBit/2^52 to land on
+    // the normalized `1.[mantissa52/2^52] * 2^exp` form: exp is the *true*
+    // exponent of that leading bit, `bitLength - 1 - 52 - 1022`, not just
+    // `bitLength - 1 - 1022` (that's `2^-1022`'s own exponent, before
+    // dividing by the mantissa field's `2^52` scale — still needed here,
+    // unlike the normal branch below, whose `biasedExp - 1023` already *is*
+    // the final exponent by definition of the bias).
+    exp = bitLength - 1075;
   } else {
-    // Normal: value = 1.[mantissa] * 2^(biasedExp-1023)
-    intPart = '1';
+    // Normal: value = 1.[52-bit mantissa] * 2^(biasedExp-1023)
+    mantissa52 = (BigInt(mantHi) << 32n) | BigInt(mantLo);
     exp = biasedExp - 1023;
   }
 
+  // Format mantissa as 13 hex digits (52 bits / 4), strip trailing zeros
+  const hexMant = mantissa52.toString(16).padStart(13, '0');
+  const trimmed = hexMant.replace(/0+$/, '');
+  const mantPart = trimmed === '' ? '' : `.${trimmed}`;
+
   const expStr = exp >= 0 ? `+${exp}` : `${exp}`;
-  const result = `0x${intPart}${mantPart}p${expStr}`;
+  const result = `0x1${mantPart}p${expStr}`;
   return neg ? `-${result}` : result;
 }
