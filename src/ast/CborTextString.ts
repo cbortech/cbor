@@ -98,7 +98,8 @@ export class CborTextString extends CborItem {
 
   override _isMultiWordText(
     _options: ToCDNOptions | undefined,
-    _strict = true
+    _strict = true,
+    _path?: readonly unknown[]
   ): boolean {
     return isMultiWordText(this.value);
   }
@@ -107,7 +108,11 @@ export class CborTextString extends CborItem {
     writer.writeTextString(MT_TEXT, this.value, this.encodingWidth);
   }
 
-  _toCDN(options: ToCDNOptions | undefined, depth: number): string {
+  _toCDN(
+    options: ToCDNOptions | undefined,
+    depth: number,
+    _path?: readonly unknown[]
+  ): string {
     const suffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(BigInt(textEncoder.encode(this.value).length))
     );

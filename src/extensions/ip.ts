@@ -98,8 +98,13 @@ function expandToFull(truncated: Uint8Array, fullLen: number): Uint8Array {
  * Bare IP address byte string whose toCDN() emits ip'…' notation.
  */
 export class CborIpExt extends CborByteString {
-  override _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
-    if (options?.appPrefix === false) return super._toCDN(options, _depth);
+  override _toCDN(
+    options: ToCDNOptions | undefined,
+    _depth: number,
+    path?: readonly unknown[]
+  ): string {
+    if (options?.appPrefix === false)
+      return super._toCDN(options, _depth, path);
     const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(BigInt(this.value.length))
     );
@@ -133,8 +138,12 @@ export class CborIpPrefixExt extends CborArray {
     this._isV4 = isV4;
   }
 
-  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    if (options?.appPrefix === false) return super._toCDN(options, depth);
+  override _toCDN(
+    options: ToCDNOptions | undefined,
+    depth: number,
+    path?: readonly unknown[]
+  ): string {
+    if (options?.appPrefix === false) return super._toCDN(options, depth, path);
     const decision = decideTaggedAppSeqRendering(
       options,
       this.appSeqSource,
@@ -168,8 +177,12 @@ export class CborTaggedIpExt extends CborTag {
     super(tag, content);
   }
 
-  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    if (options?.appPrefix === false) return super._toCDN(options, depth);
+  override _toCDN(
+    options: ToCDNOptions | undefined,
+    depth: number,
+    path?: readonly unknown[]
+  ): string {
+    if (options?.appPrefix === false) return super._toCDN(options, depth, path);
     const decision = decideTaggedAppSeqRendering(
       options,
       this.appSeqSource,
@@ -189,7 +202,7 @@ export class CborTaggedIpExt extends CborTag {
     // / CborUint) never self-switches on `appPrefix`, so no need to force
     // it false here — doing so would also force hex byte-string encoding
     // (see CborByteString._toCDN), overriding `bstrEncoding`/`sqstr`.
-    if (decision === 'structural') return super._toCDN(options, depth);
+    if (decision === 'structural') return super._toCDN(options, depth, path);
     if (decision === 'adjusted') {
       const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
         canonicalEncodingWidth(this.tag)
@@ -207,7 +220,8 @@ export class CborTaggedIpExt extends CborTag {
     if (c instanceof CborByteString) {
       // IP'...'_N only encodes the tag's width. If the inner byte string uses a
       // non-canonical length header, fall back to generic tag notation to preserve it.
-      if (c.encodingWidth !== undefined) return super._toCDN(options, depth);
+      if (c.encodingWidth !== undefined)
+        return super._toCDN(options, depth, path);
       const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
         canonicalEncodingWidth(this.tag)
       );
@@ -225,7 +239,7 @@ export class CborTaggedIpExt extends CborTag {
         (c.items[0] as CborUint).encodingWidth !== undefined ||
         (c.items[1] as CborByteString).encodingWidth !== undefined
       )
-        return super._toCDN(options, depth);
+        return super._toCDN(options, depth, path);
       const prefixLen = Number((c.items[0] as CborUint).value);
       const full = expandToFull((c.items[1] as CborByteString).value, fullLen);
       const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
@@ -233,7 +247,7 @@ export class CborTaggedIpExt extends CborTag {
       );
       return `${PREFIX_IP_TAGGED}'${formatAddress(full)}/${prefixLen}'${eiSuffix}`;
     }
-    return super._toCDN(options, depth);
+    return super._toCDN(options, depth, path);
   }
 }
 

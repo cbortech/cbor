@@ -637,8 +637,12 @@ function criItemsToUri(items: readonly CborItem[]): string {
  * Falls back to generic array notation if the content cannot be expressed as a URI.
  */
 export class CborCriExt extends CborArray {
-  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    if (options?.appPrefix === false) return super._toCDN(options, depth);
+  override _toCDN(
+    options: ToCDNOptions | undefined,
+    depth: number,
+    path?: readonly unknown[]
+  ): string {
+    if (options?.appPrefix === false) return super._toCDN(options, depth, path);
     const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
       canonicalEncodingWidth(BigInt(this.items.length))
     );
@@ -659,7 +663,7 @@ export class CborCriExt extends CborArray {
     try {
       return `${PREFIX_CRI}'${criItemsToUri(this.items)}'${eiSuffix}`;
     } catch {
-      return super._toCDN(options, depth);
+      return super._toCDN(options, depth, path);
     }
   }
 }
@@ -673,8 +677,12 @@ export class CborTaggedCriExt extends CborTag {
     super(TAG_CRI, content);
   }
 
-  override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
-    if (options?.appPrefix === false) return super._toCDN(options, depth);
+  override _toCDN(
+    options: ToCDNOptions | undefined,
+    depth: number,
+    path?: readonly unknown[]
+  ): string {
+    if (options?.appPrefix === false) return super._toCDN(options, depth, path);
     const decision = decideTaggedAppSeqRendering(
       options,
       this.appSeqSource,
@@ -693,13 +701,13 @@ export class CborTaggedCriExt extends CborTag {
     // Like dt's content classes, cri's content (CborCriExt) re-switches to
     // its own app-string notation unless `appPrefix` is forced false here.
     if (decision === 'structural')
-      return super._toCDN({ ...options, appPrefix: false }, depth);
+      return super._toCDN({ ...options, appPrefix: false }, depth, path);
     try {
       const inner = this.content as CborArray;
       // CRI'...'_N only encodes the tag's width. If the inner array uses a
       // non-canonical count header, fall back to generic tag notation to preserve it.
       if (inner.encodingWidth !== undefined)
-        return super._toCDN(options, depth);
+        return super._toCDN(options, depth, path);
       const eiSuffix = resolveEiSuffix(options, this.encodingWidth, () =>
         canonicalEncodingWidth(TAG_CRI)
       );
@@ -713,7 +721,7 @@ export class CborTaggedCriExt extends CborTag {
         );
       return `${PREFIX_CRI_TAGGED}'${criItemsToUri(inner.items)}'${eiSuffix}`;
     } catch {
-      return super._toCDN(options, depth);
+      return super._toCDN(options, depth, path);
     }
   }
 }

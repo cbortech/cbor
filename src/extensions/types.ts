@@ -11,7 +11,11 @@
 // Type-only import avoids a runtime circular chain while giving API Extractor
 // the real CborItem type: extensions/types → ast/CborItem → types → extensions/types.
 import type { CborItem } from '../ast/CborItem';
-import type { FromCBOROptions, FromJSOptions } from '../types';
+import type {
+  FromCBOROptions,
+  FromJSOptions,
+  ReadonlyToJSNodeOptions,
+} from '../types';
 import type { EncodingWidth } from '../cbor/encode';
 
 /**
@@ -147,4 +151,45 @@ export interface CborExtension {
    * (e.g. `value is Date`) for better static type inference at the call site.
    */
   isJSType?(value: unknown): boolean;
+
+  /**
+   * Called during `toJS()` for every node, before that node's own default
+   * conversion, when this extension is listed in `ToJSOptions.extensions`.
+   * Return `undefined` to fall through to the next extension (then, if none
+   * claim the node, its own default conversion). Typically checks the
+   * node's class/shape (e.g. `item instanceof CborTaggedEpochDtExt`) rather
+   * than a tag number, since app-string forms without a wrapping tag (e.g.
+   * `dt'...'`) never reach `parseTag`-style tag-number dispatch either.
+   *
+   * The result is wrapped in `{ value }` — rather than returned directly —
+   * so a legitimate conversion result of `undefined` (CBOR `undefined`,
+   * simple 23) can be distinguished from "this extension doesn't handle
+   * this node".
+   *
+   * `options` never carries a `reviver` — its type is
+   * `ReadonlyToJSNodeOptions`, not `ToJSOptions` — so this hook has no way
+   * to make its result depend on whether one is present. That matters
+   * because `CborArray`/`CborMap.toObject`, when a `reviver` *is* present
+   * elsewhere in the call, convert each child more than once: once (with
+   * `reviver` itself stripped, though `itemOptions`/`extensions` stay
+   * active) to pre-populate a holder visible to an *earlier* sibling's own
+   * reviver call as `this[j]`, and once more, for real, to compute the
+   * value the container actually keeps. This hook is offered each of those
+   * conversions independently — once per visit, not deduplicated across
+   * them — precisely so that a `this[j]` observation reflects this hook's
+   * conversion (e.g. a `Date`) rather than the node's un-converted default.
+   * `options.extensions`, if present, is likewise a fresh copy each call —
+   * mutating it in place has no effect elsewhere.
+   * A deeply nested structure can multiply this further: a container
+   * several levels down may run its own such pre-population pass while
+   * itself sitting inside an *outer* container's pre-population pass, so
+   * the same node can in principle be offered to this hook more than
+   * twice. Whatever this hook returns for one visit only ever affects that
+   * visit's own value; reviving of the value a *container* holds still
+   * happens afterwards, exactly once per visit, in that container itself.
+   */
+  toJS?(
+    item: CborItem,
+    options: ReadonlyToJSNodeOptions
+  ): { value: unknown } | undefined;
 }

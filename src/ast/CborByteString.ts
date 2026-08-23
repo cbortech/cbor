@@ -120,7 +120,8 @@ export class CborByteString extends CborItem {
    */
   override _isMultiWordText(
     options: ToCDNOptions | undefined,
-    _strict = true
+    _strict = true,
+    _path?: readonly unknown[]
   ): boolean {
     return isMultiWordByteString(this.value, options?.sqstr);
   }
@@ -130,7 +131,11 @@ export class CborByteString extends CborItem {
     writer.writeBytes(this.value);
   }
 
-  _toCDN(options: ToCDNOptions | undefined, _depth: number): string {
+  _toCDN(
+    options: ToCDNOptions | undefined,
+    _depth: number,
+    _path?: readonly unknown[]
+  ): string {
     const indentStr = resolveIndent(options);
     if (
       options?.preserveConcatenation &&
