@@ -1,5 +1,6 @@
 import type { ToCDNOptions, ToCBOROptions, ToJSOptions } from '../types';
-import { CborItem } from './CborItem';
+import { CborItem, needsItemDispatch, ROOT_OCCURRENCE } from './CborItem';
+import type { Occurrence } from './CborItem';
 import type { CborWriter } from '../cbor/encode';
 import {
   isMultiWordRenderedLiteral,
@@ -76,7 +77,21 @@ export class CborAppSeqResult extends CborItem {
     return this.inner._toCDN(options, depth);
   }
 
-  _toJS(options?: ToJSOptions): unknown {
-    return this.inner._toJS(options);
+  _toJS(
+    options?: ToJSOptions,
+    path?: readonly unknown[],
+    occurrence?: Occurrence
+  ): unknown {
+    // Transparent wrapper — the inner item shares this wrapper's own path
+    // (see ItemContext.path) and its own cache-matching identity (see
+    // Occurrence) unchanged.
+    return needsItemDispatch(options)
+      ? this.inner._toJSChild(
+          options,
+          path ?? [],
+          occurrence ?? ROOT_OCCURRENCE,
+          { parent: this }
+        )
+      : this.inner._toJS(options);
   }
 }

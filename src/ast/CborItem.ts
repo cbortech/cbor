@@ -8,6 +8,8 @@ import type {
   CborComments,
   DecodeWarning,
   ParseWarning,
+  ItemContext,
+  ReadonlyToJSNodeOptions,
 } from '../types';
 import { CBOR_OMIT } from '../types';
 import {
@@ -103,6 +105,305 @@ function resolveDeprecatedAppPrefixAliases(
     preserveAppPrefix: options.preserveAppPrefix ?? options.preserveAppSequence,
     appPrefix: options.appPrefix ?? options.appStrings,
   };
+}
+
+/**
+ * @internal
+ * Shared, frozen empty path passed as the default `path` argument to
+ * `_toJS()`/`_toJSChild()` so that not using `itemOptions` never allocates a
+ * path array.
+ */
+const EMPTY_PATH: readonly unknown[] = Object.freeze([]);
+
+/**
+ * @internal
+ * Cheap upfront check for whether per-node option/extension resolution is
+ * needed at all for a given `toJS()` options object. Container nodes use
+ * this to choose between the plain `child._toJS(options)` recursion (when
+ * `false`, identical cost to before `itemOptions`/`extensions` existed) and
+ * `child._toJSChild(options, path, ctx)` (when `true`).
+ */
+export function needsItemDispatch(options: ToJSOptions | undefined): boolean {
+  return !!(options?.itemOptions || options?.extensions?.length);
+}
+
+/**
+ * @internal
+ * Options for a reviver-driven container's "raw" structural pre-population
+ * pass (see `CborArray`/`CborMap.toObject`) — `reviver` removed, everything
+ * else (including `itemOptions`/`extensions`) left as-is.
+ *
+ * This pass's output is never returned to the caller as the final result —
+ * every position it computes is unconditionally overwritten by the *real*
+ * (revived) pass's own result before `toJS()` returns — but it is not
+ * write-only scaffolding either: a `reviver` reads it directly, as `this[j]`
+ * for a not-yet-processed sibling `j`, while deciding how to revive an
+ * *earlier* sibling (matching `JSON.parse`'s own reviver contract, which
+ * this replicates). That value must reflect `itemOptions`/`extensions`
+ * exactly as the real pass would — e.g. an `integerAs: 'bigint'` override
+ * for position `j` — or a reviver reading `this[j]` would see the wrong
+ * type. So `itemOptions`/`extensions` stay active here, unlike `reviver`
+ * itself.
+ *
+ * Running dispatch during this pass is safe only because callers building
+ * a child's occurrence for it — `CborArray`/`CborMap.toObject` — insert
+ * `RAW_PASS_MARKER` into that occurrence (see `Occurrence`), so its
+ * resolutions are filed under a different `DispatchCache` key than the
+ * real pass's and can never be reused *by* the real pass, however many
+ * ancestor levels apart the two passes are. That distinction matters for
+ * more than consistency — a composite (non-scalar) map key is itself
+ * revived differently between the two passes (this pass leaves its own
+ * nested content entirely unrevived, matching `this[j]`'s contract above;
+ * the real pass revives it normally), so a value node whose
+ * `ItemContext.path` is built from that key's converted JS value would
+ * otherwise see a stale, pre-revival path if the real pass reused this
+ * pass's cached decision.
+ */
+export function withoutReviver(
+  options: ToJSOptions | undefined
+): ToJSOptions | undefined {
+  if (!options) return options;
+  return { ...options, reviver: undefined };
+}
+
+/**
+ * @internal
+ * Build the `reviver`-free, `extensions`-copied view of `options` handed
+ * to code that must not be able to mutate options actually in effect
+ * elsewhere in the tree — `ItemContext.options` and the `options`
+ * parameter of `CborExtension.toJS()` — see `ReadonlyToJSNodeOptions`.
+ *
+ * A plain `{ ...options, reviver: undefined }` spread (as `withoutReviver`
+ * does) is not enough here: `extensions`, if present, would still be the
+ * *same array* `options.extensions` is, so `.push()`/`.splice()`/etc. on
+ * the copy would still mutate the original in place — corrupting it for
+ * this node's own later use, its siblings, and the caller. `extensions` is
+ * the only field on `ToJSOptions` that's an ordinary mutable container, so
+ * it's the only one that needs its own copy here.
+ */
+export function toReadonlyNodeOptions(
+  options: ToJSOptions
+): ReadonlyToJSNodeOptions {
+  const { reviver: _reviver, extensions, ...rest } = options;
+  return extensions ? { ...rest, extensions: [...extensions] } : rest;
+}
+
+/**
+ * @internal
+ * Symbol-keyed slot, stashed on the top-level `toJS()` options object,
+ * holding the per-call dispatch cache (see `DispatchCache` below). Reading
+ * and writing through this indirection (rather than a typed field on
+ * `ToJSOptions`) keeps the cache out of the public option surface while
+ * still surviving every `{ ...options, ...override }` copy made while
+ * resolving `itemOptions` overrides — object spread carries own-enumerable
+ * symbol-keyed properties along with string-keyed ones — so the *same*
+ * cache reaches every node touched by one `toJS()` call, however deep.
+ */
+const kDispatchCache = Symbol('cbor.itemOptions.dispatchCache');
+
+/**
+ * @internal
+ * A node's resolved `itemOptions`/`extensions` outcome at one occurrence,
+ * cached across the duplicate visits that occurrence can receive within
+ * one `toJS()` call (see `DispatchCache`).
+ *
+ * - `'value'`: an extension's `toJS()` hook matched and fully resolved this
+ *   occurrence — reused verbatim on a later visit to the same occurrence,
+ *   since the hook never even sees `reviver` itself (see `_toJSChild`'s
+ *   stripped `hookOptions`) and so cannot have produced a result that
+ *   depends on it; only the container holding the *returned* value still
+ *   applies reviver to it, once per visit, as usual.
+ * - `'override'`: `options.itemOptions()` ran (and no extension matched);
+ *   `override` is its raw return value, applied at use time as
+ *   `{ ...options, ...override }` rather than stored pre-merged.
+ */
+type DispatchOutcome =
+  | { kind: 'value'; value: unknown }
+  | { kind: 'override'; override: Partial<ToJSOptions> | undefined };
+
+/**
+ * @internal
+ * Stable, allocation-light identifier for "this occurrence of a node" —
+ * used only to key `DispatchCache` lookups, never exposed via
+ * `ItemContext`. Built exactly the way `ItemContext.path` is (accumulated
+ * from the root, one element per container level, unchanged through a
+ * tag/app-sequence wrapper), but from *structural* container positions —
+ * an array index, or a map entry's ordinal paired with a `'k'`/`'v'` role
+ * tag (see `CborArray`/`CborMap`) — rather than from the JS values `path`
+ * is built from.
+ *
+ * That distinction matters in two ways `path` alone (or even `path` plus
+ * only the *immediate* container's identity) does not cover:
+ *
+ * - A composite (non-scalar) map key re-converts to a *new* array/object
+ *   every time its JS value is asked for, so two visits to the very same
+ *   logical position produce `path`s that are structurally equal but not
+ *   reference-equal at that segment — unusable for matching.
+ * - Two different positions can legitimately produce the very same `path`,
+ *   when duplicate map entries carry equal keys (e.g. two `"a"` entries).
+ * - A *container* (not just a leaf) can itself be a shared node instance
+ *   reused at two positions (e.g. the same `CborArray` placed at two
+ *   different indices of an outer array). Matching only on `{immediate
+ *   parent identity, local slot}` — as an earlier version of this type
+ *   did — correctly distinguishes the *container's own* two occurrences,
+ *   but not its *descendants'*: each of the shared container's children
+ *   would resolve `{parent: <the shared container>, slot: <local index>}`
+ *   identically regardless of which of the container's own two
+ *   occurrences was being converted, silently conflating them. Chaining
+ *   the full occurrence from the root — rather than just one level —
+ *   avoids this: the shared container's own two occurrences differ
+ *   earlier in the chain, so appending the same local slot to each still
+ *   yields two different full chains for its children.
+ *
+ * A local slot only needs to be unique among its own container's direct
+ * children — `CborArray` uses the element index (`number`) directly;
+ * `CborMap` prefixes a map entry's ordinal with `'k'`/`'v'`
+ * (`` `k${i}` ``/`` `v${i}` ``) so a key and its own value, which share an
+ * ordinal, don't collide.
+ *
+ * `RAW_PASS_MARKER` (see below) is the one non-structural element this
+ * chain can contain: `CborArray`/`CborMap.toObject` insert it — once,
+ * immediately before that level's own local slot — only when building a
+ * child's occurrence for their raw structural pre-population pass (see
+ * `withoutReviver`), never for the real, revived pass. That's what lets
+ * `_toJSChild`'s cache correctly tell apart the *distinct* raw-pass
+ * resolutions a single occurrence can otherwise receive when more than one
+ * ancestor level forks — e.g. the very same value node visited once
+ * through an outer container's own raw pass (before *any* ancestor has
+ * revived anything) and once more through a different, inner container's
+ * own raw pass nested inside the outer's real pass (after some ancestor,
+ * such as a composite map key, *has* already been revived) — two visits
+ * that share every structural coordinate yet must not share a cached
+ * decision, since what a reviver-sensitive value like that key converts to
+ * differs between them (see `DispatchCacheEntry`). A container that isn't
+ * itself forking (no `reviver` in its own options, so it takes the plain,
+ * unsplit path) never inserts the marker — it simply passes the
+ * occurrence chain it was given through unchanged before extending it with
+ * its own children's local slots, the same way it always did.
+ */
+export type Occurrence = readonly unknown[];
+
+/**
+ * @internal
+ * Sentinel inserted into an `Occurrence` chain by `CborArray`/
+ * `CborMap.toObject` when building a child's occurrence for their own raw
+ * structural pre-population pass — see `Occurrence`'s own note. A
+ * dedicated symbol rather than a string/number so it can never collide
+ * with an ordinary local slot value (an array index or a `` `k${i}` ``/
+ * `` `v${i}` `` map-entry tag).
+ */
+export const RAW_PASS_MARKER: unique symbol = Symbol(
+  'cbor.itemOptions.rawPass'
+);
+
+/**
+ * @internal
+ * The root value's occurrence, for `toJS()`'s own top-level `_toJSChild()`
+ * call — empty, the same way `ItemContext.path` is empty at the root. Also
+ * used by `CborTag`/`CborAppSeqResult` as a defensive fallback if `_toJS()`
+ * is ever invoked without an `occurrence` (only possible via a direct,
+ * non-`toJS()` call to `_toJS()`, which the dispatch cache never sees).
+ */
+export const ROOT_OCCURRENCE: Occurrence = Object.freeze([]);
+
+/**
+ * @internal
+ * One resolved occurrence of a node, cached under that node in
+ * `DispatchCache`. `occurrence` identifies *which* occurrence this is — a
+ * single `CborItem` instance can legitimately appear at more than one
+ * occurrence in a hand-built tree (e.g. the same shared node reused at two
+ * array indices, or as the value of two entries sharing a duplicate map
+ * key — or, transitively, as a descendant of such a shared node), and a
+ * reviver-driven container's raw structural pre-population pass (see
+ * `withoutReviver`) produces yet more distinct occurrences of its own for
+ * the very same node, via `RAW_PASS_MARKER` — see `Occurrence`. A later
+ * visit only reuses `outcome` once `occurrence` matches elementwise —
+ * seeing this node again at a *different* occurrence (a distinct
+ * `DispatchCacheEntry` in the same node's list, see `DispatchCache`)
+ * resolves fresh instead, exactly as if no caching were happening for that
+ * occurrence yet.
+ *
+ * The raw pass's own resolutions are never reused by the real, revived
+ * pass (or vice versa) purely because their occurrences differ by
+ * `RAW_PASS_MARKER` — not because of any separate bookkeeping — so
+ * `itemOptions`/an extension's `toJS()` hook can run more than once for
+ * what looks like "the same node" from the outside: once for each
+ * distinct raw pass it's reachable through (there can be more than one,
+ * nested — see `Occurrence`), plus once more for the real pass. That is
+ * the accepted cost of a raw pass's placeholder value being observable
+ * (`this[j]` for a not-yet-processed sibling `j`, inside an *earlier*
+ * sibling's own reviver call) and therefore needing to reflect
+ * `itemOptions`/`extensions` accurately rather than being computed as if
+ * neither were configured.
+ */
+interface DispatchCacheEntry {
+  occurrence: Occurrence;
+  outcome: DispatchOutcome;
+}
+
+/**
+ * @internal
+ * One `toJS()` call's dispatch cache, keyed by node identity, each node
+ * mapped to the list of occurrences resolved for it so far (almost always
+ * exactly one — see `DispatchCacheEntry`). Exists because `CborArray`/
+ * `CborMap` (with a `reviver`) and any nesting through `CborTag`/
+ * `CborAppSeqResult` wrappers each visit the *same* occurrence more than
+ * once — see `DispatchOutcome` — and `itemOptions`/an extension's `toJS()`
+ * hook must still each run exactly once per occurrence, since either may be
+ * stateful or otherwise have observable side effects.
+ */
+type DispatchCache = WeakMap<CborItem, DispatchCacheEntry[]>;
+
+function getDispatchCache(
+  options: ToJSOptions | undefined
+): DispatchCache | undefined {
+  return (options as Record<symbol, unknown> | undefined)?.[kDispatchCache] as
+    DispatchCache | undefined;
+}
+
+/**
+ * @internal
+ * Attach a fresh dispatch cache to a top-level `toJS()` call's merged
+ * options. Called once per `toJS()` invocation (never by internal
+ * recursion), so unrelated calls never share a cache.
+ */
+function withDispatchCache(options: ToJSOptions): ToJSOptions {
+  const cache: DispatchCache = new WeakMap();
+  return Object.assign({}, options, { [kDispatchCache]: cache });
+}
+
+function sameOccurrence(a: Occurrence, b: Occurrence): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/**
+ * @internal
+ * Find the cached entry (if any) for the exact occurrence among a node's
+ * previously-resolved occurrences.
+ */
+function findOccurrence(
+  entries: DispatchCacheEntry[] | undefined,
+  occurrence: Occurrence
+): DispatchCacheEntry | undefined {
+  return entries?.find((e) => sameOccurrence(e.occurrence, occurrence));
+}
+
+/**
+ * @internal
+ * Record a newly-resolved occurrence, appending to (rather than replacing)
+ * whatever occurrences of this node were already recorded — see
+ * `DispatchCacheEntry`.
+ */
+function recordOccurrence(
+  cache: DispatchCache,
+  node: CborItem,
+  entry: DispatchCacheEntry
+): void {
+  const existing = cache.get(node);
+  if (existing) existing.push(entry);
+  else cache.set(node, [entry]);
 }
 
 /**
@@ -329,7 +630,14 @@ export abstract class CborItem {
    */
   toJS(options?: ToJSOptions): unknown {
     const merged = this._defaults ? { ...this._defaults, ...options } : options;
-    const result = this._toJS(merged);
+    const result = needsItemDispatch(merged)
+      ? this._toJSChild(
+          withDispatchCache(merged!),
+          EMPTY_PATH,
+          ROOT_OCCURRENCE,
+          {}
+        )
+      : this._toJS(merged);
     if (!merged?.reviver) return result;
     const rv = merged.reviver.call({ '': result }, '', result);
     return rv === CBOR_OMIT ? undefined : rv;
@@ -435,10 +743,146 @@ export abstract class CborItem {
   /**
    * @internal
    * Core conversion logic implemented by each subclass.
-   * Container nodes apply `options.reviver` to their direct children.
+   * Container nodes apply `options.reviver` to their direct children, and
+   * must recurse via `child._toJSChild()` (never `child._toJS()` directly)
+   * so that `options.itemOptions`/`options.extensions` are honored for
+   * every node, not just the root — see `_toJSChild`.
+   * `path` is this node's own full path from the root (see `ItemContext.path`);
+   * only meaningful, and only ever non-empty, when `needsItemDispatch()` is
+   * `true` for the options in effect — leaf implementations that don't
+   * recurse can ignore it. `occurrence` is this node's own cache-matching
+   * identity (see `Occurrence`) — `CborArray`/`CborMap` build on it to
+   * derive their children's own occurrences, and `CborTag`/`CborAppSeqResult`
+   * pass it through unchanged to their content's `_toJSChild()` call; leaf
+   * implementations that don't recurse can ignore it.
    * Do not call this directly — use `toJS()` instead.
    */
-  abstract _toJS(options?: ToJSOptions): unknown;
+  abstract _toJS(
+    options?: ToJSOptions,
+    path?: readonly unknown[],
+    occurrence?: Occurrence
+  ): unknown;
+
+  /**
+   * @internal
+   * Entry point container nodes must use when recursing into a child during
+   * `toJS()`, instead of calling `child._toJS(options)` directly, so that
+   * `options.itemOptions` and `options.extensions` (toJS hooks) are honored
+   * for every node in the tree, not just the root.
+   *
+   * Guarded by `needsItemDispatch()` at each call site rather than
+   * internally, so that containers can skip straight to the cheap
+   * `child._toJS(options)` call — matching pre-`itemOptions` behavior
+   * exactly, with no extra allocation — whenever neither option is in play
+   * for the whole conversion.
+   *
+   * `path` is this child's own full path from the root, already computed by
+   * the caller: `[...parentPath, key]` for an array element or map
+   * entry/key, or the parent's own `path` unchanged for a transparent
+   * wrapper's content (`CborTag`, `CborAppSeqResult`) — see
+   * `ItemContext.path`. `ctx.key` is *not* supplied by the caller — it's
+   * derived here from `path`'s own last element (or left `undefined` for
+   * the root and for `isMapKey` visits), which is what keeps a wrapper's
+   * content correctly reporting its outer key: since `CborTag`/
+   * `CborAppSeqResult` pass their own unmodified `path` straight through,
+   * that derivation naturally recovers the tag's own key for its content
+   * too, matching `ItemContext.key`'s documented invariant of always
+   * equalling `path`'s last element outside those two exceptions.
+   *
+   * `occurrence` identifies this child's position for cache-matching
+   * purposes only (see `Occurrence`) — deliberately separate from `path`,
+   * which is built from *converted JS values* and so is unreliable for
+   * that: matching on `path` alone either double-resolves the same position
+   * (a composite map key converts to a fresh, non-`===` array/object every
+   * time) or wrongly conflates two different positions that happen to
+   * convert to equal `path`s (duplicate map entries with equal keys).
+   * `occurrence` avoids both by construction — see `Occurrence`.
+   *
+   * A single node can be visited more than once *at the same occurrence* in
+   * one `toJS()` call — a `reviver`-driven `CborArray`/`CborMap` converts
+   * each child once to pre-populate an unrevived holder and once more to
+   * compute the revived value (see their own `_toJS()`), and either pass
+   * may itself recurse through a `CborTag`/`CborAppSeqResult` wrapper that
+   * adds no occurrence of its own (content shares the wrapper's). The raw
+   * pre-population pass's own occurrence for a child is distinguished from
+   * the real pass's by `RAW_PASS_MARKER` (see `Occurrence`), so that even
+   * distinct, *nested* raw passes reaching the same node — one from an
+   * outer container's own split, one from a different, inner container's
+   * own split nested inside the outer's real pass — resolve independently
+   * rather than colliding with each other. Neither `options.itemOptions`
+   * nor an `extensions` `toJS()` hook may run more than once for the same
+   * occurrence despite all that, since either may be stateful — so the
+   * *decision* (not the reviver-dependent application of an `itemOptions`
+   * override — see `DispatchOutcome`) is cached in `options`'s dispatch
+   * cache, when one is present, and reused on a later visit to that exact
+   * occurrence. A node *reused* at more than one occurrence (the same
+   * `CborItem` instance placed at two positions in a hand-built tree)
+   * still resolves once per occurrence, never conflating two different
+   * ones.
+   */
+  _toJSChild(
+    options: ToJSOptions | undefined,
+    path: readonly unknown[],
+    occurrence: Occurrence,
+    ctx: Omit<ItemContext, 'path' | 'key' | 'options'>
+  ): unknown {
+    const cache = getDispatchCache(options);
+    const cached = findOccurrence(cache?.get(this), occurrence);
+    if (cached) {
+      if (cached.outcome.kind === 'value') return cached.outcome.value;
+      const eff = cached.outcome.override
+        ? { ...options, ...cached.outcome.override }
+        : options;
+      return this._toJS(eff, path, occurrence);
+    }
+
+    const key =
+      ctx.isMapKey || path.length === 0 ? undefined : path[path.length - 1];
+    let eff = options;
+    let override: Partial<ToJSOptions> | undefined;
+    if (options?.itemOptions) {
+      // `ctx.options` is `options` itself, read-only and with `extensions`
+      // (if any) copied — see `toReadonlyNodeOptions` — so the callback
+      // can't corrupt what this node, its siblings, or the caller see by
+      // mutating what it read. Computed fresh here (never cached) so it
+      // always reflects exactly what's in effect for *this* call, not a
+      // stale snapshot from an earlier resolution of the same occurrence.
+      override = options.itemOptions(this, {
+        ...ctx,
+        key,
+        path,
+        options: toReadonlyNodeOptions(options),
+      });
+      if (override) eff = { ...options, ...override };
+    }
+    if (eff?.extensions?.length) {
+      // Hooks never see `reviver` (see `ReadonlyToJSNodeOptions`) — not
+      // merely by convention, but because its type omits the field — so
+      // their result can never itself depend on it, which is what makes
+      // caching that result across a reviver-driven container's repeat
+      // visits sound. `extensions` is likewise copied — freshly for *each*
+      // hook, not once and shared across the loop — so one hook mutating
+      // it in place (bypassing the readonly type) can't leak into what a
+      // later hook in the same loop sees.
+      for (const ext of eff.extensions) {
+        const hooked = ext.toJS?.(this, toReadonlyNodeOptions(eff));
+        if (hooked) {
+          if (cache)
+            recordOccurrence(cache, this, {
+              occurrence,
+              outcome: { kind: 'value', value: hooked.value },
+            });
+          return hooked.value;
+        }
+      }
+    }
+    if (cache)
+      recordOccurrence(cache, this, {
+        occurrence,
+        outcome: { kind: 'override', override },
+      });
+    return this._toJS(eff, path, occurrence);
+  }
 
   /**
    * @internal

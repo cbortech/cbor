@@ -6,7 +6,13 @@ import type {
 } from '../types';
 import { CBOR_OMIT } from '../types';
 import { MapEntries } from '../mapEntries';
-import { CborItem } from './CborItem';
+import {
+  CborItem,
+  needsItemDispatch,
+  withoutReviver,
+  ROOT_OCCURRENCE,
+  RAW_PASS_MARKER,
+} from './CborItem';
 import type { AnnotatedLine } from './CborItem';
 import { CborTextString } from './CborTextString';
 import { MT_MAP, AI_INDEFINITE, BREAK_CODE } from '../cbor/constants';
@@ -167,12 +173,42 @@ export class CborMap extends CborItem {
     return lines;
   }
 
-  _toJS(options?: ToJSOptions): unknown {
+  _toJS(
+    options?: ToJSOptions,
+    path?: readonly unknown[],
+    occurrence?: readonly unknown[]
+  ): unknown {
     const reviver = options?.reviver;
+    const dispatch = needsItemDispatch(options);
+    const basePath = path ?? [];
+    const occ = occurrence ?? ROOT_OCCURRENCE;
     const toEntries = () => {
-      const result = MapEntries.from(
-        this.entries,
-        ([k, v]) => [k._toJS(options), v._toJS(options)] as [unknown, unknown]
+      const convertPair = (
+        k: CborItem,
+        v: CborItem,
+        i: number,
+        opts: ToJSOptions | undefined
+      ): [unknown, unknown] => {
+        if (!dispatch) return [k._toJS(opts), v._toJS(opts)];
+        // The key has no path segment of its own — it names the value's —
+        // so it's converted first, against the parent's own path, and its
+        // result becomes the value's path segment. The occurrence chains
+        // (unlike path) are derived purely from this map's own occurrence
+        // plus this entry's own ordinal `i`, never from the key's converted
+        // JS value — see `Occurrence`.
+        const kJs = k._toJSChild(opts, basePath, [...occ, `k${i}`], {
+          parent: this,
+          isMapKey: true,
+          keyNode: k,
+        });
+        const vJs = v._toJSChild(opts, [...basePath, kJs], [...occ, `v${i}`], {
+          parent: this,
+          keyNode: k,
+        });
+        return [kJs, vJs];
+      };
+      const result = MapEntries.from(this.entries, ([k, v], i) =>
+        convertPair(k, v, i, options)
       );
       if (!reviver) return result;
       const uOmits = options?.undefinedOmits;
@@ -186,15 +222,47 @@ export class CborMap extends CborItem {
       return result;
     };
     const toObject = () => {
+      // `rawPass` marks a call as belonging to the raw pre-population pass
+      // below — its occurrence gets `RAW_PASS_MARKER` inserted (see
+      // `Occurrence`) so it can never be reused by the real, revived pass,
+      // even indirectly through some other, more deeply nested raw pass.
+      const convertValue = (
+        k: CborItem,
+        v: CborItem,
+        key: string,
+        i: number,
+        opts: ToJSOptions | undefined,
+        rawPass: boolean
+      ) =>
+        dispatch
+          ? v._toJSChild(
+              opts,
+              [...basePath, key],
+              // Derived from this map's own occurrence plus this entry's
+              // own ordinal `i`, not from `key` (a converted JS value) —
+              // see `Occurrence`.
+              rawPass ? [...occ, RAW_PASS_MARKER, `v${i}`] : [...occ, `v${i}`],
+              { parent: this, keyNode: k }
+            )
+          : v._toJS(opts);
       // First pass: pre-populate holder with unrevived values so all sibling
       // keys are visible in `this` when reviver runs (matches JSON.parse).
-      const optNoReviver = options
-        ? { ...options, reviver: undefined }
-        : undefined;
+      // `itemOptions`/`extensions` still apply here — see `withoutReviver`
+      // — since this holder is directly observable through `this[key]`
+      // inside an earlier sibling's own reviver call, not just internal
+      // scaffolding; the `RAW_PASS_MARKER` in each value's occurrence above
+      // keeps this pass's resolutions from being reused by the real,
+      // revived pass below. When there's no reviver, this loop's result
+      // *is* the final output (see `if (!reviver) return holder` below) —
+      // `withoutReviver` is then a no-op (`reviver` was already unset), and
+      // `rawPass` is `false` so no marker is inserted, matching that this
+      // loop is not throwaway in that case.
+      const optNoReviver = withoutReviver(options);
       const holder: Record<string, unknown> = {};
-      for (const [k, v] of this.entries) {
+      for (let i = 0; i < this.entries.length; i++) {
+        const [k, v] = this.entries[i];
         const key = k instanceof CborTextString ? k.value : k.toCDN();
-        const raw = v._toJS(optNoReviver);
+        const raw = convertValue(k, v, key, i, optNoReviver, !!reviver);
         if (key === '__proto__') {
           Object.defineProperty(holder, key, {
             value: raw,
@@ -219,7 +287,7 @@ export class CborMap extends CborItem {
         const [k, v] = this.entries[i];
         const key = k instanceof CborTextString ? k.value : k.toCDN();
         if (lastIdx.get(key) !== i) continue;
-        const val = v._toJS(options);
+        const val = convertValue(k, v, key, i, options, false);
         const rv = reviver.call(holder, key, val);
         const omit =
           rv === CBOR_OMIT || (options?.undefinedOmits && rv === undefined);

@@ -1,7 +1,7 @@
 import type { ToCDNOptions, ToJSOptions, ToCBOROptions } from '../types';
-import { CborItem } from './CborItem';
+import { CborItem, needsItemDispatch, ROOT_OCCURRENCE } from './CborItem';
 import { Tag } from '../tag';
-import type { AnnotatedLine } from './CborItem';
+import type { AnnotatedLine, Occurrence } from './CborItem';
 import { MT_TAG } from '../cbor/constants';
 import {
   writeHead,
@@ -124,8 +124,22 @@ export class CborTag extends CborItem {
     return lines;
   }
 
-  _toJS(options?: ToJSOptions): unknown {
-    const value = this.content._toJS(options);
+  _toJS(
+    options?: ToJSOptions,
+    path?: readonly unknown[],
+    occurrence?: Occurrence
+  ): unknown {
+    // A tag wrapper adds no path segment — or occurrence — of its own: the
+    // content shares this tag's own path (see ItemContext.path) and its own
+    // cache-matching identity (see Occurrence) unchanged.
+    const value = needsItemDispatch(options)
+      ? this.content._toJSChild(
+          options,
+          path ?? [],
+          occurrence ?? ROOT_OCCURRENCE,
+          { parent: this }
+        )
+      : this.content._toJS(options);
     return options?.stripTags ? value : Tag.set(value, this.tag);
   }
 }

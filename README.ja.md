@@ -708,6 +708,54 @@ console.log(text);
 // DT'2026-05-06T00:00:00Z'
 ```
 
+### 項目ごとのオプション上書き
+
+`toJS()` の `itemOptions` は、各ノードが変換される直前にすべてのノードに対して呼ばれるため、
+ドキュメントの一部だけを他と異なる方法で変換できます。そのノードとその子孫に適用する
+オプションを部分的なオプションオブジェクトとして返すか、変更しない場合は `undefined` を
+返します。`ctx.path` は配列インデックスとマップキーからなる列でノードを識別し、
+ルートでは空になります。
+
+同じノードに対して複数回呼ばれることがあります —— `reviver` も併用している場合、配列や
+object-mode の map は各子要素を少なくとも2回変換します。1回は、先行する兄弟要素自身の
+`reviver` 呼び出しから見える値を構築するため、もう1回は実際に保持される値を計算するため
+です。このコールバックは `node`/`ctx` のみに依存する純粋関数として書き、呼ばれる回数には
+依存しないようにしてください。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const item = CBOR.fromCDN(
+  `{"date1": DT'2026-08-23T00:00:00Z', "date2": DT'2026-08-23T00:00:00Z'}`
+);
+
+const value = item.toJS({
+  stripTags: true,
+  itemOptions: (_node, ctx) =>
+    ctx.path.length === 1 && ctx.path[0] === 'date1'
+      ? { extensions: [CBOR.dt_as_Date] }
+      : undefined,
+});
+
+console.log(value);
+// { date1: Date(...), date2: 1787443200 }
+```
+
+`ToJSOptions` の `extensions` は `itemOptions` なしでも単体で機能し、ツリー全体を
+再解釈できます —— デフォルトの `dt` extension でパースされた値も、`toJS()` に
+`extensions` を渡すことで `dt_as_Date`（またはその逆）に変換し直せます。
+
+`ctx.options` には、そのノードにおいて現在有効なオプション —— ルートのオプションに
+祖先の `itemOptions` がすでに返した上書きをマージしたもの —— が渡されます。これにより、
+コールバックはオプションを丸ごと置き換えるのではなく、現在の値を土台にして組み立てる
+ことができます。
+
+```ts
+itemOptions: (_node, ctx) => ({
+  extensions: [...(ctx.options.extensions ?? []), CBOR.dt_as_Date],
+});
+```
+
 ## 文字列連結と不定長文字列
 
 draft-ietf-cbor-edn-literals-27(§3.5 / §3.6)の app-extension

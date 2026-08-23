@@ -719,6 +719,55 @@ console.log(text);
 // DT'2026-05-06T00:00:00Z'
 ```
 
+### Per-item option overrides
+
+`itemOptions` on `toJS()` is called for every node before it is converted, so
+one part of a document can be converted differently from the rest. Return a
+partial options object to override options for that node and its descendants,
+or `undefined` to leave them unchanged. `ctx.path` identifies the node as a
+sequence of array indices and map keys, empty at the root.
+
+It can be called more than once for the same node — when a `reviver` is also
+present, arrays and object-mode maps convert each child at least twice: once
+to build a value visible to an earlier sibling's own `reviver` call, and once
+more for the value that's actually kept. Write it as a pure function of
+`node`/`ctx`, not relying on how many times it runs.
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const item = CBOR.fromCDN(
+  `{"date1": DT'2026-08-23T00:00:00Z', "date2": DT'2026-08-23T00:00:00Z'}`
+);
+
+const value = item.toJS({
+  stripTags: true,
+  itemOptions: (_node, ctx) =>
+    ctx.path.length === 1 && ctx.path[0] === 'date1'
+      ? { extensions: [CBOR.dt_as_Date] }
+      : undefined,
+});
+
+console.log(value);
+// { date1: Date(...), date2: 1787443200 }
+```
+
+`extensions` on `ToJSOptions` also works on its own, without `itemOptions`, to
+reinterpret an entire tree: a value parsed with the default `dt` extension can
+still be converted with `dt_as_Date` (or vice versa) by passing `extensions`
+directly to `toJS()`.
+
+`ctx.options` carries the options already in effect for the node — the root
+options merged with whatever an ancestor's `itemOptions` already returned —
+so a callback can build on the current value of an option instead of
+overriding it outright:
+
+```ts
+itemOptions: (_node, ctx) => ({
+  extensions: [...(ctx.options.extensions ?? []), CBOR.dt_as_Date],
+});
+```
+
 ## String Concatenation and Indefinite-Length Strings
 
 The `t1` / `b1` / `ilbs` / `ilts` app-extensions from
