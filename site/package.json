@@ -15,17 +15,17 @@
   "dependencies": {
     "@cbortech/cbor": "file:..",
     "@cbortech/hash-extension": "^0.27.0",
-    "@codemirror/commands": "^6.10.4",
+    "@codemirror/commands": "^6.11.0",
     "@codemirror/lint": "^6.9.7",
     "@codemirror/state": "^6.7.1",
-    "@codemirror/view": "^6.43.8"
+    "@codemirror/view": "^6.43.9"
   },
   "devDependencies": {
-    "@vitest/browser": "^4.1.10",
-    "@vitest/browser-playwright": "^4.1.10",
+    "@vitest/browser": "^4.1.11",
+    "@vitest/browser-playwright": "^4.1.11",
     "playwright": "^1.62.1",
     "typescript": "^7.0.2",
-    "vite": "^8.2.1",
-    "vitest": "^4.1.10"
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   }
 }
