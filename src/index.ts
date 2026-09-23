@@ -62,6 +62,23 @@ export { cri } from './extensions/cri';
 export { t1, b1 } from './extensions/concat';
 export { ilbs, ilts } from './extensions/ilstrings';
 
+// `e'...'` external-reference extension (draft-ietf-cbor-edn-e-ref) — unlike
+// the other bundled extensions, this one is schema-specific; build one with
+// `createERefExtension(schema)`. `CBOR.fromCDN()`/`fromCBOR()`/`fromJS()`
+// register it automatically whenever the `cddl` option is set, so most
+// callers never need either of these directly. `annotateERefKeys()` is
+// exposed for a caller that validates separately from parsing/decoding —
+// e.g. a UI that must keep converting input that doesn't match the open
+// schema instead of throwing, so it can't use the `cddl` option's own
+// validate-and-annotate behavior, but still wants `e'name'` annotation
+// applied whenever the input *does* happen to validate.
+export {
+  createERefExtension,
+  annotateERefKeys,
+  CborERefUint,
+  CborERefNint,
+} from './extensions/eref';
+
 // The default set of bundled app-extensions, for use with
 // the `builtinExtensions` option (e.g. to build a filtered subset).
 export { BUILTIN_EXTENSIONS } from './extensions/builtins';

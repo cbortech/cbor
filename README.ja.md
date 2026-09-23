@@ -1251,6 +1251,7 @@ CDDL コンパイラは `@cbortech/cbor/cddl`
 - CDN (CBOR-EDN)
   - [draft-ietf-cbor-edn-literals-25](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/)
   - [draft-ietf-cbor-edn-literals-27](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/27/)
+  - [draft-ietf-cbor-edn-e-ref-03](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-e-ref/03/)
 - CDDL
   - [RFC 8610](https://www.rfc-editor.org/rfc/rfc8610)
   - [RFC 9682](https://www.rfc-editor.org/rfc/rfc9682)
@@ -1267,6 +1268,9 @@ CDDL コンパイラは `@cbortech/cbor/cddl`
   `#6.<type>` / `#7.<type>` head number に対応しています。コメントの `PCHAR`
   検証、単独 CR の改行、EOF で終わるコメントは、collected ABNF よりも意図的に
   寛容に受理します。
+- draft-ietf-cbor-edn-e-ref の `e'...'` application extension を試験的に
+  サポートしています(draft本文より狭いスコープで、整数リテラルに直接束縛された
+  名前のみ対応 — 文字列定数や、他の定数への別名参照は解決できません)。
 
 ## ライセンス
 

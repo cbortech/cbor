@@ -672,6 +672,13 @@ const MISSING_EXTENSION_HINTS: ReadonlyMap<string, string> = new Map([
   ['ilbs', builtinDisabledHint('ilbs')],
   ['ilts', builtinDisabledHint('ilts')],
   ['float', builtinDisabledHint('float')],
+  // `e'...'` (draft-ietf-cbor-edn-e-ref) needs a CDDL model to resolve names
+  // against; it is registered automatically whenever the `cddl` option is
+  // supplied, so this is only reached without one.
+  [
+    'e',
+    "pass the 'cddl' option (a compiled CddlSchema or CDDL source text) — e'...' external references are enabled automatically whenever a CDDL schema is supplied",
+  ],
 ]);
 
 /**

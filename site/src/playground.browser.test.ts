@@ -32,10 +32,24 @@ import { SAMPLES } from './samples';
 const byId = <T extends HTMLElement>(id: string): T =>
   document.getElementById(id) as T;
 
-/** Join a CodeMirror pane's rendered lines back into plain text. */
+/**
+ * Join a CodeMirror pane's rendered lines back into plain text. An empty
+ * doc's single `.cm-line` still renders a `.cm-placeholder` widget span
+ * (CodeMirror's `placeholder()` extension) — real DOM content, but not
+ * real *document* content, so it's stripped rather than read as if it
+ * were the pane's actual text (a real empty editor would otherwise be
+ * indistinguishable from one that literally contains the placeholder
+ * string).
+ */
 function cmText(hostId: string): string {
   const lines = byId(hostId).querySelectorAll('.cm-line');
-  return [...lines].map((l) => l.textContent ?? '').join('\n');
+  return [...lines]
+    .map((l) => {
+      const clone = l.cloneNode(true) as HTMLElement;
+      clone.querySelectorAll('.cm-placeholder').forEach((el) => el.remove());
+      return clone.textContent ?? '';
+    })
+    .join('\n');
 }
 
 /** Synthesize an OS-level file drop (real DataTransfer, not a file input). */
@@ -422,6 +436,12 @@ describe('playground', () => {
           .length
       ).toBeGreaterThan(0);
 
+      // e'...' groups with "Built-in", not "Additional", even though it's
+      // not a fixed CborExtension like the rest of that group — see
+      // EXTENSION_ENTRIES's own doc.
+      expect(builtinGroup.contains(byId('ext-eref'))).toBe(true);
+      expect(byId('ext-eref').closest('label')?.textContent?.trim()).toBe('e');
+
       const hashCheckbox = byId<HTMLInputElement>('ext-hash');
       expect(hashCheckbox.checked).toBe(true);
       hashCheckbox.click();
@@ -706,6 +726,341 @@ describe('playground', () => {
       expect(pane.hasAttribute('hidden')).toBe(true);
       expect(byId('cddl-status').hidden).toBe(true);
       expect(new URLSearchParams(location.search).get('cddl')).toBe('0');
+    });
+
+    test('selecting a sample that requires CDDL opens the pane and persists ?cddl=1', async () => {
+      // Starting state, left by the previous test: pane closed, ?cddl=0 —
+      // exactly the state a user who manually closed the pane earlier would
+      // be in (see the bug this guards against, below).
+      expect(byId('cddl-toggle-btn').getAttribute('aria-pressed')).toBe(
+        'false'
+      );
+      expect(new URLSearchParams(location.search).get('cddl')).toBe('0');
+
+      const eRefSample = SAMPLES.find((s) => s.requiresCddl);
+      expect(eRefSample).toBeDefined();
+      byId<HTMLSelectElement>('samples').value = eRefSample!.name;
+      byId<HTMLSelectElement>('samples').dispatchEvent(new Event('change'));
+
+      const toggle = byId('cddl-toggle-btn');
+      const pane = document.querySelector('.pane-cddl')!;
+      expect(toggle.getAttribute('aria-pressed')).toBe('true');
+      expect(pane.hasAttribute('hidden')).toBe(false);
+      // Must be persisted the same way an explicit toggle click is (not just
+      // opened in memory) — otherwise a stale ?cddl=0 from an earlier manual
+      // close would win over the schema a Share link taken right after this
+      // carries in its hash, and reloading that link would reproduce the
+      // pane closed (e'...' unresolved) instead of what was actually shown.
+      expect(new URLSearchParams(location.search).get('cddl')).toBe('1');
+
+      const status = byId('cddl-status');
+      expect(status.className).toContain('ok');
+      expect(status.textContent).toContain('valid');
+      // The e'...' external references convert cleanly once the schema is
+      // active — no missing-extension warning on the bytes side either.
+      expect(byId('bytes-status').hidden).toBe(true);
+      // Nor as a lint squiggle in the CDN editor itself — this runs its own,
+      // independent parse (see createCdnLinter()), which needs to be told
+      // about the active schema separately from the bytes-pane conversion.
+      await vi.waitFor(() => {
+        expect(
+          byId('editor').querySelector('.cm-lint-marker-warning')
+        ).toBeNull();
+      });
+
+      // A Share link taken right now must carry the schema, so a fresh load
+      // of it can reproduce this exact state (readCddlOpenParam prioritizes
+      // ?cddl= over the hash's own presence — see main.ts's initCddlPane).
+      const spy = vi.spyOn(Clipboard.prototype, 'writeText');
+      byId('share-btn').click();
+      expect(location.hash).toMatch(/^#cdn=[^&]*&cddl=/);
+      expect(spy).toHaveBeenCalledWith(location.href);
+    });
+
+    test('JS tab: schema-named keys render by name, not as MapEntries', async () => {
+      // Continues from the previous test: e-ref sample's schema active.
+      // The JS pane renders `binAst` — decoded straight from the *encoded
+      // bytes*, not the already-annotated CDN AST — so this only passes if
+      // convertCdn() itself re-annotates the binary side too (see
+      // annotateIfValid() in convert.ts); before that fix, none of the three
+      // keys were object-eligible (still plain -1/-3/-4 CborNint) and
+      // 'auto' fell back to `MapEntries [ [-1]: ... ]` instead of a plain
+      // object with the schema's own names.
+      document
+        .querySelector<HTMLButtonElement>('.mode-tabs .tab[data-mode=js]')!
+        .click();
+      // gp_enc_alg's and hkdf's own values are &(name: value) used as a
+      // *value*'s own type (a closed choice of named integer constants),
+      // not a member key — they stay the integer (10, 5) in toJS(), not
+      // the name ("AES-CCM-16-64-128", "HMAC-256-256"); see
+      // ToJSOptions.eRefKeys.
+      expect(byId('js-view').textContent).toBe(
+        '{\n' +
+          '  "group_mode": true,\n' +
+          '  "gp_enc_alg": 10,\n' +
+          '  "hkdf": 5\n' +
+          '}'
+      );
+
+      document
+        .querySelector<HTMLButtonElement>(
+          '.mode-tabs .tab[data-mode=annotated]'
+        )!
+        .click();
+    });
+
+    test("unchecking the e'...' extension makes e'hkdf' unresolved even with the schema active", async () => {
+      // Continues from the previous test: e-ref sample loaded, pane open,
+      // no squiggle. The e'...' checkbox (Extensions popover) gates
+      // createERefExtension() registration independently of whether the
+      // CDDL pane itself is open — see isERefEnabled() in ui/toolbar.ts.
+      byId('ext-opts-btn').click();
+      const erefCheckbox = byId<HTMLInputElement>('ext-eref');
+      expect(erefCheckbox.checked).toBe(true);
+      erefCheckbox.click();
+      document.body.click();
+
+      expect(byId('bytes-status').hidden).toBe(false);
+      expect(byId('bytes-status').textContent).toContain(
+        "app-string prefix 'e'"
+      );
+      await vi.waitFor(() => {
+        expect(
+          byId('editor').querySelector('.cm-lint-marker-warning')
+        ).not.toBeNull();
+      });
+
+      // Re-checking it resolves e'...' again, same as before.
+      byId('ext-opts-btn').click();
+      byId<HTMLInputElement>('ext-eref').click();
+      document.body.click();
+      expect(byId('bytes-status').hidden).toBe(true);
+      await vi.waitFor(() => {
+        expect(
+          byId('editor').querySelector('.cm-lint-marker-warning')
+        ).toBeNull();
+      });
+    });
+
+    test("Format respects the e'...' checkbox too, not just the live conversion", async () => {
+      // Continues from the previous test: e-ref sample's schema active,
+      // e'...' checkbox re-checked. formatCdnText() (main.ts's format-btn
+      // handler) used to always pass the library's own `cddl` option
+      // directly, which registers/annotates e'...' unconditionally — this
+      // exercises that it now goes through the same isERefEnabled() gate
+      // convertCdn()/bytesToCdnText() already use.
+      await uploadTo(
+        'cdn-import-input',
+        new File(['{-1: 5}'], 'bare.cdn', { type: 'text/plain' })
+      );
+      await vi.waitFor(() => expect(cmText('editor')).toContain('-1'));
+
+      byId('ext-opts-btn').click();
+      byId<HTMLInputElement>('ext-eref').click();
+      document.body.click();
+
+      byId('format-btn').click();
+      // Not auto-annotated to e'hkdf' — e'...' is off, even though the
+      // schema is still active and would otherwise annotate it.
+      expect(cmText('editor').replace(/\s+/g, '')).toBe('{-1:5}');
+
+      byId('ext-opts-btn').click();
+      byId<HTMLInputElement>('ext-eref').click();
+      document.body.click();
+
+      byId('format-btn').click();
+      expect(cmText('editor').replace(/\s+/g, '')).toBe(
+        `{e'hkdf':e'HMAC-256-256'}`
+      );
+    });
+
+    test('closing the CDDL pane brings back the missing-extension squiggle', async () => {
+      // Continues from the previous test: e-ref sample loaded, pane open,
+      // no squiggle. Closing it should make e'hkdf' unresolved again, in
+      // the editor's own lint pass just as much as in the bytes pane.
+      byId('cddl-toggle-btn').click();
+      expect(byId('cddl-toggle-btn').getAttribute('aria-pressed')).toBe(
+        'false'
+      );
+      await vi.waitFor(() => {
+        expect(
+          byId('editor').querySelector('.cm-lint-marker-warning')
+        ).not.toBeNull();
+      });
+      expect(byId('bytes-status').hidden).toBe(false);
+      expect(byId('bytes-status').textContent).toContain(
+        "app-string prefix 'e'"
+      );
+
+      // Reopening restores both.
+      byId('cddl-toggle-btn').click();
+      await vi.waitFor(() => {
+        expect(
+          byId('editor').querySelector('.cm-lint-marker-warning')
+        ).toBeNull();
+      });
+      expect(byId('bytes-status').hidden).toBe(true);
+    });
+
+    test("Edit tab: typing bytes for a schema-named key annotates it as e'group_mode' in the CDN pane", async () => {
+      // Continues from the previous test: e-ref sample's schema active.
+      // Typed hex decodes to {-3: true} — the bare integer key this same
+      // schema names, with a plain bool *value* (group_mode's own value
+      // type isn't an enum, so only the key annotates here — see the next
+      // test for a value that does) — and bytesToCdnText() (unlike the
+      // read-only Annotated/Hex views, which deliberately render raw values
+      // via appPrefix: false) must annotate it the same way the CDN pane's
+      // own conversion does. The CDN editor already contains "e'group_mode'"
+      // from the still-loaded sample text itself, so the wait below polls
+      // for the exact expected result rather than a loose substring match
+      // that the stale content would already satisfy.
+      document
+        .querySelector<HTMLButtonElement>('.mode-tabs .tab[data-mode=edit]')!
+        .click();
+      await page
+        .elementLocator(document.querySelector('#bytes-edit-host .cm-content')!)
+        .fill('a1 22 f5');
+      // Normalized against whitespace: an earlier CDN-pane test may have
+      // left the Compact/Pretty indent option on Pretty, and this test
+      // isn't about which one — only that the value itself annotated.
+      await vi.waitFor(
+        () =>
+          expect(cmText('editor').replace(/\s+/g, '')).toBe(
+            `{e'group_mode':true}`
+          ),
+        { timeout: 2000 }
+      );
+
+      document
+        .querySelector<HTMLButtonElement>(
+          '.mode-tabs .tab[data-mode=annotated]'
+        )!
+        .click();
+    });
+
+    test("Edit tab: typing bytes for a schema-named value (a closed &(name: value) choice) annotates it as e'HMAC-256-256' too", async () => {
+      // Continues from the previous test: e-ref sample's schema active.
+      // Typed hex decodes to {-1: 5} — hkdf's own value type is
+      // &(HMAC-256-64: 4, HMAC-256-256: 5, …), a closed choice of named
+      // integer constants, so annotateERefKeys() labels the *value* too,
+      // not just the key — see eRefValueFor() in extensions/eref.ts.
+      document
+        .querySelector<HTMLButtonElement>('.mode-tabs .tab[data-mode=edit]')!
+        .click();
+      await page
+        .elementLocator(document.querySelector('#bytes-edit-host .cm-content')!)
+        .fill('a1 20 05');
+      await vi.waitFor(
+        () =>
+          expect(cmText('editor').replace(/\s+/g, '')).toBe(
+            `{e'hkdf':e'HMAC-256-256'}`
+          ),
+        { timeout: 2000 }
+      );
+
+      document
+        .querySelector<HTMLButtonElement>(
+          '.mode-tabs .tab[data-mode=annotated]'
+        )!
+        .click();
+    });
+
+    test('toggling CDDL while the Edit tab is active reconverts without corrupting the typed hex', async () => {
+      // Continues from the previous test: e-ref sample's schema active.
+      // Stay on the Edit tab (not the previous test's own ending state —
+      // re-establish it explicitly so this test doesn't depend on that).
+      document
+        .querySelector<HTMLButtonElement>('.mode-tabs .tab[data-mode=edit]')!
+        .click();
+      const hex = 'a1 20 05';
+      await page
+        .elementLocator(document.querySelector('#bytes-edit-host .cm-content')!)
+        .fill(hex);
+      await vi.waitFor(() =>
+        expect(cmText('editor').replace(/\s+/g, '')).toBe(
+          `{e'hkdf':e'HMAC-256-256'}`
+        )
+      );
+      expect(cmText('bytes-edit-host')).toBe(hex);
+      // Explicitly blurred (not just "some other element gets clicked
+      // next") — the corruption this test guards against only happens
+      // while hexEditEditor.hasFocus is false (see renderBytesPane()'s own
+      // `mode === 'edit' && !hexEditEditor.hasFocus` guard), and a plain
+      // DOM .click() below isn't guaranteed to shift focus as reliably as
+      // a real user click would.
+      (document.activeElement as HTMLElement | null)?.blur();
+
+      // Closing the schema: the CDN side falls back to cpa999 (same as any
+      // other unresolved app-extension without a registered handler), but
+      // the reader's own typed hex must survive completely unchanged —
+      // this is *their* input, not a reflection of whatever the CDN side
+      // currently makes of it.
+      byId('cddl-toggle-btn').click();
+      await vi.waitFor(() =>
+        expect(cmText('editor').replace(/\s+/g, '')).toBe(`{-1:5}`)
+      );
+      expect(cmText('bytes-edit-host')).toBe(hex);
+
+      // Reopening restores the annotation — still without touching the hex.
+      byId('cddl-toggle-btn').click();
+      await vi.waitFor(() =>
+        expect(cmText('editor').replace(/\s+/g, '')).toBe(
+          `{e'hkdf':e'HMAC-256-256'}`
+        )
+      );
+      expect(cmText('bytes-edit-host')).toBe(hex);
+
+      document
+        .querySelector<HTMLButtonElement>(
+          '.mode-tabs .tab[data-mode=annotated]'
+        )!
+        .click();
+    });
+
+    test('emptying the Edit tab, then immediately toggling CDDL, leaves both it and the CDN pane empty', async () => {
+      // Continues from the previous test: e-ref sample's schema active.
+      document
+        .querySelector<HTMLButtonElement>('.mode-tabs .tab[data-mode=edit]')!
+        .click();
+      const hexLocator = page.elementLocator(
+        document.querySelector('#bytes-edit-host .cm-content')!
+      );
+      await hexLocator.fill('a1 20 05');
+      await vi.waitFor(() =>
+        expect(cmText('editor').replace(/\s+/g, '')).toBe(
+          `{e'hkdf':e'HMAC-256-256'}`
+        )
+      );
+
+      // Empty is a legitimate value of the reader's own input, same as any
+      // other — toggle right away, *before* the 300ms debounced
+      // reconversion (convertHexEditText) has a chance to run, so this
+      // exercises the exact race: the CDN editor still holds its old,
+      // non-empty text at the moment onSchemaChanged's own update() call
+      // reconverts it under the new schema state.
+      await hexLocator.fill('');
+      (document.activeElement as HTMLElement | null)?.blur();
+      byId('cddl-toggle-btn').click();
+
+      // Checked synchronously, not via vi.waitFor: onSchemaChanged's own
+      // restore-and-reconvert is entirely synchronous (no debounce), so a
+      // correct fix leaves both panes empty the instant click() returns.
+      // Polling instead would also pass by coincidence once the *separate*,
+      // unrelated ~500ms debounce chain (convertHexEditText's own 300ms +
+      // the CDN editor's onDocChanged 200ms) eventually clears both panes
+      // on its own — masking exactly the bug this guards against, which is
+      // about that immediate synchronous instant, not eventual convergence.
+      expect(cmText('bytes-edit-host')).toBe('');
+      expect(cmText('editor')).toBe('');
+
+      // Reopen — later tests in this describe (if any were added after this
+      // one) shouldn't inherit a closed pane from this test specifically.
+      byId('cddl-toggle-btn').click();
+      document
+        .querySelector<HTMLButtonElement>(
+          '.mode-tabs .tab[data-mode=annotated]'
+        )!
+        .click();
     });
   });
 });

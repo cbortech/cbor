@@ -30,6 +30,8 @@ export type { CompileOptions } from './schema';
 export { parseCDDL } from './parser';
 export type { ParseCddlResult } from './parser';
 export { PRELUDE_CDDL, getPreludeRules } from './prelude';
+export { getERefTables } from './eref';
+export type { ERefTables } from './eref';
 export { positionAt } from './position';
 export type { CddlFormatOptions } from './writer';
 export type {
