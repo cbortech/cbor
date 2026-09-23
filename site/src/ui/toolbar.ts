@@ -1,5 +1,5 @@
 /**
- * Wiring for the static chrome: theme toggle, copy buttons, samples
+ * Wiring for the static chrome: theme toggle, copy buttons, examples
  * dropdown, format-options popover, extensions popover, bytes-pane mode
  * tabs, and share links.
  */
@@ -8,7 +8,7 @@ import type {
   FromCDNOptions,
   ToCDNOptions,
 } from '@cbortech/cbor';
-import { SAMPLES, type Sample } from '../samples';
+import { EXAMPLES, type Example } from '../examples';
 import { EXTENSION_ENTRIES } from '../extensions';
 
 export type BytesMode = 'annotated' | 'plain' | 'js' | 'edit';
@@ -100,17 +100,17 @@ export function initFileDrop(
   );
 }
 
-export function initSamples(onSelect: (sample: Sample) => void): () => void {
-  const select = document.getElementById('samples') as HTMLSelectElement;
-  for (const sample of SAMPLES) {
+export function initExamples(onSelect: (example: Example) => void): () => void {
+  const select = document.getElementById('examples') as HTMLSelectElement;
+  for (const example of EXAMPLES) {
     const option = document.createElement('option');
-    option.value = sample.name;
-    option.textContent = sample.name;
+    option.value = example.name;
+    option.textContent = example.name;
     select.appendChild(option);
   }
   select.addEventListener('change', () => {
-    const sample = SAMPLES.find((s) => s.name === select.value);
-    if (sample) onSelect(sample);
+    const example = EXAMPLES.find((s) => s.name === select.value);
+    if (example) onSelect(example);
   });
   return () => {
     select.selectedIndex = 0;

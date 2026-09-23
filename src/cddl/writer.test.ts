@@ -194,7 +194,7 @@ c = 3
 });
 
 describe('CDDL formatter: comments (preserveComments)', () => {
-  test('the default playground sample formats to itself', () => {
+  test('the default playground example formats to itself', () => {
     const text = `; CDDL (RFC 8610) — the schema language for CBOR. Edit me!
 person = {
   name: tstr,

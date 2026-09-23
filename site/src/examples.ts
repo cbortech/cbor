@@ -1,4 +1,4 @@
-export interface Sample {
+export interface Example {
   name: string;
   /** CDN instance loaded into the CDN editor. */
   cdn: string;
@@ -8,36 +8,36 @@ export interface Sample {
    */
   cddl: string;
   /**
-   * When `true`, selecting this sample opens the CDDL pane if it isn't
+   * When `true`, selecting this example opens the CDDL pane if it isn't
    * already open (leaving it alone otherwise) — *unconditionally*, even
-   * overriding a reader's own earlier explicit close. For a sample whose CDN
+   * overriding a reader's own earlier explicit close. For an example whose CDN
    * actually depends on the schema being *active*, not just present — e.g.
    * `e'...'` external references (draft-ietf-cbor-edn-e-ref), which the CDN
    * parser can't resolve without the schema currently open — so a reader
    * who happened to have the pane closed sees a working conversion instead
    * of a silent unresolved-extension fallback with no clue why. Reserve this
-   * for that case; for a sample that's merely *about* CDDL but converts
+   * for that case; for an example that's merely *about* CDDL but converts
    * correctly either way, use `showsCddl` instead.
    * @default false
    */
   requiresCddl?: boolean;
   /**
-   * When `true`, selecting this sample opens the CDDL pane if it isn't
+   * When `true`, selecting this example opens the CDDL pane if it isn't
    * already open — but only while the reader hasn't yet made an explicit
    * choice about it this session (no `?cddl=` in the URL yet, checked via
    * `readCddlOpenParam`): once they've toggled it themselves (open *or*
-   * closed), that choice is left alone for every later `showsCddl` sample,
+   * closed), that choice is left alone for every later `showsCddl` example,
    * and this never persists an opened-this-way state to `?cddl=` on its
-   * own. For a sample whose whole point is demonstrating a CDDL feature
+   * own. For an example whose whole point is demonstrating a CDDL feature
    * (e.g. "CDDL: Groups, choices & ranges") but whose CDN converts
    * perfectly well without the schema active — unlike `requiresCddl`, which
-   * is for a sample that's actually *broken* without it.
+   * is for an example that's actually *broken* without it.
    * @default false
    */
   showsCddl?: boolean;
 }
 
-export const SAMPLES: Sample[] = [
+export const EXAMPLES: Example[] = [
   {
     name: 'JSON is valid CDN',
     cdn: `{
@@ -274,7 +274,7 @@ cbor-types = {
     cdn: `{
   # Arrays and Maps (§2.4) — commas are optional; §2.5 Tags: n(item);
   # §2.6 Simple values: true/false/null/undefined/simple(N) (see also
-  # the "All CBOR types" sample).
+  # the "All CBOR types" example).
   "array":          [1, 2, 3],
   "array-nested":   [1, [2, 3]],
   "no-commas":      [1 2 3],       # whitespace alone separates items
@@ -352,7 +352,7 @@ app-extensions-dt-ip = {
 }`,
     cddl: `; hash'...' — requires @cbortech/hash-extension (bstr; without it,
 ; an unrecognised app-string becomes tag 999(["hash", "..."]) instead —
-; see the "unknown" fields in the cri/float/others sample)
+; see the "unknown" fields in the cri/float/others example)
 app-extensions-hash = {
   "sha256-text": bstr .size 32,
   "sha256-bytes": bstr .size 32,
@@ -609,4 +609,4 @@ label = int / tstr`,
   },
 ];
 
-export const DEFAULT_SAMPLE = SAMPLES[0]!.cdn;
+export const DEFAULT_EXAMPLE = EXAMPLES[0]!.cdn;

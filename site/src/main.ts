@@ -23,7 +23,7 @@ import { HexView } from './hexview/hexview';
 import type { CddlSchema } from '@cbortech/cbor/cddl';
 import { rangeAtByte, rangeAtChar } from './mapping/lockstep';
 import { appendJSChunks, tokenizeJS } from './js-preview';
-import { DEFAULT_SAMPLE, SAMPLES } from './samples';
+import { DEFAULT_EXAMPLE, EXAMPLES } from './examples';
 import { initCddlPane, type CddlPane } from './cddl-pane';
 import {
   type BytesMode,
@@ -35,7 +35,7 @@ import {
   initFileDrop,
   initFormatPopover,
   initModeTabs,
-  initSamples,
+  initExamples,
   initTheme,
   readCddlOpenParam,
   readFormatOptions,
@@ -221,8 +221,8 @@ const onCursorMoved = debounce((pos: number): void => {
 }, 100);
 
 const shared = decodeShareHash(location.hash);
-const initialText = shared?.cdn ?? DEFAULT_SAMPLE;
-let resetSamples = (): void => {};
+const initialText = shared?.cdn ?? DEFAULT_EXAMPLE;
+let resetExamples = (): void => {};
 let cddlPane: CddlPane | undefined;
 
 const editor = createEditor(
@@ -231,7 +231,7 @@ const editor = createEditor(
   {
     onDocChanged(text) {
       if (!_programmaticEdit) hexParseWarning = null;
-      if (text.trim() === '') resetSamples();
+      if (text.trim() === '') resetExamples();
       debouncedUpdate(text);
     },
     onCursorMoved,
@@ -395,46 +395,46 @@ initExtensionsPopover(() => {
   editor.dispatch({ effects: refreshCdnLint.of(null) });
   forceLinting(editor);
 });
-resetSamples = initSamples((sample) => {
-  // A sample is a CDN/CDDL pair: load both. The schema compiles right
+resetExamples = initExamples((example) => {
+  // An example is a CDN/CDDL pair: load both. The schema compiles right
   // away, but validation only runs while the CDDL pane is open. Convert
   // immediately (skipping the editor debounce) so the pane never shows
-  // the previous sample's data validated against the new schema.
-  cddlPane?.setText(sample.cddl);
-  // A sample whose CDN relies on the schema being active (e.g. `e'...'`
+  // the previous example's data validated against the new schema.
+  cddlPane?.setText(example.cddl);
+  // An example whose CDN relies on the schema being active (e.g. `e'...'`
   // external references, which have no meaning without one) opens the pane
-  // itself rather than leaving the reader to notice why the sample doesn't
-  // convert as shown — see Sample.requiresCddl. A sample merely *about*
+  // itself rather than leaving the reader to notice why the example doesn't
+  // convert as shown — see Example.requiresCddl. An example merely *about*
   // CDDL, but that converts fine either way, opens it only as long as the
   // reader hasn't made their own explicit choice yet this session — see
-  // Sample.showsCddl. Every other sample leaves the pane's open state
+  // Example.showsCddl. Every other example leaves the pane's open state
   // alone entirely.
   //
   // requiresCddl is persisted the same way an explicit click would be
   // (`writeCddlOpenParam`, normally `onToggle`'s job — `setOpen()` alone
-  // doesn't call it, see its own doc): selecting a sample is itself a user
+  // doesn't call it, see its own doc): selecting an example is itself a user
   // action, so a `?cddl=0` left over from an earlier manual close must not
   // silently override this and reopen the pane closed again on reload, and
-  // Share right after selecting this sample must capture the pane as
+  // Share right after selecting this example must capture the pane as
   // actually shown. showsCddl is deliberately *not* persisted this way —
   // it's a suggestion, not a decision made on the reader's behalf.
-  if (sample.requiresCddl && !cddlPane?.isOpen()) {
+  if (example.requiresCddl && !cddlPane?.isOpen()) {
     cddlPane?.setOpen(true);
     writeCddlOpenParam(true);
   } else if (
-    sample.showsCddl &&
+    example.showsCddl &&
     !cddlPane?.isOpen() &&
     readCddlOpenParam(location.search) === undefined
   ) {
     // Weaker than requiresCddl: only while the reader hasn't made an
     // explicit choice about the pane yet this session — an existing
     // `?cddl=` (open *or* closed) means they already have, and this leaves
-    // it alone. Not persisted to `?cddl=` either — see Sample.showsCddl.
+    // it alone. Not persisted to `?cddl=` either — see Example.showsCddl.
     cddlPane?.setOpen(true);
   }
-  setEditorText(editor, sample.cdn);
+  setEditorText(editor, example.cdn);
   debouncedUpdate.cancel();
-  update(sample.cdn);
+  update(example.cdn);
 });
 initModeTabs((next) => {
   mode = next;
@@ -450,17 +450,17 @@ cddlPane = initCddlPane({
   cdnEditor: editor,
   getConversion: () => conversion,
   hexHighlight: (range) => hexView.highlightValidation(range),
-  // Fresh visit: the default sample's schema, matching the default CDN.
+  // Fresh visit: the default example's schema, matching the default CDN.
   // Share link: the shared schema, or — since a schema matching foreign
   // CDN cannot be guessed — an empty editor.
-  initialCddl: shared ? (shared.cddl ?? '') : SAMPLES[0]!.cddl,
+  initialCddl: shared ? (shared.cddl ?? '') : EXAMPLES[0]!.cddl,
   // `?cddl=1`/`?cddl=0` (etc.) explicitly overrides whether the pane opens;
   // absent that, fall back to the share-hash heuristic (schema → open).
   initiallyOpen:
     readCddlOpenParam(location.search) ?? shared?.cddl !== undefined,
-  // A loaded sample is a CDN/CDDL pair; importing a foreign schema makes
-  // the samples selection stale, same as importing CDN or CBOR.
-  onImported: () => resetSamples(),
+  // A loaded example is a CDN/CDDL pair; importing a foreign schema makes
+  // the examples selection stale, same as importing CDN or CBOR.
+  onImported: () => resetExamples(),
   onToggle: writeCddlOpenParam,
   // The CDN pane's own conversion *and* its linter (see `createCdnLinter()`
   // above) both consult `cddlPane.isOpen()`/`getSchema()` to register
@@ -547,7 +547,7 @@ function importCdnFile(file: File): void {
   file
     .text()
     .then((text) => {
-      resetSamples();
+      resetExamples();
       setEditorText(editor, text);
     })
     .catch((e: unknown) => {
@@ -598,7 +598,7 @@ function importCborFile(file: File): void {
       const cdn = items
         .map((item) => item.toCDN(readFormatOptions()))
         .join('\n');
-      resetSamples();
+      resetExamples();
       applyHexResult(cdn, warnings);
     })
     .catch((e: unknown) => {

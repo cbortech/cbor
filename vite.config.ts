@@ -50,7 +50,7 @@ export default defineConfig({
     // eref-shared-boot.browser.test.ts) must be excluded automatically,
     // not silently run (and crash) here until someone remembers to list it.
     exclude: [...configDefaults.exclude, 'site/src/**/*.browser.test.ts'],
-    // @cbortech/hash-extension (used by site/src/samples.test.ts) does its
+    // @cbortech/hash-extension (used by site/src/examples.test.ts) does its
     // own `instanceof CborByteString` checks against the classes exported
     // from `@cbortech/cbor/ast`. Left unaliased, that resolves to the
     // *built* dist (via the node_modules self-symlink), a different class

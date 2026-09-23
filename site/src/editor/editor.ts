@@ -66,7 +66,7 @@ export function createEditor(
   return view;
 }
 
-/** Replace the whole document (e.g. sample load, Format, bytes paste). */
+/** Replace the whole document (e.g. example load, Format, bytes paste). */
 export function setEditorText(view: EditorView, text: string): void {
   view.dispatch({
     changes: { from: 0, to: view.state.doc.length, insert: text },
