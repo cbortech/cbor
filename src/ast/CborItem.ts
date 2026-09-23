@@ -668,8 +668,10 @@ export abstract class CborItem {
    * (`h'...'`, `b64'...'`, ...) depends on the `sqstr` option.
    *
    * This method deliberately does *not* also cover the "is this (or does
-   * it wrap) a prefixed literal" question — a prefixed literal has no word
-   * count to check, but still disqualifies under the strict rule (and, per
+   * it wrap) a prefixed literal" question — a byte-string literal has no
+   * word count to check, and an app-string literal (`dt'...'`) is
+   * word-counted from its rendered content, but either disqualifies only
+   * under the strict rule (and, per
    * `strict`, is an ordinary leaf under the loose one). That's handled
    * generically elsewhere instead, from the *actual rendered text* rather
    * than predicted from this node's type: `isPrefixedLiteralText` for a

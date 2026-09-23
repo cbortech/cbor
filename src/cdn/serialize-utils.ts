@@ -443,7 +443,8 @@ export function serializeContainer(p: {
    * no nested array/map — a multi-word string reads better with a line of
    * its own. This does *not* also cover a prefixed literal like `h'...'`
    * (which has no word count to check at all, but still disqualifies under
-   * the strict rule) — that's covered separately, generically, by
+   * the strict rule) or an app-string like `dt'...'` (word-counted, strict
+   * rule only) — that's covered separately, generically, by
    * `isPrefixedLiteralText` (checked against the rendered entry `s` below)
    * or, for a `CborTag`, `isMultiWordRenderedLiteral`. Omitted = never
    * disqualifies.
@@ -869,17 +870,18 @@ export function isMultiWordByteString(
 const PREFIXED_LITERAL_RE = /^[A-Za-z][A-Za-z0-9-]*['`]/;
 
 /**
- * True when `rendered` — a single entry's own CDN rendering — is shaped
- * like a prefixed literal: an identifier immediately followed by `'` or a
- * backtick (`h'...'`, `b64'...'`, `ip'...'`, `dt'...'`, or any other
- * app-string extension's own spelling, built-in or user-defined). These
- * have no natural word boundary to check, so — like a byte string's own
- * prefixed-literal case in `isMultiWordByteString` — the strict
+ * True when `rendered` — a single entry's own CDN rendering — starts with
+ * a prefixed literal that disqualifies under the strict
  * `inlineLeafContainers` rule (`CborArray`/`CborMap`, and the
- * indefinite-length string groups) always disqualifies a container from
- * collapsing onto one line when an entry looks like this; the loose rule
- * (only `CborEmbeddedCBOR`/`<<...>>`) treats it as an ordinary leaf
- * instead.
+ * indefinite-length string groups): a byte-string literal (`h'...'`,
+ * `b64'...'`), which has no natural word boundary to check (like a byte
+ * string's own prefixed-literal case in `isMultiWordByteString`), or an
+ * app-string extension literal (`ip'...'`, `dt'...'`, `e'...'`, or any
+ * other, built-in or user-defined) whose own content has two or more
+ * words — the latter is word-counted like a text string, so `e'alg'`
+ * stays a leaf while `dt'1969-07-21T02:56:16Z'` doesn't. The loose rule
+ * (only `CborEmbeddedCBOR`/`<<...>>`) treats either as an ordinary leaf
+ * instead, never calling this.
  *
  * This is a generic, rendering-based catch-all — unlike `isMultiWordByteString`,
  * it doesn't need per-extension-class support, so it also covers any
@@ -890,7 +892,21 @@ const PREFIXED_LITERAL_RE = /^[A-Za-z][A-Za-z0-9-]*['`]/;
  * instead to see through its own tag digits/parens onto whatever they wrap.
  */
 export function isPrefixedLiteralText(rendered: string): boolean {
-  return PREFIXED_LITERAL_RE.test(rendered);
+  if (!PREFIXED_LITERAL_RE.test(rendered)) return false;
+  // An app-string extension literal (`e'alg'`, `dt'...'`, `ip'...'`, ...)
+  // counts by its own decoded content's word count instead, exactly like a
+  // text string — `{e'alg': -7}` reads fine on one line. Byte-string
+  // literals (`h'...'`, `b64'...'`, tokenized as `BYTES_*`, not
+  // `APP_STRING`) still always count. Only the leading token is read, same
+  // as the regex above: `rendered` may be a whole map entry (`key: value`),
+  // whose value side `CborMap` checks separately.
+  let first: Token;
+  try {
+    first = new Tokenizer(rendered).consume();
+  } catch {
+    return true;
+  }
+  return first.type !== 'APP_STRING' || isMultiWordText(first.value);
 }
 
 const textDecoderForRenderedLiteral = new TextDecoder();
@@ -915,8 +931,11 @@ const textDecoderForRenderedLiteral = new TextDecoder();
  * - A bare quoted literal (`"..."`, `` `...` ``, or a bare `'...'` sqstr):
  *   always counts if its *decoded* content has two or more words,
  *   regardless of `strict` — matching a text string's own word count.
- * - A prefixed literal (`h'...'`, `b64'...'`, `ip'...'`, `dt'...'`, ...):
- *   has no natural word boundary to check, so it counts only when `strict`.
+ * - A prefixed byte-string literal (`h'...'`, `b64'...'`): has no natural
+ *   word boundary to check, so it counts only when `strict`.
+ * - An app-string extension literal (`ip'...'`, `dt'...'`, `e'...'`, ...):
+ *   counts only when `strict` *and* its content has two or more words (see
+ *   `isPrefixedLiteralText`).
  * - A generic tag wrapper (`tagNum[_EI](...)`) spanning the *entire* input:
  *   peels off just that one layer and recurses on what's inside (handling
  *   nested tags one layer at a time) — this is what lets a plain `CborTag`
@@ -937,6 +956,8 @@ const textDecoderForRenderedLiteral = new TextDecoder();
  *   all) still always counts, while a prefixed-literal item
  *   (`ilbs<<h'00'>>`) — unlike the same literal bare or tag-wrapped —
  *   does not.
+ * - A rendered array/map counts under the strict rule, including one
+ *   exposed by `appPrefix: false` inside otherwise leaf-like tag wrappers.
  * - Anything else (a number, `true`/`false`, multiple top-level tokens that
  *   aren't one of the wrappers above, ...) never counts.
  *
@@ -1158,6 +1179,18 @@ function isMultiWordTokenRange(
     }
   }
 
+  // The rendered form can expose a container hidden by the AST's leaf
+  // classification: appPrefix: false turns an unresolved app-string into
+  // 999([prefix, text]). Check after peeling tags so outer tag wrappers
+  // cannot hide that array from the strict inline-leaf rule.
+  if (
+    strict &&
+    (tokens[start].type === 'LBRACKET' || tokens[start].type === 'LBRACE') &&
+    findMatchingClose(tokens, start, contentEnd) === contentEnd - 1
+  ) {
+    return true;
+  }
+
   // App-sequence wrapper: prefix<< item item ... >> spanning the whole
   // range. Its own <<...>> is never peeled away (see doc above), but each
   // top-level item inside — separated by a comma, whitespace, or both — is
@@ -1233,8 +1266,11 @@ function isMultiWordTokenRange(
     case 'BYTES_HEX':
     case 'BYTES_HEX_ELIDED':
     case 'BYTES_B64':
-    case 'APP_STRING':
       return strict;
+    case 'APP_STRING':
+      // Word-counted like a text string, but still only under the strict
+      // rule — see `isPrefixedLiteralText`.
+      return strict && isMultiWordText(token.value);
     default:
       return false;
   }

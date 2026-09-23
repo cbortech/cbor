@@ -1035,8 +1035,9 @@ function collectCdnBreakpoints(
       } else {
         // Mirrors CborByteString._isMultiWordText's prefixed-literal branch
         // (and, via APP_STRING, `isPrefixedLiteralText`'s generic catch-all
-        // for other app-string extensions like `ip'...'`/`dt'...'`): none of
-        // these have natural word boundaries to check, so they always count
+        // for other app-string extensions like `ip'...'`/`dt'...'`, which
+        // count only when their own content is multi-word): byte literals
+        // have no natural word boundaries to check, so they always count
         // as multi-word under the strict rule (array/map, and — unlike a
         // multi-word text entry — an indefinite-length string group too) —
         // but the *only* loose frame (`<<...>>`/app-sequence) treats it as
@@ -1053,7 +1054,11 @@ function collectCdnBreakpoints(
         // text-leading chain, handled above instead.
         const top = stack[stack.length - 1];
         const ruleFrame = nearestRuleFrame();
-        if (top && (!ruleFrame || !isLooseFrame(ruleFrame))) {
+        if (
+          top &&
+          (!ruleFrame || !isLooseFrame(ruleFrame)) &&
+          (token.type !== 'APP_STRING' || isMultiWordText(token.value))
+        ) {
           top.entryForcedBreak = true;
         }
         if (prevType !== 'PLUS' || chainKind === 'none') {

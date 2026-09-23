@@ -404,6 +404,34 @@ describe("e'...' CDN parsing", () => {
   });
 });
 
+describe("e'name' and inlineLeafContainers", () => {
+  // A one-word e'name' is word-counted like a text string, not treated as
+  // an always-disqualifying prefixed literal (h'...'), so a leaf map still
+  // collapses onto one line — inside <<...>> too.
+  test("a leaf map keyed by e'name' stays on one line", () => {
+    const opts: ToCDNOptions = { indent: 2, inlineLeafContainers: true };
+    expect(
+      CBOR.fromCDN('{e\'title\': "x"}', { cddl: PROBLEM_DETAILS_CDDL }).toCDN(
+        opts
+      )
+    ).toBe('{e\'title\': "x"}');
+    expect(
+      CBOR.fromCDN('<<{e\'title\': "x"}>>', {
+        cddl: 'root = bstr .cbor problem-details\n' + PROBLEM_DETAILS_CDDL,
+      }).toCDN(opts)
+    ).toBe('<<{e\'title\': "x"}>>');
+  });
+
+  test("a multi-word e'name' still breaks, like a multi-word text key", () => {
+    expect(
+      CBOR.fromCDN('{-4: 200}', { cddl: PROBLEM_DETAILS_CDDL }).toCDN({
+        indent: 2,
+        inlineLeafContainers: true,
+      })
+    ).toBe("{\n  e'response-code': 200\n}");
+  });
+});
+
 describe('post-validation e-ref annotation', () => {
   test("plain -1 written directly is annotated and round-trips as e'title'", () => {
     const item = CBOR.fromCDN('{-1: "oops"}', { cddl: PROBLEM_DETAILS_CDDL });
