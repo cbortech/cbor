@@ -446,6 +446,53 @@ initModeTabs((next) => {
 
 // ── CDDL pane ────────────────────────────────────────────────────────────────
 
+// The CDN pane's own conversion *and* its linter (see `createCdnLinter()`
+// above) both consult `cddlPane.isOpen()`/`getSchema()` to register
+// `e'...'`; refresh both whenever either could have changed, even though
+// the CDN text itself didn't — otherwise the editor's own squiggle for an
+// unresolved `e'name'` would go stale the moment the schema that resolves
+// it becomes active (or inactive). `forceLinting()` alone doesn't do this
+// reliably (it's a no-op unless a lint run is already pending) — dispatch
+// `refreshCdnLint` first so the CDN editor's linter actually schedules one
+// for `forceLinting()` to then run immediately — see `cdn-lint.ts`'s doc.
+function refreshForSchemaChange(): void {
+  // Captured *before* update() below: while the Edit tab is active and
+  // unfocused, renderBytesPane() (called from inside update()) syncs
+  // hexEditEditor's own text from the *new* conversion's bytes — e.g. the
+  // cpa999 fallback bytes a schema that just went away leaves behind, not
+  // what the reader actually typed. Reading hexEditEditor's text only
+  // *after* update() would already be reading that overwritten value,
+  // silently replacing the reader's real input with it. So this is read
+  // first, and used (not re-read) below regardless of what update() did
+  // to the editor in between.
+  const preservedHexText =
+    mode === 'edit' ? hexEditEditor.state.doc.toString() : null;
+  update(editor.state.doc.toString());
+  editor.dispatch({ effects: refreshCdnLint.of(null) });
+  forceLinting(editor);
+  // The Edit tab's own hex → CDN conversion (bytesToCdnText, driven by
+  // hexEditEditor's text, not the CDN editor's) has the same `e'...'`
+  // annotation dependency but isn't reached by anything above — refresh
+  // it too, immediately rather than through its usual debounce. Only
+  // while it's the active tab: hexEditEditor's text is otherwise stale
+  // (renderBytesPane() only keeps it in sync with `bytes` while it *is*
+  // the active tab — see its own `mode === 'edit'` branch), so reconverting
+  // it here regardless of `mode` could stomp the CDN editor with a
+  // reconversion of hex the reader isn't even looking at anymore.
+  if (preservedHexText !== null) {
+    // Undo whatever update() above just did to hexEditEditor's own text
+    // (see preservedHexText's own comment) before reconverting it — the
+    // reader's real input, not a stale reflection of the old schema's
+    // conversion result, is what the new schema state must be applied to.
+    // Empty is a legitimate value of that input too (runHexEditConversion
+    // has its own branch for it, clearing the CDN editor to match) — not
+    // exempted here, or a reader who'd just cleared the field right
+    // before toggling would see it silently repopulated instead.
+    syncHexEditText(preservedHexText);
+    runHexEditConversion(preservedHexText);
+  }
+}
+
 cddlPane = initCddlPane({
   cdnEditor: editor,
   getConversion: () => conversion,
@@ -462,53 +509,13 @@ cddlPane = initCddlPane({
   // the examples selection stale, same as importing CDN or CBOR.
   onImported: () => resetExamples(),
   onToggle: writeCddlOpenParam,
-  // The CDN pane's own conversion *and* its linter (see `createCdnLinter()`
-  // above) both consult `cddlPane.isOpen()`/`getSchema()` to register
-  // `e'...'`; refresh both whenever either could have changed, even though
-  // the CDN text itself didn't — otherwise the editor's own squiggle for an
-  // unresolved `e'name'` would go stale the moment the schema that resolves
-  // it becomes active (or inactive). `forceLinting()` alone doesn't do this
-  // reliably (it's a no-op unless a lint run is already pending) — dispatch
-  // `refreshCdnLint` first so the CDN editor's linter actually schedules one
-  // for `forceLinting()` to then run immediately — see `cdn-lint.ts`'s doc.
-  onSchemaChanged: () => {
-    // Captured *before* update() below: while the Edit tab is active and
-    // unfocused, renderBytesPane() (called from inside update()) syncs
-    // hexEditEditor's own text from the *new* conversion's bytes — e.g. the
-    // cpa999 fallback bytes a schema that just went away leaves behind, not
-    // what the reader actually typed. Reading hexEditEditor's text only
-    // *after* update() would already be reading that overwritten value,
-    // silently replacing the reader's real input with it. So this is read
-    // first, and used (not re-read) below regardless of what update() did
-    // to the editor in between.
-    const preservedHexText =
-      mode === 'edit' ? hexEditEditor.state.doc.toString() : null;
-    update(editor.state.doc.toString());
-    editor.dispatch({ effects: refreshCdnLint.of(null) });
-    forceLinting(editor);
-    // The Edit tab's own hex → CDN conversion (bytesToCdnText, driven by
-    // hexEditEditor's text, not the CDN editor's) has the same `e'...'`
-    // annotation dependency but isn't reached by anything above — refresh
-    // it too, immediately rather than through its usual debounce. Only
-    // while it's the active tab: hexEditEditor's text is otherwise stale
-    // (renderBytesPane() only keeps it in sync with `bytes` while it *is*
-    // the active tab — see its own `mode === 'edit'` branch), so reconverting
-    // it here regardless of `mode` could stomp the CDN editor with a
-    // reconversion of hex the reader isn't even looking at anymore.
-    if (preservedHexText !== null) {
-      // Undo whatever update() above just did to hexEditEditor's own text
-      // (see preservedHexText's own comment) before reconverting it — the
-      // reader's real input, not a stale reflection of the old schema's
-      // conversion result, is what the new schema state must be applied to.
-      // Empty is a legitimate value of that input too (runHexEditConversion
-      // has its own branch for it, clearing the CDN editor to match) — not
-      // exempted here, or a reader who'd just cleared the field right
-      // before toggling would see it silently repopulated instead.
-      syncHexEditText(preservedHexText);
-      runHexEditConversion(preservedHexText);
-    }
-  },
+  onSchemaChanged: refreshForSchemaChange,
 });
+// Opening the pane on load (`initiallyOpen`, e.g. a shared e'...' link)
+// already fired onSchemaChanged from inside initCddlPane() — before
+// `cddlPane` was assigned, so activeCddlSchema() still saw no schema and the
+// conversion and lint ran without e'...'. Rerun them now that it's set.
+if (cddlPane.isOpen()) refreshForSchemaChange();
 
 el('format-btn').addEventListener('click', () => {
   const text = editor.state.doc.toString();
