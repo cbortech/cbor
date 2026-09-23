@@ -1223,6 +1223,29 @@ Throwing methods such as `parse`, `decode`, and `encode` throw
 in `result.cddlErrors`. Pass validator options through `cddlValidationOptions`,
 or set `cddl` as an instance default with `new CBOR({ cddl: … })`.
 
+With a schema, tags the schema itself requires can be left implicit in
+JavaScript. `toJS()` drops a tag matched by a `#6.N(…)` type such as the
+prelude's `time = #6.1(number)`, and `fromJS()` adds it back to a value that
+lacks it:
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const cddl = 'event = { t: time }';
+
+CBOR.parse(`{"t": DT'1969-07-21T02:56:16Z'}`, { cddl });
+// { t: -14159024 } (a plain number, no Tag.symbol)
+
+CBOR.stringify({ t: -14159024 }, { cddl });
+// {"t":DT'1969-07-21T02:56:16Z'}
+```
+
+A tag is dropped only when `fromJS()` would restore it: it is kept where the
+untagged value is also valid on its own (`time / number`) or where the schema
+doesn't require it (`any`). Inference only runs when the value doesn't
+already match the schema. Pass `implicitTags: false` (a `ToJSOptions` and
+`FromJSOptions` option) to keep or require every tag explicitly.
+
 `CDDL.compile()` throws `CddlSyntaxError` or `CddlSemanticError`; use
 `{ strict: false }` to collect semantic issues in `schema.warnings` instead.
 Compiled schemas can be formatted with `schema.format()`. The subpath also
