@@ -446,8 +446,9 @@ streamed = [
 ]`,
   },
   {
-    name: 'Tags, bignums, CBOR sequences & elision',
-    cdn: `{
+    name: 'Tags, bignums, embedded CBOR & elision',
+    cdn: `# 55799 = self-described CBOR (RFC 8949 §3.4.6)
+55799({
   "timestamp": 1(1749772800),
   "rfc3339": 0("2026-06-13T00:00:00Z"),
   "bignum": 18446744073709551616,
@@ -461,8 +462,9 @@ streamed = [
     "b": ...,
     ...: ...
   },
-}`,
-    cddl: `tagged = {
+})`,
+    cddl: `self-described = #6.55799(tagged)
+tagged = {
   "timestamp": time,       ; prelude: #6.1(number)
   "rfc3339": tdate,        ; prelude: #6.0(tstr)
   "bignum": biguint,       ; > 2^64-1 → tag 2 on the wire
@@ -508,20 +510,23 @@ concat = {
 }`,
   },
   {
-    name: 'CDN Sequence & JSONL',
-    cdn: `# CDN Sequence — multiple items separated by whitespace, comma, or comment.
-# Output is a CBOR Sequence (RFC 8742): concatenated CBOR items.
+    name: 'CDN (CBOR Sequence) / JSONL',
+    cdn: `# Labeled CBOR Sequence (RFC 9277 §2.3)
+55800(1413829460('BOR'))
 
+# A CBOR Sequence in CDN — multiple items separated by whitespace, comma, or comment.
+# Output is a CBOR Sequence (RFC 8742): concatenated CBOR items.
 { "event": "start", "ts": DT'2026-06-01T00:00:00Z' }
 { "event": "data",  "value": 42 }
 { "event": "end",   "ts": DT'2026-06-01T00:01:00Z' }
 
-# JSONL / NDJSON is a CDN Sequence too:
+# JSONL / NDJSON is a CDN (CBOR Sequence) too:
 {"id": 1, "name": "Alice", "score": 98.5}
 {"id": 2, "name": "Bob",   "score": 72.0}`,
     cddl: `; Each item of the sequence is validated against the root rule —
-; here a choice between the two record shapes.
-item = event / row
+; here a choice between the label and the two record shapes.
+item = label / event / row
+label = #6.55800(#6.1413829460('BOR'))
 event = {
   "event": tstr,
   ? "ts": time,
@@ -581,16 +586,17 @@ room-number = 100..699 / "penthouse"`,
   {
     name: 'CDDL: COSE_Sign1 (RFC 9052)',
     requiresCddl: true,
-    cdn: `[
-  # e'alg'/e'kid' resolve via header_map's own &(name: value) entries below —
-  # RFC 9052's registered COSE header parameter labels, given mnemonic names.
+    cdn: `18([
   / protected   / << {e'alg': -7} >>,
   / unprotected / {e'kid': '11'},
   / payload     / 'This is the content.',
   / signature   / h'8eb33e4ca31d1c465ab05aac34cc6b23
-                    d58fef5c083106c4d25a91aef0b0117e',
-]`,
-    cddl: `COSE_Sign1 = [
+                    d58fef5c083106c4d25a91aef0b0117e
+                    2af9a291aa32e14ab834dc56ed2a2234
+                    44547e01f11d3b0916e5a4c345cacb36',
+])`,
+    cddl: `COSE_Sign1_Tagged = #6.18(COSE_Sign1)
+COSE_Sign1 = [
   protected: bstr .cbor header_map / bstr .size 0,
   unprotected: header_map,
   payload: bstr / nil,

@@ -456,7 +456,12 @@ function walkAnnotate(
     return undefined;
   }
   if (item instanceof CborTag) {
-    walkAnnotate(item.content, ctx, undefined, NO_POSITION);
+    walkAnnotate(
+      item.content,
+      ctx,
+      candidates ? tagContentTypes(ctx, item, candidates) : undefined,
+      NO_POSITION
+    );
     return undefined;
   }
   if (item instanceof CborEmbeddedCBOR) {
@@ -469,6 +474,38 @@ function walkAnnotate(
   if (candidates && Object.getPrototypeOf(item) === CborByteString.prototype)
     return expandEmbedded(item as CborByteString, ctx, candidates);
   return undefined;
+}
+
+/**
+ * The content types of every `#6.N(T)` alternative among `candidates` that
+ * `tag` actually matches (tag number included) — so a tag-wrapped schema
+ * like `COSE_Sign1_Tagged = #6.18(COSE_Sign1)` still names keys inside it.
+ * `undefined` when some *other* kind of alternative (`any`, a control
+ * operator, …) accepts `tag` too, since the content's type is then unknown.
+ */
+function tagContentTypes(
+  ctx: AnnotateContext,
+  tag: CborTag,
+  candidates: Candidates
+): Candidates | undefined {
+  const contents: { type: CddlType; env: undefined }[] = [];
+  for (const c of candidates) {
+    if (c.env !== undefined) return undefined;
+    const alts = typeAlternatives(ctx.schema, c.type);
+    if (!alts) return undefined;
+    for (const t1 of alts) {
+      const matches = itemMatchesType(
+        ctx.schema,
+        tag,
+        { kind: 'type', start: t1.start, end: t1.end, alternatives: [t1] },
+        ctx.options
+      );
+      if (matches === false) continue;
+      if (t1.op || t1.target.kind !== 'tagged') return undefined;
+      contents.push({ type: t1.target.item, env: undefined });
+    }
+  }
+  return contents.length > 0 ? contents : undefined;
 }
 
 /**
