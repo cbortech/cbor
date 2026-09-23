@@ -20,15 +20,25 @@ import { hash } from '@cbortech/hash-extension';
  *   it through the `builtinExtensions` option instead.
  * 'extra': not bundled by default — enabling it requires the `extensions`
  *   option (this playground enables all of them by default).
+ * 'eref': the `e'...'` external-reference extension (draft-ietf-cbor-edn-e-ref),
+ *   shown in the "Built-in" group. Unlike every other kind, it has no fixed
+ *   `ext` — `createERefExtension()` needs a compiled CDDL schema to build,
+ *   so it's resolved at call time by `convert.ts`/`cdn-lint.ts` (via
+ *   `isERefEnabled()`) instead of going through `getEnabledExtensions()`'s
+ *   returned arrays. Still persisted the same way, and skipped by
+ *   `getEnabledExtensions()` — see its own doc.
  */
-export type ExtensionKind = 'builtin' | 'extra';
+export type ExtensionKind = 'builtin' | 'extra' | 'eref';
 
 export interface ExtensionEntry {
   /** Stable key used for the checkbox id and localStorage persistence. */
   key: string;
   /** Human-readable label shown next to the checkbox. */
   label: string;
-  ext: CborExtension;
+  /** Optional tooltip, shown the same way the locked h/b64 checkboxes are. */
+  title?: string;
+  /** Absent for `kind: 'eref'` — see `ExtensionKind`'s own doc. */
+  ext?: CborExtension;
   kind: ExtensionKind;
 }
 
@@ -47,6 +57,13 @@ export const EXTENSION_ENTRIES: ExtensionEntry[] = [
   { key: 't1', label: 't1', ext: t1, kind: 'builtin' },
   { key: 'ilbs', label: 'ilbs', ext: ilbs, kind: 'builtin' },
   { key: 'ilts', label: 'ilts', ext: ilts, kind: 'builtin' },
+  {
+    key: 'eref',
+    label: 'e',
+    title:
+      "resolves e'...' against the CDDL pane's schema; has no effect while the pane is closed",
+    kind: 'eref',
+  },
   // Not bundled by default — toggled via the `extensions` option.
   { key: 'hash', label: 'hash', ext: hash, kind: 'extra' },
   { key: 'same', label: 'same', ext: same, kind: 'extra' },

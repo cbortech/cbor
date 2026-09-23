@@ -24,7 +24,12 @@ describe('playground samples', () => {
   for (const sample of SAMPLES) {
     test(`'${sample.name}' CDN matches its CDDL`, () => {
       const schema = CDDL.compile(sample.cddl);
-      const items = [...CBOR.fromCDNSeq(sample.cdn, parseOptions)];
+      // `cddl: schema` mirrors what the playground itself does while the
+      // CDDL pane is open: it also registers the `e'...'` app-extension
+      // (needed by the e-ref sample) — see `main.ts`'s own `update()`.
+      const items = [
+        ...CBOR.fromCDNSeq(sample.cdn, { ...parseOptions, cddl: schema }),
+      ];
       expect(items.length).toBeGreaterThan(0);
       for (const item of items) {
         const result = schema.validate(item);

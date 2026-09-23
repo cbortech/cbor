@@ -3,6 +3,7 @@ import { CBOR } from '@cbortech/cbor';
 import { forceLinting } from '@codemirror/lint';
 import { placeholder } from '@codemirror/view';
 import {
+  annotateIfValid,
   bytesToCdnText,
   bytesToHexString,
   convertCdn,
@@ -10,6 +11,8 @@ import {
   type Conversion,
 } from './convert';
 import { createEditor, selectRange, setEditorText } from './editor/editor';
+import { cdnHighlight } from './editor/cdn-highlight';
+import { createCdnLinter, refreshCdnLint } from './editor/cdn-lint';
 import {
   hexEditHighlight,
   hexEditHoverTooltip,
@@ -17,6 +20,7 @@ import {
   setHexEditModel,
 } from './editor/hex-edit-highlight';
 import { HexView } from './hexview/hexview';
+import type { CddlSchema } from '@cbortech/cbor/cddl';
 import { rangeAtByte, rangeAtChar } from './mapping/lockstep';
 import { appendJSChunks, tokenizeJS } from './js-preview';
 import { DEFAULT_SAMPLE, SAMPLES } from './samples';
@@ -68,6 +72,21 @@ const bytesEditHostEl = el<HTMLDivElement>('bytes-edit-host');
 const statusEl = el<HTMLDivElement>('bytes-status');
 const byteCountEl = el<HTMLSpanElement>('byte-count');
 const exportBtnEl = el<HTMLButtonElement>('export-btn');
+const copyBytesBtn = el('copy-bytes');
+
+// Declared this early (rather than alongside the other bytes-pane toolbar
+// wiring further down) because `update()` below calls `updateCopyBytesBtn()`
+// synchronously, and — since `cddlPane`'s own construction can itself
+// synchronously call back into `update()` via `onSchemaChanged` when the
+// initial share/`?cddl=` state opens the pane — that can happen during this
+// module's own top-level setup, before a later declaration would exist yet.
+function updateCopyBytesBtn(): void {
+  const active = mode === 'annotated' || mode === 'plain';
+  copyBytesBtn.toggleAttribute(
+    'disabled',
+    !active || !conversion.ok || conversion.empty
+  );
+}
 
 let mode: BytesMode = 'annotated';
 let conversion: Conversion = { ok: true, empty: true };
@@ -170,8 +189,21 @@ function renderBytesPane(): void {
   }
 }
 
+/**
+ * The schema every CDDL-aware conversion in this file should treat as
+ * active right now: the CDDL pane's own compiled schema while it's open,
+ * `null` while it's closed — matches "validation only runs while the pane
+ * is open" for the same reason: closing the pane should make every one of
+ * these forget the schema entirely, not just stop checking it.
+ */
+function activeCddlSchema(): CddlSchema | null {
+  return cddlPane?.isOpen() ? cddlPane.getSchema() : null;
+}
+
 const update = (text: string): void => {
-  conversion = convertCdn(text);
+  // See activeCddlSchema()'s own doc for why this is `null`, not just
+  // absent, while the pane is closed.
+  conversion = convertCdn(text, activeCddlSchema());
   renderBytesPane();
   updateCopyBytesBtn();
   cddlPane?.revalidate(conversion);
@@ -193,14 +225,26 @@ const initialText = shared?.cdn ?? DEFAULT_SAMPLE;
 let resetSamples = (): void => {};
 let cddlPane: CddlPane | undefined;
 
-const editor = createEditor(el('editor'), initialText, {
-  onDocChanged(text) {
-    if (!_programmaticEdit) hexParseWarning = null;
-    if (text.trim() === '') resetSamples();
-    debouncedUpdate(text);
+const editor = createEditor(
+  el('editor'),
+  initialText,
+  {
+    onDocChanged(text) {
+      if (!_programmaticEdit) hexParseWarning = null;
+      if (text.trim() === '') resetSamples();
+      debouncedUpdate(text);
+    },
+    onCursorMoved,
   },
-  onCursorMoved,
-});
+  // Same [highlight, linter] pair createEditor() defaults to, except the
+  // linter also registers `e'...'` — mirroring update()'s own conversion —
+  // so a name the open CDDL schema resolves doesn't show a stale
+  // missing-extension squiggle. `cddlPane` is assigned after this call but
+  // read only when the linter callback actually runs (on a doc change),
+  // by which point it's set — same forward-reference pattern `update()`
+  // itself relies on.
+  [cdnHighlight, createCdnLinter(activeCddlSchema)]
+);
 
 /** Set editor text from an external hex/file source, preserving hexParseWarning. */
 function applyHexResult(cdn: string, warnings: string[]): void {
@@ -264,13 +308,17 @@ initPaneDivider(el('cddl-divider'), cddlPaneEl, cdnPane);
 // Editable hex dump, colored and hover-hinted the same way as the read-only
 // Hex tab once it parses (see hex-edit-highlight.ts) — the coloring model
 // is kept fresh independently, in renderBytesPane().
-const convertHexEditText = debounce((text: string) => {
+function runHexEditConversion(text: string): void {
   if (text.trim() === '') {
     setEditorText(editor, '');
     return;
   }
   try {
-    const { cdn, warnings } = bytesToCdnText(text, readFormatOptions());
+    const { cdn, warnings } = bytesToCdnText(
+      text,
+      readFormatOptions(),
+      activeCddlSchema()
+    );
     applyHexResult(cdn, warnings);
   } catch (e) {
     debouncedUpdate.cancel();
@@ -278,7 +326,8 @@ const convertHexEditText = debounce((text: string) => {
     renderBytesPane();
     updateCopyBytesBtn();
   }
-}, 300);
+}
+const convertHexEditText = debounce(runHexEditConversion, 300);
 
 const hexEditEditor = createEditor(
   bytesEditHostEl,
@@ -317,7 +366,11 @@ hexviewEl.addEventListener('paste', (e) => {
   if (!text) return;
   e.preventDefault();
   try {
-    const { cdn, warnings } = bytesToCdnText(text, readFormatOptions());
+    const { cdn, warnings } = bytesToCdnText(
+      text,
+      readFormatOptions(),
+      activeCddlSchema()
+    );
     applyHexResult(cdn, warnings);
   } catch (err) {
     debouncedUpdate.cancel();
@@ -334,8 +387,12 @@ initFormatPopover();
 initExtensionsPopover(() => {
   // Extension toggles change parse/decode results without editing the
   // document, so force both the bytes-pane conversion and the CDN editor's
-  // lint diagnostics to refresh immediately (no debounce).
+  // lint diagnostics to refresh immediately (no debounce). `forceLinting()`
+  // alone is a no-op unless a lint run is already pending — dispatch
+  // `refreshCdnLint` first so it actually has one to run — see
+  // `cdn-lint.ts`'s doc (same pattern `onSchemaChanged` below uses).
   update(editor.state.doc.toString());
+  editor.dispatch({ effects: refreshCdnLint.of(null) });
   forceLinting(editor);
 });
 resetSamples = initSamples((sample) => {
@@ -344,6 +401,37 @@ resetSamples = initSamples((sample) => {
   // immediately (skipping the editor debounce) so the pane never shows
   // the previous sample's data validated against the new schema.
   cddlPane?.setText(sample.cddl);
+  // A sample whose CDN relies on the schema being active (e.g. `e'...'`
+  // external references, which have no meaning without one) opens the pane
+  // itself rather than leaving the reader to notice why the sample doesn't
+  // convert as shown — see Sample.requiresCddl. A sample merely *about*
+  // CDDL, but that converts fine either way, opens it only as long as the
+  // reader hasn't made their own explicit choice yet this session — see
+  // Sample.showsCddl. Every other sample leaves the pane's open state
+  // alone entirely.
+  //
+  // requiresCddl is persisted the same way an explicit click would be
+  // (`writeCddlOpenParam`, normally `onToggle`'s job — `setOpen()` alone
+  // doesn't call it, see its own doc): selecting a sample is itself a user
+  // action, so a `?cddl=0` left over from an earlier manual close must not
+  // silently override this and reopen the pane closed again on reload, and
+  // Share right after selecting this sample must capture the pane as
+  // actually shown. showsCddl is deliberately *not* persisted this way —
+  // it's a suggestion, not a decision made on the reader's behalf.
+  if (sample.requiresCddl && !cddlPane?.isOpen()) {
+    cddlPane?.setOpen(true);
+    writeCddlOpenParam(true);
+  } else if (
+    sample.showsCddl &&
+    !cddlPane?.isOpen() &&
+    readCddlOpenParam(location.search) === undefined
+  ) {
+    // Weaker than requiresCddl: only while the reader hasn't made an
+    // explicit choice about the pane yet this session — an existing
+    // `?cddl=` (open *or* closed) means they already have, and this leaves
+    // it alone. Not persisted to `?cddl=` either — see Sample.showsCddl.
+    cddlPane?.setOpen(true);
+  }
   setEditorText(editor, sample.cdn);
   debouncedUpdate.cancel();
   update(sample.cdn);
@@ -374,16 +462,73 @@ cddlPane = initCddlPane({
   // the samples selection stale, same as importing CDN or CBOR.
   onImported: () => resetSamples(),
   onToggle: writeCddlOpenParam,
+  // The CDN pane's own conversion *and* its linter (see `createCdnLinter()`
+  // above) both consult `cddlPane.isOpen()`/`getSchema()` to register
+  // `e'...'`; refresh both whenever either could have changed, even though
+  // the CDN text itself didn't — otherwise the editor's own squiggle for an
+  // unresolved `e'name'` would go stale the moment the schema that resolves
+  // it becomes active (or inactive). `forceLinting()` alone doesn't do this
+  // reliably (it's a no-op unless a lint run is already pending) — dispatch
+  // `refreshCdnLint` first so the CDN editor's linter actually schedules one
+  // for `forceLinting()` to then run immediately — see `cdn-lint.ts`'s doc.
+  onSchemaChanged: () => {
+    // Captured *before* update() below: while the Edit tab is active and
+    // unfocused, renderBytesPane() (called from inside update()) syncs
+    // hexEditEditor's own text from the *new* conversion's bytes — e.g. the
+    // cpa999 fallback bytes a schema that just went away leaves behind, not
+    // what the reader actually typed. Reading hexEditEditor's text only
+    // *after* update() would already be reading that overwritten value,
+    // silently replacing the reader's real input with it. So this is read
+    // first, and used (not re-read) below regardless of what update() did
+    // to the editor in between.
+    const preservedHexText =
+      mode === 'edit' ? hexEditEditor.state.doc.toString() : null;
+    update(editor.state.doc.toString());
+    editor.dispatch({ effects: refreshCdnLint.of(null) });
+    forceLinting(editor);
+    // The Edit tab's own hex → CDN conversion (bytesToCdnText, driven by
+    // hexEditEditor's text, not the CDN editor's) has the same `e'...'`
+    // annotation dependency but isn't reached by anything above — refresh
+    // it too, immediately rather than through its usual debounce. Only
+    // while it's the active tab: hexEditEditor's text is otherwise stale
+    // (renderBytesPane() only keeps it in sync with `bytes` while it *is*
+    // the active tab — see its own `mode === 'edit'` branch), so reconverting
+    // it here regardless of `mode` could stomp the CDN editor with a
+    // reconversion of hex the reader isn't even looking at anymore.
+    if (preservedHexText !== null) {
+      // Undo whatever update() above just did to hexEditEditor's own text
+      // (see preservedHexText's own comment) before reconverting it — the
+      // reader's real input, not a stale reflection of the old schema's
+      // conversion result, is what the new schema state must be applied to.
+      // Empty is a legitimate value of that input too (runHexEditConversion
+      // has its own branch for it, clearing the CDN editor to match) — not
+      // exempted here, or a reader who'd just cleared the field right
+      // before toggling would see it silently repopulated instead.
+      syncHexEditText(preservedHexText);
+      runHexEditConversion(preservedHexText);
+    }
+  },
 });
 
 el('format-btn').addEventListener('click', () => {
   const text = editor.state.doc.toString();
   if (text.trim() === '') return;
   try {
-    const opts = { ...readFormatOptions(), ...getEnabledExtensions() };
-    setEditorText(editor, formatCdnText(text, opts));
+    // formatCdnText()'s own `cddlSchema` parameter validates and annotates
+    // (a mismatch throws, caught below like any other formatting error)
+    // while still respecting the `e'...'` checkbox — unlike the library's
+    // own `cddl` option, which would register/annotate `e'...'`
+    // unconditionally; see formatCdnText()'s own doc.
+    const schema = activeCddlSchema();
+    const opts = {
+      ...readFormatOptions(),
+      ...getEnabledExtensions(),
+    };
+    setEditorText(editor, formatCdnText(text, opts, schema));
   } catch {
-    // Invalid CDN: the lint squiggle already explains the problem.
+    // Invalid CDN, or CDN that doesn't validate against an open CDDL
+    // schema: the lint squiggle (or the CDDL pane's own status) already
+    // explains the problem.
   }
 });
 
@@ -448,6 +593,8 @@ function importCborFile(file: File): void {
           onWarning: (w) => warnings.push(w.message),
         }),
       ];
+      const schema = activeCddlSchema();
+      for (const item of items) annotateIfValid(item, schema);
       const cdn = items
         .map((item) => item.toCDN(readFormatOptions()))
         .join('\n');
@@ -490,16 +637,6 @@ el('export-btn').addEventListener('click', () => {
   a.click();
   URL.revokeObjectURL(url);
 });
-
-const copyBytesBtn = el('copy-bytes');
-
-function updateCopyBytesBtn(): void {
-  const active = mode === 'annotated' || mode === 'plain';
-  copyBytesBtn.toggleAttribute(
-    'disabled',
-    !active || !conversion.ok || conversion.empty
-  );
-}
 
 copyBytesBtn.addEventListener('click', (e) => {
   if (!conversion.ok || conversion.empty) return;

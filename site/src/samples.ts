@@ -7,6 +7,34 @@ export interface Sample {
    * validation runs only while the CDDL pane is open.
    */
   cddl: string;
+  /**
+   * When `true`, selecting this sample opens the CDDL pane if it isn't
+   * already open (leaving it alone otherwise) — *unconditionally*, even
+   * overriding a reader's own earlier explicit close. For a sample whose CDN
+   * actually depends on the schema being *active*, not just present — e.g.
+   * `e'...'` external references (draft-ietf-cbor-edn-e-ref), which the CDN
+   * parser can't resolve without the schema currently open — so a reader
+   * who happened to have the pane closed sees a working conversion instead
+   * of a silent unresolved-extension fallback with no clue why. Reserve this
+   * for that case; for a sample that's merely *about* CDDL but converts
+   * correctly either way, use `showsCddl` instead.
+   * @default false
+   */
+  requiresCddl?: boolean;
+  /**
+   * When `true`, selecting this sample opens the CDDL pane if it isn't
+   * already open — but only while the reader hasn't yet made an explicit
+   * choice about it this session (no `?cddl=` in the URL yet, checked via
+   * `readCddlOpenParam`): once they've toggled it themselves (open *or*
+   * closed), that choice is left alone for every later `showsCddl` sample,
+   * and this never persists an opened-this-way state to `?cddl=` on its
+   * own. For a sample whose whole point is demonstrating a CDDL feature
+   * (e.g. "CDDL: Groups, choices & ranges") but whose CDN converts
+   * perfectly well without the schema active — unlike `requiresCddl`, which
+   * is for a sample that's actually *broken* without it.
+   * @default false
+   */
+  showsCddl?: boolean;
 }
 
 export const SAMPLES: Sample[] = [
@@ -507,6 +535,7 @@ row = {
   },
   {
     name: 'CDDL: Groups, choices & ranges',
+    showsCddl: true,
     cdn: `[
   {"name": "Kudo"},
   {"name": "Ada", "vip": true},
@@ -522,10 +551,41 @@ guest = { name: tstr, ? vip: bool }
 room-number = 100..699 / "penthouse"`,
   },
   {
-    name: 'COSE_Sign1 (RFC 9052)',
+    name: "CDDL: e'...' external references",
+    requiresCddl: true,
+    cdn: `{
+  e'group_mode' : true,
+  e'gp_enc_alg' : e'AES-CCM-16-64-128',
+        e'hkdf' : e'HMAC-256-256',
+}`,
+    cddl: `payload = {
+  ? &(hkdf: -1) => &(
+    HMAC-256-64: 4,
+    HMAC-256-256: 5,
+    HMAC-384-384: 6,
+    HMAC-512-512: 7
+  ),
+  ? &(group_mode: -3) => bool,
+  ? &(gp_enc_alg: -4) => &(
+    AES-CCM-16-64-128: 10,
+    AES-CCM-16-64-256: 11,
+    AES-CCM-64-64-128: 12,
+    AES-CCM-64-64-256: 13,
+    AES-CCM-16-128-128: 30,
+    AES-CCM-16-128-256: 31,
+    AES-CCM-64-128-128: 32,
+    AES-CCM-64-128-256: 33
+  )
+}`,
+  },
+  {
+    name: 'CDDL: COSE_Sign1 (RFC 9052)',
+    requiresCddl: true,
     cdn: `[
-  / protected   / << {1: -7} >>,
-  / unprotected / {4: '11'},
+  # e'alg'/e'kid' resolve via header_map's own &(name: value) entries below —
+  # RFC 9052's registered COSE header parameter labels, given mnemonic names.
+  / protected   / << {e'alg': -7} >>,
+  / unprotected / {e'kid': '11'},
   / payload     / 'This is the content.',
   / signature   / h'8eb33e4ca31d1c465ab05aac34cc6b23
                     d58fef5c083106c4d25a91aef0b0117e',
@@ -537,8 +597,12 @@ room-number = 100..699 / "penthouse"`,
   signature: bstr,
 ]
 header_map = {
-  ? 1 => int / tstr,   ; alg
-  ? 4 => bstr,         ; kid
+  ? &(alg: 1) => int / tstr,
+  ? &(crit: 2) => [+label],
+  ? &(content-type: 3) => tstr / int,
+  ? &(kid: 4) => bstr,
+  ? ( &(IV: 5) => bstr //
+      &(Partial-IV: 6) => bstr ),
   * label => any,
 }
 label = int / tstr`,

@@ -1263,6 +1263,7 @@ types).
 - CDN (CBOR-EDN)
   - [draft-ietf-cbor-edn-literals-25](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/25/)
   - [draft-ietf-cbor-edn-literals-27](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-literals/27/)
+  - [draft-ietf-cbor-edn-e-ref-03](https://datatracker.ietf.org/doc/draft-ietf-cbor-edn-e-ref/03/)
 - CDDL
   - [RFC 8610](https://www.rfc-editor.org/rfc/rfc8610)
   - [RFC 9682](https://www.rfc-editor.org/rfc/rfc9682)
@@ -1280,6 +1281,10 @@ Implementation notes:
   `#7.<type>` head numbers. Comment `PCHAR` validation, bare CR line endings,
   and comments ending at EOF are intentionally accepted more leniently than the
   collected ABNF.
+- Experimental support for draft-ietf-cbor-edn-e-ref's `e'...'` application
+  extension, limited to names bound directly to an integer literal (the
+  draft's own scope is broader) — a string constant, or an alias to another
+  named constant, doesn't resolve.
 
 ## License
 

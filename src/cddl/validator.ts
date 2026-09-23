@@ -247,6 +247,453 @@ export function validateItem(
   };
 }
 
+function withCtx<T>(
+  schema: CddlSchema,
+  options: ValidateOptions | undefined,
+  run: (ctx: Ctx) => T
+): T | undefined {
+  const ctx = new Ctx(
+    schema,
+    options?.maxDepth ?? 256,
+    options?.maxSteps ?? 1_000_000,
+    new Set(options?.features ?? [])
+  );
+  try {
+    return run(ctx);
+  } catch (e) {
+    if (e instanceof LimitExceeded) return undefined;
+    throw e;
+  }
+}
+
+/**
+ * Whether `item` matches `type` on its own, exactly as validation would
+ * check it at a position of that type (no generic bindings). `undefined`
+ * when the step/depth budget runs out.
+ */
+export function itemMatchesType(
+  schema: CddlSchema,
+  item: CborItem,
+  type: CddlType,
+  options?: ValidateOptions
+): boolean | undefined {
+  return withCtx(schema, options, (ctx) =>
+    matchType(item, type, undefined, [], ctx, 0)
+  );
+}
+
+/** Opaque generic-parameter bindings in force at some point of a match. */
+export type CddlEnv = Env;
+
+/**
+ * The group member that consumed one map entry on the validator's own
+ * successful path — its member key, value type, and the generic bindings
+ * in force there.
+ */
+export interface MapMember {
+  readonly memberKey: CddlMemberKey;
+  readonly type: CddlType;
+  readonly env: CddlEnv;
+}
+
+/** One map group a type can denote, with its generic bindings. */
+export interface MapGroupTarget {
+  readonly group: CddlGroup;
+  readonly env: CddlEnv;
+}
+
+/**
+ * Every map group (`{...}`) `type` can denote, following references,
+ * parentheses, choices and generic bindings exactly as `matchType()` does.
+ * `undefined` when some alternative could still match a map some *other*
+ * way this can't see into — `any`/`#5`, a control operator, `~unwrap`, an
+ * `&(...)` type, an undefined name — so no single group's assignment is
+ * known to be the one validation used.
+ */
+export function mapGroupsOfType(
+  schema: CddlSchema,
+  type: CddlType,
+  env: CddlEnv
+): MapGroupTarget[] | undefined {
+  return withCtx(schema, undefined, (ctx) => {
+    const out: MapGroupTarget[] = [];
+    return collectMapGroups(type, env, ctx, [], out) ? out : undefined;
+  });
+}
+
+function collectMapGroups(
+  type: CddlType,
+  env: Env,
+  ctx: Ctx,
+  stack: string[],
+  out: MapGroupTarget[]
+): boolean {
+  for (const t1 of type.alternatives) {
+    if (t1.op) return false;
+    if (!collectMapGroups2(t1.target, env, ctx, stack, out)) return false;
+  }
+  return true;
+}
+
+function collectMapGroups2(
+  t2: CddlType2,
+  env: Env,
+  ctx: Ctx,
+  stack: string[],
+  out: MapGroupTarget[]
+): boolean {
+  switch (t2.kind) {
+    case 'map':
+      out.push({ group: t2.group, env });
+      return true;
+    case 'paren':
+      return collectMapGroups(t2.type, env, ctx, stack, out);
+    case 'ref': {
+      const binding = env?.get(t2.name);
+      if (binding && !t2.genericArgs) {
+        if (binding.type1.op) return false;
+        return collectMapGroups2(
+          binding.type1.target,
+          binding.env,
+          ctx,
+          stack,
+          out
+        );
+      }
+      if (stack.length > 64) return false;
+      if (!t2.genericArgs && stack.includes(t2.name)) return true;
+      const defs = ruleDefs(ctx, t2.name);
+      if (!defs) return false;
+      stack.push(t2.name);
+      try {
+        for (const def of defs) {
+          const defEnv = bindGenericsForDef(def, t2.genericArgs, env);
+          if (isPlainTypeEntry(def.body)) {
+            if (!collectMapGroups(def.body.value, defEnv, ctx, stack, out))
+              return false;
+            continue;
+          }
+          // Mirrors matchRuleName(): a group body is usable as a type only
+          // when every choice is a single plain entry; otherwise it never
+          // matches anything here.
+          const choices = choicesOfBody(def.body);
+          if (!choices.every((c) => c.length === 1 && isPlainTypeEntry(c[0]!)))
+            continue;
+          for (const [only] of choices)
+            if (
+              !collectMapGroups(
+                (only as Extract<CddlGroupEntry, { kind: 'entry' }>).value,
+                defEnv,
+                ctx,
+                stack,
+                out
+              )
+            )
+              return false;
+        }
+      } finally {
+        stack.pop();
+      }
+      return true;
+    }
+    case 'major':
+      return t2.major !== 5;
+    case 'value':
+    case 'array':
+    case 'tagged': // requires a tag, never a bare map
+      return true;
+    default:
+      return false; // any, unwrap, enum
+  }
+}
+
+/**
+ * The literal text a member key requires, when it requires exactly one:
+ * `name:`, `"name":`, or `"name" =>` (a text-literal key type).
+ */
+export function plainTextSpelling(mk: CddlMemberKey): string | undefined {
+  if (mk.kind === 'bareword') return mk.key;
+  if (mk.kind === 'value')
+    return mk.key.type === 'text' ? mk.key.value : undefined;
+  const t2 = mk.key.target;
+  return !mk.key.op && t2.kind === 'value' && t2.type === 'text'
+    ? t2.value
+    : undefined;
+}
+
+/**
+ * Every spelling used as a plain text member key anywhere in `target`'s
+ * group — `name:`, `"name":`, or a key type that accepts a text literal
+ * (`"name" =>`, a rule or `/` choice of such literals, or a generic
+ * parameter bound to one, e.g. `K => …` in `G<"name">`) — through inline
+ * sub-groups, bare group references and `~unwrap`ped groups, expanded
+ * exactly as matching expands them (`expandEntry()`), across every choice
+ * and every distinct generic instantiation. `undefined` when the expansion
+ * runs out of budget.
+ */
+export function plainTextMemberKeys(
+  schema: CddlSchema,
+  target: MapGroupTarget
+): ReadonlySet<string> | undefined {
+  return withCtx(schema, undefined, (ctx) => {
+    const names = new Set<string>();
+    // The same group under the same (normalized) bindings can't add
+    // anything new; under different bindings — `G<"x">` vs `G<"y">` — it
+    // can, so both are part of the key.
+    const visited = new Set<string>();
+    const ids = new WeakMap<object, number>();
+    let nextId = 0;
+    const idOf = (node: object): number => {
+      let id = ids.get(node);
+      if (id === undefined) ids.set(node, (id = nextId++));
+      return id;
+    };
+    const visit = (choices: readonly GroupChoice[], depth: number): void => {
+      ctx.checkDepth(depth);
+      for (const choice of choices) {
+        const key = `${idOf(choice.entries)}|${envSignature(idOf, choice.env)}`;
+        if (visited.has(key)) continue;
+        visited.add(key);
+        for (const entry of choice.entries) {
+          ctx.step();
+          const m = expandEntry(entry, choice.env, ctx);
+          if (m.kind === 'group') visit(m.choices, depth + 1);
+          else if (m.memberKey) {
+            const texts = memberKeyTexts(m.memberKey, m.env, ctx);
+            if (!texts) throw UNKNOWN_KEY;
+            for (const t of texts.literals) names.add(t);
+          }
+        }
+      }
+    };
+    try {
+      visit(plainChoices(target.group, target.env), 0);
+    } catch (e) {
+      if (e === UNKNOWN_KEY) return undefined;
+      throw e;
+    }
+    return names;
+  });
+}
+
+const UNKNOWN_KEY = new Error('member key type not resolvable');
+
+/**
+ * A structural signature of `env`: each binding followed through bare
+ * references to other bound parameters down to the type it finally stands
+ * for, so a recursive instantiation (`G<T> = (…, ? G<T>)`) that re-binds a
+ * parameter to the same thing yields the same signature at every level.
+ */
+function envSignature(idOf: (node: object) => number, env: Env): string {
+  if (!env) return '';
+  const parts: string[] = [];
+  for (const [name, binding] of env) {
+    let b = binding;
+    for (let hops = 0; hops < 64; hops++) {
+      const t = b.type1;
+      if (t.op || t.target.kind !== 'ref' || t.target.genericArgs) break;
+      const next = b.env?.get(t.target.name);
+      if (!next) break;
+      b = next;
+    }
+    parts.push(`${name}=${idOf(b.type1)}(${envSignature(idOf, b.env)})`);
+  }
+  return parts.sort().join(',');
+}
+
+/**
+ * What text a member-key type accepts: the specific text `literals` it
+ * can equal, and whether it also accepts arbitrary text (`wildcard`, e.g.
+ * `tstr`/`any` — not a plain spelling, so not a label conflict). A
+ * function returning `undefined` means *unknown*: it might accept some
+ * specific literal this can't see (e.g. a control operator narrowing
+ * `tstr` to `"x"`), so no conclusion about any spelling can be drawn.
+ */
+interface KeyTexts {
+  readonly literals: ReadonlySet<string>;
+  readonly wildcard: boolean;
+}
+
+const NO_TEXT: KeyTexts = { literals: new Set(), wildcard: false };
+const ANY_TEXT: KeyTexts = { literals: new Set(), wildcard: true };
+
+/**
+ * Control operators whose result is always a subset of their target's own
+ * values — so on a target of known literals they can only drop some.
+ */
+const NARROWING_CONTROLS = new Set([
+  'size',
+  'bits',
+  'regexp',
+  'pcre',
+  'and',
+  'within',
+  'lt',
+  'le',
+  'gt',
+  'ge',
+  'eq',
+  'ne',
+  'default',
+  'feature',
+]);
+
+function mergeKeyTexts(a: KeyTexts, b: KeyTexts): KeyTexts {
+  return {
+    literals: new Set([...a.literals, ...b.literals]),
+    wildcard: a.wildcard || b.wildcard,
+  };
+}
+
+function memberKeyTexts(
+  mk: CddlMemberKey,
+  env: Env,
+  ctx: Ctx
+): KeyTexts | undefined {
+  if (mk.kind === 'bareword')
+    return { literals: new Set([mk.key]), wildcard: false };
+  if (mk.kind === 'value')
+    return mk.key.type === 'text'
+      ? { literals: new Set([mk.key.value]), wildcard: false }
+      : NO_TEXT;
+  return keyTextsOfType1(mk.key, env, ctx, []);
+}
+
+function keyTextsOfType(
+  type: CddlType,
+  env: Env,
+  ctx: Ctx,
+  stack: string[]
+): KeyTexts | undefined {
+  let out = NO_TEXT;
+  for (const alt of type.alternatives) {
+    const t = keyTextsOfType1(alt, env, ctx, stack);
+    if (!t) return undefined;
+    out = mergeKeyTexts(out, t);
+  }
+  return out;
+}
+
+function keyTextsOfType1(
+  t1: CddlType1,
+  env: Env,
+  ctx: Ctx,
+  stack: string[]
+): KeyTexts | undefined {
+  ctx.step();
+  const target = keyTextsOfType2(t1.target, env, ctx, stack);
+  if (!target || !t1.op) return target;
+  // A control or range over a type that never holds text can't yield text.
+  if (target.literals.size === 0 && !target.wildcard) return target;
+  if (
+    t1.op.kind === 'ctl' &&
+    NARROWING_CONTROLS.has(t1.op.name) &&
+    !target.wildcard
+  )
+    return target;
+  // Could narrow arbitrary text down to one literal, or build a new one.
+  return undefined;
+}
+
+function keyTextsOfType2(
+  t2: CddlType2,
+  env: Env,
+  ctx: Ctx,
+  stack: string[]
+): KeyTexts | undefined {
+  switch (t2.kind) {
+    case 'value':
+      return t2.type === 'text'
+        ? { literals: new Set([t2.value]), wildcard: false }
+        : NO_TEXT;
+    case 'paren':
+      return keyTextsOfType(t2.type, env, ctx, stack);
+    case 'ref': {
+      const binding = env?.get(t2.name);
+      if (binding && !t2.genericArgs)
+        return keyTextsOfType1(binding.type1, binding.env, ctx, stack);
+      ctx.checkDepth(stack.length);
+      if (!t2.genericArgs && stack.includes(t2.name)) return NO_TEXT;
+      const defs = ruleDefs(ctx, t2.name);
+      if (!defs) return undefined;
+      stack.push(t2.name);
+      try {
+        let out = NO_TEXT;
+        for (const def of defs) {
+          const defEnv = bindGenericsForDef(def, t2.genericArgs, env);
+          // Mirrors matchRuleName(): a group body is usable as a type only
+          // when every choice is a single plain entry.
+          const types = isPlainTypeEntry(def.body)
+            ? [def.body.value]
+            : choicesOfBody(def.body).every(
+                  (c) => c.length === 1 && isPlainTypeEntry(c[0]!)
+                )
+              ? choicesOfBody(def.body).map(
+                  ([only]) =>
+                    (only as Extract<CddlGroupEntry, { kind: 'entry' }>).value
+                )
+              : [];
+          for (const type of types) {
+            const t = keyTextsOfType(type, defEnv, ctx, stack);
+            if (!t) return undefined;
+            out = mergeKeyTexts(out, t);
+          }
+        }
+        return out;
+      } finally {
+        stack.pop();
+      }
+    }
+    case 'enum': {
+      // `&(a: "x", …)` accepts each entry's own value.
+      if (t2.group.kind !== 'group') return undefined;
+      let out = NO_TEXT;
+      for (const choice of t2.group.choices)
+        for (const entry of choice) {
+          if (entry.kind !== 'entry' || !entry.memberKey) return undefined;
+          const t = keyTextsOfType(entry.value, env, ctx, stack);
+          if (!t) return undefined;
+          out = mergeKeyTexts(out, t);
+        }
+      return out;
+    }
+    case 'unwrap': {
+      const inner = resolveUnwrapTagType(t2.ref, env, ctx, 0);
+      return inner
+        ? keyTextsOfType(inner.type, inner.env, ctx, stack)
+        : undefined;
+    }
+    case 'major':
+      return t2.major === 3 ? ANY_TEXT : NO_TEXT;
+    case 'any':
+      return ANY_TEXT;
+    default:
+      return NO_TEXT; // map, array, tagged: never a text string
+  }
+}
+
+/**
+ * Match `map` against one map group exactly as validation does
+ * (`matchMapGroup()`), returning which member consumed each of its entries
+ * on the successful path (`false` for one left unconsumed, e.g. an elided
+ * `...` entry). `null` when it doesn't match; `undefined` when the budget
+ * runs out.
+ */
+export function traceMapGroup(
+  schema: CddlSchema,
+  map: CborMap,
+  target: MapGroupTarget,
+  options?: ValidateOptions
+): readonly (MapMember | false)[] | null | undefined {
+  return withCtx(schema, options, (ctx) => {
+    let owners: (MapMember | false)[] | undefined;
+    const ok = matchMapGroup(map, target.group, target.env, [], ctx, 0, (c) => {
+      owners = c.slice();
+    });
+    return ok && owners ? owners : null;
+  });
+}
+
 // ─── Rule resolution ──────────────────────────────────────────────────────────
 
 function ruleDefs(ctx: Ctx, name: string): readonly CddlRule[] | undefined {
@@ -1480,10 +1927,11 @@ function matchMapGroup(
   env: Env,
   path: readonly PathSeg[],
   ctx: Ctx,
-  depth: number
+  depth: number,
+  onMatch?: (consumed: readonly (MapMember | false)[]) => void
 ): boolean {
   ctx.checkDepth(depth);
-  const consumed = new Array<boolean>(map.entries.length).fill(false);
+  const consumed = new Array<MapMember | false>(map.entries.length).fill(false);
   for (const choice of plainChoices(group, env)) {
     consumed.fill(false);
     if (
@@ -1496,7 +1944,11 @@ function matchMapGroup(
         path,
         ctx,
         depth,
-        () => mapFullyConsumed(map, consumed, path, ctx, group)
+        () => {
+          if (!mapFullyConsumed(map, consumed, path, ctx, group)) return false;
+          onMatch?.(consumed);
+          return true;
+        }
       )
     )
       return true;
@@ -1506,7 +1958,7 @@ function matchMapGroup(
 
 function mapFullyConsumed(
   map: CborMap,
-  consumed: boolean[],
+  consumed: (MapMember | false)[],
   path: readonly PathSeg[],
   ctx: Ctx,
   node: CddlNodeBase
@@ -1539,7 +1991,7 @@ function mapSeq(
   map: CborMap,
   entries: readonly CddlGroupEntry[],
   k: number,
-  consumed: boolean[],
+  consumed: (MapMember | false)[],
   env: Env,
   path: readonly PathSeg[],
   ctx: Ctx,
@@ -1567,7 +2019,7 @@ function mapSeq(
       if (!keyMatches(m.memberKey, key, m.env, path, ctx, depth)) continue;
       const valuePath = [...path, keySeg(key, i)];
       if (matchType(value, m.type, m.env, valuePath, ctx, depth + 1)) {
-        consumed[i] = true;
+        consumed[i] = { memberKey: m.memberKey, type: m.type, env: m.env };
         count++;
         continue;
       }

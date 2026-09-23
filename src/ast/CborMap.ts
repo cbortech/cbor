@@ -320,7 +320,10 @@ export class CborMap extends CborItem {
       const holder: Record<string, unknown> = {};
       for (let i = 0; i < this.entries.length; i++) {
         const [k, v] = this.entries[i];
-        const key = k instanceof CborTextString ? k.value : k.toCDN();
+        const key =
+          k instanceof CborTextString
+            ? k.value
+            : (k._jsObjectKey(options) ?? k.toCDN());
         const raw = convertValue(k, v, key, i, optNoReviver, !!reviver);
         if (key === '__proto__') {
           Object.defineProperty(holder, key, {
@@ -340,11 +343,19 @@ export class CborMap extends CborItem {
       const lastIdx = new Map<string, number>();
       for (let i = 0; i < this.entries.length; i++) {
         const [k] = this.entries[i];
-        lastIdx.set(k instanceof CborTextString ? k.value : k.toCDN(), i);
+        lastIdx.set(
+          k instanceof CborTextString
+            ? k.value
+            : (k._jsObjectKey(options) ?? k.toCDN()),
+          i
+        );
       }
       for (let i = 0; i < this.entries.length; i++) {
         const [k, v] = this.entries[i];
-        const key = k instanceof CborTextString ? k.value : k.toCDN();
+        const key =
+          k instanceof CborTextString
+            ? k.value
+            : (k._jsObjectKey(options) ?? k.toCDN());
         if (lastIdx.get(key) !== i) continue;
         const val = convertValue(k, v, key, i, options, false);
         const rv = reviver.call(holder, key, val);
@@ -370,8 +381,50 @@ export class CborMap extends CborItem {
 
     if (options?.mapAs === 'entries') return toEntries();
     if (options?.mapAs === 'object') return toObject();
-    if (this.entries.every(([k]) => k instanceof CborTextString))
-      return toObject();
+    // A key is object-eligible under 'auto' when it's a text string, or when
+    // it offers an alternate key spelling via `_jsObjectKey()` (a CDDL
+    // e-ref annotated integer key; see `extensions/eref.ts`) — which, by
+    // default, every such key does: `eRefKeys` defaults to `true` for a key
+    // that exists only because a schema named it in the first place, so
+    // only an *explicit* `eRefKeys: false` turns this off (see
+    // `CborERefUint`/`CborERefNint`'s own `_jsObjectKey()`, which under
+    // `eRefKeys: false` falls back to the key's own plain numeric string
+    // rather than `undefined` — so `eRefKeys !== false` is checked here too;
+    // it returns `undefined` for a label `fromJS()` couldn't convert back,
+    // making that key ineligible like any plain integer).
+    //
+    // Eligibility alone isn't enough, though: an e-ref name can collide
+    // with an unrelated entry's own genuine text key of the same spelling
+    // (e.g. `&(title: -1)` alongside a literal `"title"` key in the same
+    // map) — 'auto' silently overwriting one with the other, via the same
+    // property, would be a much less obvious data loss than the *already*
+    // -accepted case of two literal duplicate text keys colliding (which
+    // 'auto' already tolerates today, independent of e-ref, so that case is
+    // deliberately left alone below). Falls back to entries/Map whenever a
+    // collision involves at least one non-text side; an explicit
+    // `mapAs: 'object'` still accepts it, same as it already does for a
+    // literal duplicate key.
+    const objectEligible = (k: CborItem): boolean =>
+      k instanceof CborTextString ||
+      (options?.eRefKeys !== false && k._jsObjectKey(options) !== undefined);
+    const isAutoObjectSafe = (): boolean => {
+      // Value: whether every occurrence of this key string seen so far was
+      // a genuine CborTextString (not e.g. an e-ref name).
+      const allTextSoFar = new Map<string, boolean>();
+      for (const [k] of this.entries) {
+        if (!objectEligible(k)) return false;
+        const isText = k instanceof CborTextString;
+        const key = isText
+          ? (k as CborTextString).value
+          : k._jsObjectKey(options)!;
+        const priorAllText = allTextSoFar.get(key);
+        if (priorAllText !== undefined && !(priorAllText && isText))
+          return false;
+        allTextSoFar.set(key, isText);
+      }
+      return true;
+    };
+    if (isAutoObjectSafe()) return toObject();
     return toEntries();
   }
 }
