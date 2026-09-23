@@ -27,7 +27,7 @@ import {
 import { page } from 'vitest/browser';
 import { CBOR } from '@cbortech/cbor';
 import { bytesToHexString } from './convert';
-import { SAMPLES } from './samples';
+import { EXAMPLES } from './examples';
 
 const byId = <T extends HTMLElement>(id: string): T =>
   document.getElementById(id) as T;
@@ -115,7 +115,7 @@ describe('playground', () => {
   });
 
   describe('boot', () => {
-    test('loads the default sample with the CDDL pane closed', () => {
+    test('loads the default example with the CDDL pane closed', () => {
       expect(cmText('editor')).toContain('"Image"');
       const paneCddl = document.querySelector('.pane-cddl')!;
       expect(paneCddl.hasAttribute('hidden')).toBe(true);
@@ -124,7 +124,7 @@ describe('playground', () => {
       );
     });
 
-    test('renders CBOR bytes for the default sample', () => {
+    test('renders CBOR bytes for the default example', () => {
       expect(byId('byte-count').textContent).toMatch(/\d+ bytes?/);
       expect(
         byId('hexview').querySelectorAll('.hex-bytes').length
@@ -374,8 +374,8 @@ describe('playground', () => {
       expect(spy).toHaveBeenCalledWith(cmText('editor'));
     });
 
-    test('Import replaces the editor text and resets the samples dropdown', async () => {
-      byId<HTMLSelectElement>('samples').selectedIndex = 1;
+    test('Import replaces the editor text and resets the examples dropdown', async () => {
+      byId<HTMLSelectElement>('examples').selectedIndex = 1;
       const file = new File(['{"greeting": "hi from import"}'], 'data.cdn', {
         type: 'text/plain',
       });
@@ -384,7 +384,7 @@ describe('playground', () => {
         () => expect(cmText('editor')).toContain('hi from import'),
         { timeout: 2000 }
       );
-      expect(byId<HTMLSelectElement>('samples').selectedIndex).toBe(0);
+      expect(byId<HTMLSelectElement>('examples').selectedIndex).toBe(0);
     });
 
     test('Drag & drop a file onto the editor also imports it', async () => {
@@ -461,12 +461,12 @@ describe('playground', () => {
 
   describe('CBOR pane', () => {
     // Earlier CDN-pane tests leave arbitrary content loaded (imports,
-    // drag & drop); reload the default sample — a map, which several
+    // drag & drop); reload the default example — a map, which several
     // assertions below depend on — before each test, back on Annotated.
     beforeEach(async () => {
-      byId<HTMLSelectElement>('samples').value = SAMPLES[0]!.name;
-      byId<HTMLSelectElement>('samples').dispatchEvent(new Event('change'));
-      await vi.waitFor(() => expect(cmText('editor')).toBe(SAMPLES[0]!.cdn));
+      byId<HTMLSelectElement>('examples').value = EXAMPLES[0]!.name;
+      byId<HTMLSelectElement>('examples').dispatchEvent(new Event('change'));
+      await vi.waitFor(() => expect(cmText('editor')).toBe(EXAMPLES[0]!.cdn));
       document
         .querySelector<HTMLButtonElement>(
           '.mode-tabs .tab[data-mode=annotated]'
@@ -597,7 +597,7 @@ describe('playground', () => {
 
       // Default options have "Inline leaf containers" checked, so a flat
       // array of scalars decoded from pasted bytes must stay on one line.
-      // (The default sample's "IDs" field already contains this same array,
+      // (The default example's "IDs" field already contains this same array,
       // so wait for the exact single-line replacement rather than a substring
       // match, which the stale pre-conversion text would also satisfy.)
       await page.elementLocator(hexEditContent()).fill(hex);
@@ -630,14 +630,14 @@ describe('playground', () => {
   });
 
   describe('CDDL pane', () => {
-    test('the toggle switch opens the pane and validates the matching sample', async () => {
+    test('the toggle switch opens the pane and validates the matching example', async () => {
       const toggle = byId('cddl-toggle-btn');
       const pane = document.querySelector('.pane-cddl')!;
       // A prior test may have left non-default CDN loaded; the default
-      // sample is what the initial CDDL schema was written to match.
-      byId<HTMLSelectElement>('samples').value = SAMPLES[0]!.name;
-      byId<HTMLSelectElement>('samples').dispatchEvent(new Event('change'));
-      await vi.waitFor(() => expect(cmText('editor')).toBe(SAMPLES[0]!.cdn));
+      // example is what the initial CDDL schema was written to match.
+      byId<HTMLSelectElement>('examples').value = EXAMPLES[0]!.name;
+      byId<HTMLSelectElement>('examples').dispatchEvent(new Event('change'));
+      await vi.waitFor(() => expect(cmText('editor')).toBe(EXAMPLES[0]!.cdn));
 
       expect(toggle.getAttribute('aria-pressed')).toBe('false');
       toggle.click();
@@ -681,8 +681,8 @@ describe('playground', () => {
       expect(spy).toHaveBeenCalledWith(cmText('cddl-editor'));
     });
 
-    test('Import loads a new schema, resets samples, and re-validates', async () => {
-      byId<HTMLSelectElement>('samples').selectedIndex = 2;
+    test('Import loads a new schema, resets examples, and re-validates', async () => {
+      byId<HTMLSelectElement>('examples').selectedIndex = 2;
       const file = new File(
         ['root = { name: tstr, ? age: uint }'],
         'schema.cddl',
@@ -693,8 +693,8 @@ describe('playground', () => {
         () => expect(cmText('cddl-editor')).toContain('root ='),
         { timeout: 2000 }
       );
-      expect(byId<HTMLSelectElement>('samples').selectedIndex).toBe(0);
-      // The default sample's CDN no longer satisfies this unrelated schema.
+      expect(byId<HTMLSelectElement>('examples').selectedIndex).toBe(0);
+      // The default example's CDN no longer satisfies this unrelated schema.
       const status = byId('cddl-status');
       expect(status.className).toContain('error');
     });
@@ -728,7 +728,7 @@ describe('playground', () => {
       expect(new URLSearchParams(location.search).get('cddl')).toBe('0');
     });
 
-    test('selecting a sample that requires CDDL opens the pane and persists ?cddl=1', async () => {
+    test('selecting an example that requires CDDL opens the pane and persists ?cddl=1', async () => {
       // Starting state, left by the previous test: pane closed, ?cddl=0 —
       // exactly the state a user who manually closed the pane earlier would
       // be in (see the bug this guards against, below).
@@ -737,10 +737,10 @@ describe('playground', () => {
       );
       expect(new URLSearchParams(location.search).get('cddl')).toBe('0');
 
-      const eRefSample = SAMPLES.find((s) => s.requiresCddl);
-      expect(eRefSample).toBeDefined();
-      byId<HTMLSelectElement>('samples').value = eRefSample!.name;
-      byId<HTMLSelectElement>('samples').dispatchEvent(new Event('change'));
+      const eRefExample = EXAMPLES.find((s) => s.requiresCddl);
+      expect(eRefExample).toBeDefined();
+      byId<HTMLSelectElement>('examples').value = eRefExample!.name;
+      byId<HTMLSelectElement>('examples').dispatchEvent(new Event('change'));
 
       const toggle = byId('cddl-toggle-btn');
       const pane = document.querySelector('.pane-cddl')!;
@@ -778,7 +778,7 @@ describe('playground', () => {
     });
 
     test('JS tab: schema-named keys render by name, not as MapEntries', async () => {
-      // Continues from the previous test: e-ref sample's schema active.
+      // Continues from the previous test: e-ref example's schema active.
       // The JS pane renders `binAst` — decoded straight from the *encoded
       // bytes*, not the already-annotated CDN AST — so this only passes if
       // convertCdn() itself re-annotates the binary side too (see
@@ -810,7 +810,7 @@ describe('playground', () => {
     });
 
     test("unchecking the e'...' extension makes e'hkdf' unresolved even with the schema active", async () => {
-      // Continues from the previous test: e-ref sample loaded, pane open,
+      // Continues from the previous test: e-ref example loaded, pane open,
       // no squiggle. The e'...' checkbox (Extensions popover) gates
       // createERefExtension() registration independently of whether the
       // CDDL pane itself is open — see isERefEnabled() in ui/toolbar.ts.
@@ -843,7 +843,7 @@ describe('playground', () => {
     });
 
     test("Format respects the e'...' checkbox too, not just the live conversion", async () => {
-      // Continues from the previous test: e-ref sample's schema active,
+      // Continues from the previous test: e-ref example's schema active,
       // e'...' checkbox re-checked. formatCdnText() (main.ts's format-btn
       // handler) used to always pass the library's own `cddl` option
       // directly, which registers/annotates e'...' unconditionally — this
@@ -875,7 +875,7 @@ describe('playground', () => {
     });
 
     test('closing the CDDL pane brings back the missing-extension squiggle', async () => {
-      // Continues from the previous test: e-ref sample loaded, pane open,
+      // Continues from the previous test: e-ref example loaded, pane open,
       // no squiggle. Closing it should make e'hkdf' unresolved again, in
       // the editor's own lint pass just as much as in the bytes pane.
       byId('cddl-toggle-btn').click();
@@ -903,7 +903,7 @@ describe('playground', () => {
     });
 
     test("Edit tab: typing bytes for a schema-named key annotates it as e'group_mode' in the CDN pane", async () => {
-      // Continues from the previous test: e-ref sample's schema active.
+      // Continues from the previous test: e-ref example's schema active.
       // Typed hex decodes to {-3: true} — the bare integer key this same
       // schema names, with a plain bool *value* (group_mode's own value
       // type isn't an enum, so only the key annotates here — see the next
@@ -911,7 +911,7 @@ describe('playground', () => {
       // read-only Annotated/Hex views, which deliberately render raw values
       // via appPrefix: false) must annotate it the same way the CDN pane's
       // own conversion does. The CDN editor already contains "e'group_mode'"
-      // from the still-loaded sample text itself, so the wait below polls
+      // from the still-loaded example text itself, so the wait below polls
       // for the exact expected result rather than a loose substring match
       // that the stale content would already satisfy.
       document
@@ -939,7 +939,7 @@ describe('playground', () => {
     });
 
     test("Edit tab: typing bytes for a schema-named value (a closed &(name: value) choice) annotates it as e'HMAC-256-256' too", async () => {
-      // Continues from the previous test: e-ref sample's schema active.
+      // Continues from the previous test: e-ref example's schema active.
       // Typed hex decodes to {-1: 5} — hkdf's own value type is
       // &(HMAC-256-64: 4, HMAC-256-256: 5, …), a closed choice of named
       // integer constants, so annotateERefKeys() labels the *value* too,
@@ -966,7 +966,7 @@ describe('playground', () => {
     });
 
     test('toggling CDDL while the Edit tab is active reconverts without corrupting the typed hex', async () => {
-      // Continues from the previous test: e-ref sample's schema active.
+      // Continues from the previous test: e-ref example's schema active.
       // Stay on the Edit tab (not the previous test's own ending state —
       // re-establish it explicitly so this test doesn't depend on that).
       document
@@ -1018,7 +1018,7 @@ describe('playground', () => {
     });
 
     test('emptying the Edit tab, then immediately toggling CDDL, leaves both it and the CDN pane empty', async () => {
-      // Continues from the previous test: e-ref sample's schema active.
+      // Continues from the previous test: e-ref example's schema active.
       document
         .querySelector<HTMLButtonElement>('.mode-tabs .tab[data-mode=edit]')!
         .click();

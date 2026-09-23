@@ -41,13 +41,13 @@ export interface CddlPane {
    */
   getSchema(): CddlSchema | null;
   /**
-   * Replace the schema text (sample selection from the CDN pane). Compiles
+   * Replace the schema text (example selection from the CDN pane). Compiles
    * immediately; validation still only runs while the pane is open.
    */
   setText(text: string): void;
   /** Open or close the pane programmatically, same as clicking the toggle
-   * button — e.g. a sample whose CDN only makes sense with its schema
-   * active (see `Sample.requiresCddl`). Does *not* invoke `onToggle` (that's
+   * button — e.g. an example whose CDN only makes sense with its schema
+   * active (see `Example.requiresCddl`). Does *not* invoke `onToggle` (that's
    * reserved for the user's own explicit toggle, which persists to the
    * `?cddl=` query parameter — see `CddlPaneOptions.onToggle`). */
   setOpen(open: boolean): void;
@@ -60,7 +60,7 @@ export interface CddlPaneOptions {
   getConversion(): Conversion;
   /** Set/clear the hex view's validation-failure byte range. */
   hexHighlight(range: { byteStart: number; byteEnd: number } | null): void;
-  /** Schema shown initially: from the share hash, or the default sample. */
+  /** Schema shown initially: from the share hash, or the default example. */
   initialCddl: string;
   /**
    * Whether the pane should open on load (normally closed). Computed by the

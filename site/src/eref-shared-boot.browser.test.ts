@@ -13,7 +13,7 @@
  * navigation to a shared link would already have it.
  */
 import { beforeAll, describe, expect, test, vi } from 'vitest';
-import { SAMPLES } from './samples';
+import { EXAMPLES } from './examples';
 import { encodeShareHash } from './ui/toolbar';
 
 const byId = <T extends HTMLElement>(id: string): T =>
@@ -21,13 +21,13 @@ const byId = <T extends HTMLElement>(id: string): T =>
 
 describe('booting straight from a shared e-ref link', () => {
   beforeAll(async () => {
-    const sample = SAMPLES.find((s) => s.requiresCddl)!;
+    const example = EXAMPLES.find((s) => s.requiresCddl)!;
     // Exactly what a real click on a shared link (built by main.ts's own
     // share-btn handler) lands the browser on — present *before* main.ts is
-    // ever imported, as opposed to the sample-selection flow (also
+    // ever imported, as opposed to the example-selection flow (also
     // requiresCddl-driven, but from an already-running page, covered
     // separately in playground.browser.test.ts).
-    const hash = encodeShareHash({ cdn: sample.cdn, cddl: sample.cddl });
+    const hash = encodeShareHash({ cdn: example.cdn, cddl: example.cddl });
     history.replaceState(null, '', hash);
 
     const html = await (await fetch('/index.html')).text();
