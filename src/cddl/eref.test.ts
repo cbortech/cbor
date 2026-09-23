@@ -1536,6 +1536,43 @@ label = int / tstr`;
     const item = CBOR.fromCDN(`[{4: h'31'}]`, { cddl });
     expect(item.toCDN()).toBe(`[{4:'1'}]`);
   });
+
+  describe('wrapped in its #6.18 tag (COSE_Sign1_Tagged)', () => {
+    const TAGGED_CDDL = `COSE_Sign1_Tagged = #6.18(COSE_Sign1)\n${COSE_SIGN1_CDDL}`;
+
+    test("Format keeps an explicit e'kid' inside the tag", () => {
+      const item = CBOR.fromCDN(
+        `18([<< {e'alg': -7} >>, {e'kid': '11'}, 'payload', h'00'])`,
+        { cddl: TAGGED_CDDL }
+      );
+      expect(item.toCDN()).toBe(
+        `18([<<{e'alg':-7}>>,{e'kid':'11'},'payload',h'00'])`
+      );
+    });
+
+    test('raw bytes annotate keys inside the tag, including <<...>>', () => {
+      const bytes = CBOR.fromCDN(
+        `18([<<{1: -7}>>, {4: '11'}, 'payload', h'00'])`
+      ).toCBOR();
+      const item = CBOR.fromCBOR(bytes, { cddl: TAGGED_CDDL });
+      expect(item.toCDN()).toBe(
+        `18([<<{e'alg':-7}>>,{e'kid':'11'},'payload',h'00'])`
+      );
+      expect(item.toCBOR()).toEqual(bytes);
+    });
+
+    test('a different tag number gets no names from #6.18', () => {
+      const cddl = `root = #6.18({ ? &(kid: 4) => bstr }) / #6.19(any)`;
+      const item = CBOR.fromCDN(`19({4: h'31'})`, { cddl });
+      expect(item.toCDN()).toBe(`19({4:'1'})`);
+    });
+
+    test('no names when a non-tag-typed alternative also matches the tag', () => {
+      const cddl = `root = #6.18({ ? &(kid: 4) => bstr }) / any`;
+      const item = CBOR.fromCDN(`18({4: h'31'})`, { cddl });
+      expect(item.toCDN()).toBe(`18({4:'1'})`);
+    });
+  });
 });
 
 describe("a label fromJS() wouldn't convert back is display-only in toJS()", () => {

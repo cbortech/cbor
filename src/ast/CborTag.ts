@@ -17,6 +17,7 @@ import {
   renderSingleChildWithComments,
 } from '../cdn/serialize-utils';
 import { bytesToSpacedHexUpper } from '../utils/hex';
+import { rfc9277TagLabel } from '../cbor/tagLabels';
 
 /** CBOR Major Type 6 — tagged data item. */
 export class CborTag extends CborItem {
@@ -130,6 +131,17 @@ export class CborTag extends CborItem {
     return `${tagStr}${suffix}${wrapped}`;
   }
 
+  /**
+   * The hex-dump comment for this tag's head: `Tag N`, followed by an
+   * RFC 9277 label when there is one — `Tag 55799 (self-described CBOR)`,
+   * `Tag 1668546929 (CoAP Content-Format 112)`, `Tag 1330664270 ("OPSN")`
+   * for a protocol-specific tag spelling four printable ASCII characters.
+   */
+  hexDumpComment(): string {
+    const label = rfc9277TagLabel(this.tag);
+    return label ? `Tag ${this.tag} (${label})` : `Tag ${this.tag}`;
+  }
+
   override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
     const lines: AnnotatedLine[] = [
       {
@@ -137,7 +149,7 @@ export class CborTag extends CborItem {
         hex: bytesToSpacedHexUpper(
           writeHead(MT_TAG, this.tag, this.encodingWidth)
         ),
-        comment: `Tag ${this.tag}`,
+        comment: this.hexDumpComment(),
       },
     ];
     pushAll(

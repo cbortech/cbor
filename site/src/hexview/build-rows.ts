@@ -133,7 +133,7 @@ export function buildRows(binAst: CborItem, bytes: Uint8Array): HexRow[] {
       // (no byte offsets) render as a single row instead.
       const content = node.content;
       if (content.start !== undefined && content.end !== undefined) {
-        push(depth, [headSpan], `Tag ${node.tag}`);
+        push(depth, [headSpan], node.hexDumpComment());
         walk(content, depth + 1);
         return;
       }
