@@ -1211,6 +1211,29 @@ const value = CBOR.parse('{"x": 12, "y": -3}', {
 検証オプションは `cddlValidationOptions` で渡せます。`cddl` は
 `new CBOR({ cddl: … })` のようにインスタンスのデフォルトにもできます。
 
+スキーマを指定すると、スキーマ自体が要求するタグは JavaScript 側で省略
+できます。`toJS()` は、prelude の `time = #6.1(number)` のような `#6.N(…)`
+型に一致したタグを外し、`fromJS()` はタグのない値にそれを補います。
+
+```ts
+import { CBOR } from '@cbortech/cbor';
+
+const cddl = 'event = { t: time }';
+
+CBOR.parse(`{"t": DT'1969-07-21T02:56:16Z'}`, { cddl });
+// { t: -14159024 }（Tag.symbol のない素の number）
+
+CBOR.stringify({ t: -14159024 }, { cddl });
+// {"t":DT'1969-07-21T02:56:16Z'}
+```
+
+タグを外すのは `fromJS()` で復元できる場合だけです。タグなしの値もその
+位置で妥当な場合（`time / number`）や、スキーマがタグを要求しない場合
+（`any`）はタグを残します。推論は、値がそのままではスキーマに一致しない
+ときにだけ行います。すべてのタグを明示的に保持・要求するには
+`implicitTags: false`（`ToJSOptions` と `FromJSOptions` のオプション）を
+指定します。
+
 `CDDL.compile()` は `CddlSyntaxError` または `CddlSemanticError` を throw
 します。`{ strict: false }` を指定すると、意味上の問題を
 `schema.warnings` に収集できます。コンパイル済みスキーマは

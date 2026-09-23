@@ -30,6 +30,14 @@ export class CborTag extends CborItem {
    * (`0x3e7`, decimal, …) when `preserveNumberFormat` is set.
    */
   ednSource?: string;
+  /**
+   * Set by `cddl`-validated decoding/parsing/conversion when the schema
+   * itself implies this tag at its position (see `cddl/implicitTags.ts`),
+   * so `toJS()` can leave it off the JS value — see
+   * `ToJSOptions.implicitTags`.
+   * @internal
+   */
+  _implicit = false;
 
   constructor(
     tag: number | bigint,
@@ -155,6 +163,21 @@ export class CborTag extends CborItem {
           { parent: this }
         )
       : this.content._toJS(options);
-    return options?.stripTags ? value : Tag.set(value, this.tag);
+    return this._tagJS(value, options);
+  }
+
+  /**
+   * Attach this tag to the converted content `value` — unless `stripTags`,
+   * or the tag is schema-implied (`_implicit`) and `implicitTags` isn't
+   * `false`.
+   * @internal
+   */
+  _tagJS(value: unknown, options?: ToJSOptions): unknown {
+    if (
+      options?.stripTags ||
+      (this._implicit && options?.implicitTags !== false)
+    )
+      return value;
+    return Tag.set(value, this.tag);
   }
 }

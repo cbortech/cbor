@@ -211,6 +211,31 @@ export interface ToJSOptions {
   stripTags?: boolean;
 
   /**
+   * Whether a tag the CDDL schema itself implies is left off the JavaScript
+   * value — e.g. with `{ t: time }` (prelude `time = #6.1(number)`), the
+   * CBOR `{"t": 1(-14159024)}` (CDN `{"t": DT'1969-07-21T02:56:16Z'}`)
+   * converts to `{ t: -14159024 }` (a plain `number`) rather than a
+   * `Number` object carrying `Tag.symbol`.
+   *
+   * A tag counts as implied only where `FromJSOptions.implicitTags` would
+   * add it back when converting the result with the same schema, so
+   * `toJS()` → `fromJS()` still round-trips: it must be matched by a
+   * `#6.N(type)` with a literal tag number, and the untagged content must
+   * not be acceptable at that position on its own — under `time / number`
+   * a tagged `1(5)` keeps its tag, since plain `5` would stay untagged.
+   * Tags the schema doesn't require (`any`, `#6.<uint>(…)`, …) are always
+   * kept.
+   *
+   * Only takes effect for an item validated via `FromCBOROptions.cddl` /
+   * `FromCDNOptions.cddl` / `FromJSOptions.cddl`; without a schema, every
+   * tag is kept as before. Pass `false` to keep every tag even with one.
+   * `stripTags: true` removes all tags regardless.
+   *
+   * @default true
+   */
+  implicitTags?: boolean;
+
+  /**
    * Post-conversion reviver function, applied bottom-up after the CBOR value
    * has been converted to JavaScript.
    *
@@ -885,6 +910,30 @@ export interface FromJSOptions {
    * @default true
    */
   eRefKeys?: boolean;
+
+  /**
+   * Whether a tag the CDDL schema requires is added to a value that lacks
+   * it — e.g. with `{ t: time }` (prelude `time = #6.1(number)`),
+   * `{ t: -14159024 }` (a plain `number`, no `Tag.symbol`) converts to
+   * `{"t": 1(-14159024)}` (CDN `{"t": DT'1969-07-21T02:56:16Z'}`). The
+   * mirror image of `ToJSOptions.implicitTags`.
+   *
+   * Inference is a fallback, never a rewrite of valid data: nothing is
+   * added when the converted value already matches the schema, and at
+   * every choice an alternative the value matches as-is wins — with
+   * `time / number`, a plain `5` stays `5`. Only a `#6.N(type)` with a
+   * literal tag number is inferred (the tag is created the same way a
+   * `Tag.symbol`-annotated value would be, so tag 1 becomes a `DT'…'`
+   * node); a value already carrying `Tag.symbol` is used as given. When
+   * even inference cannot make the value match, it is left unchanged and
+   * the usual `CddlMismatchError` is thrown.
+   *
+   * Requires `cddl` — has no effect on its own. Pass `false` to require
+   * every tag to be spelled out via `Tag.symbol`, as without a schema.
+   *
+   * @default true
+   */
+  implicitTags?: boolean;
 }
 
 // ─── Per-item option overrides (toCDN) ─────────────────────────────────────────

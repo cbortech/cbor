@@ -24,11 +24,16 @@ import { CdnSyntaxError } from './cdn/errors';
 import { shouldEmitComments } from './cdn/serialize-utils';
 import { CddlMismatchError } from './cddl/errors';
 import { compile as compileCDDL, CddlSchema } from './cddl/schema';
-import type { ValidateOptions as CddlValidateOptions } from './cddl/validator';
+import {
+  validateItem,
+  type TagRecord,
+  type ValidateOptions as CddlValidateOptions,
+} from './cddl/validator';
+import { inferImplicitTags, markImplicitTags } from './cddl/implicitTags';
 import type { CddlValidationError, CddlValidationWarning } from './cddl/errors';
 import { annotateERefKeys, createERefExtension } from './extensions/eref';
 import { dt_as_Date as _dt_as_Date } from './extensions/dt';
-import { fromJS as _fromJS, _applyReplacer } from './js/fromJS';
+import { fromJS as _fromJS, _applyReplacer, tagFromJS } from './js/fromJS';
 import { MapEntries as _MapEntries } from './mapEntries';
 import { Simple as _Simple } from './simple';
 import { CBOR_TAG, Tag as _Tag } from './tag';
@@ -73,13 +78,22 @@ function assertCddl(
   item: CborItem,
   schema: CddlSchema | undefined,
   validationOptions?: CddlValidateOptions,
-  decodeOptions?: Pick<FromCBOROptions, 'extensions' | 'builtinExtensions'>
+  decodeOptions?: Pick<FromCBOROptions, 'extensions' | 'builtinExtensions'>,
+  jsOptions?: FromJSOptions
 ): CborItem {
   if (schema) {
-    const result = schema.validate(item, validationOptions);
+    // A converted JS value may leave out tags the schema implies (see
+    // `cddl/implicitTags.ts`); add them before validating.
+    if (jsOptions && jsOptions.implicitTags !== false)
+      item = inferImplicitTags(schema, item, validationOptions, (tag, inner) =>
+        tagFromJS(tag, inner, jsOptions)
+      );
+    const trail: TagRecord[] = [];
+    const result = validateItem(schema, item, validationOptions, { trail });
     if (!result.valid) {
       throw new CddlMismatchError(result.errors, result.warnings);
     }
+    markImplicitTags(schema, item, validationOptions, trail);
     annotateERefKeys(item, schema, validationOptions, decodeOptions);
   }
   return item;
@@ -593,7 +607,13 @@ export class CBOR {
     // itself — see `_fromJS()`'s own doc in `js/fromJS.ts`.
     const schema = resolveCddl(options?.cddl);
     const item = _fromJS(value, options, schema);
-    return assertCddl(item, schema, options?.cddlValidationOptions, options);
+    return assertCddl(
+      item,
+      schema,
+      options?.cddlValidationOptions,
+      options,
+      options ?? {}
+    );
   }
 
   /**
@@ -1009,14 +1029,22 @@ export class CBOR {
           : undefined,
         schema
       );
-      return assertCddl(item, schema, opts.cddlValidationOptions, opts).toCDN(
-        opts
-      );
+      return assertCddl(
+        item,
+        schema,
+        opts.cddlValidationOptions,
+        opts,
+        restFromJS as FromJSOptions
+      ).toCDN(opts);
     }
     const item = _fromJS(value, opts as FromJSOptions | undefined, schema);
-    return assertCddl(item, schema, opts?.cddlValidationOptions, opts).toCDN(
-      opts
-    );
+    return assertCddl(
+      item,
+      schema,
+      opts?.cddlValidationOptions,
+      opts,
+      opts ?? {}
+    ).toCDN(opts);
   }
 
   /** Normalize a CDN text string by parsing and re-serializing it. */

@@ -165,6 +165,24 @@ export function fromJS(
   return _fromJS(value, options, true, resolveExtensions(options), eRefScope);
 }
 
+/**
+ * Wrap `inner` in tag `tag` exactly as converting a JS value carrying that
+ * tag would (`parseTag()` hooks first, so e.g. tag 1 becomes the `dt`
+ * extension's `DT'…'` node) — used for tags a CDDL schema implies (see
+ * `FromJSOptions.implicitTags`).
+ */
+export function tagFromJS(
+  tag: bigint,
+  inner: CborItem,
+  options?: FromJSOptions
+): CborItem {
+  for (const ext of resolveExtensions(options).parseTag) {
+    const result = ext.parseTag!(tag, inner);
+    if (result !== undefined) return result;
+  }
+  return new CborTag(tag, inner);
+}
+
 function resolveActiveScope(
   schema: CddlSchema,
   ruleName: string | undefined

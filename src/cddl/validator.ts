@@ -76,6 +76,40 @@ export interface ValidateOptions {
   rule?: string;
 }
 
+/**
+ * One tag on a successful match path: `item` is a `CborTag` matched by a
+ * `#6.N(type)` with literal tag number `tag`, or — `inferred` — an
+ * untagged item that matched only as the content of such a type (see
+ * `TagTracing.infer`).
+ */
+export interface TagRecord {
+  readonly item: CborItem;
+  readonly tag: bigint;
+  readonly inferred: boolean;
+  /**
+   * For an inferred record, how many inferred tags enclose this one around
+   * the same item (0 = outermost): `#6.101(#6.100(int))` records 101 at
+   * layer 0 and 100 at layer 1. Re-checking one layer (`.and`, …) repeats
+   * its layer; a genuinely nested tag, even of the same number, doesn't.
+   * Always 0 for a matched tag.
+   */
+  readonly layer: number;
+}
+
+/** Tag bookkeeping for {@link validateItem}'s internal callers. */
+export interface TagTracing {
+  /**
+   * Let `#6.N(type)` (literal N) accept an untagged item matching `type`,
+   * recording it as inferred. Only a fallback: at every type, rule and
+   * map-group choice, alternatives are first tried without inference.
+   */
+  readonly infer?: boolean;
+  /** Tags to match as if absent (their content in their place). */
+  readonly stripped?: ReadonlySet<CborTag>;
+  /** Receives the successful path's records (left empty on failure). */
+  readonly trail: TagRecord[];
+}
+
 // ─── Context ──────────────────────────────────────────────────────────────────
 
 type PathSeg = string | number;
@@ -98,6 +132,22 @@ class Ctx {
   preludeRef: CddlNodeBase | undefined;
   readonly warnings: CddlValidationWarning[] = [];
   private readonly warned = new Set<string>();
+  /**
+   * Implicit-tag bookkeeping (see `matchTags()`): when `infer` is set, a
+   * `#6.N(type)` with a literal tag number also accepts an *untagged* item
+   * matching `type` — as a fallback only, see `strictFirst()`.
+   */
+  infer = false;
+  /** Tags matched as if absent (their content stands in their place). */
+  stripped: ReadonlySet<CborTag> | undefined;
+  /**
+   * Tag matches/inferences on the current match path, when recording.
+   * Failing branches truncate it back (`ctx.trail.length = mark`), so on
+   * overall success it holds the successful path's records only.
+   */
+  trail: TagRecord[] | undefined;
+  /** Inferred tags currently open around each item (see `TagRecord.layer`). */
+  readonly inferLayers = new Map<CborItem, number>();
   best: (CddlValidationError & { depth: number; startKey: number }) | undefined;
 
   constructor(
@@ -106,6 +156,23 @@ class Ctx {
     readonly maxSteps: number,
     readonly features: Set<string>
   ) {}
+
+  /**
+   * Run `fn` with inference off first, then (only if that fails) on: at a
+   * choice point, an alternative the item matches as-is always wins over
+   * one it would match only with an inferred tag (so `time / number`
+   * leaves a plain number untagged).
+   */
+  strictFirst(fn: () => boolean): boolean {
+    if (!this.infer) return fn();
+    this.infer = false;
+    try {
+      if (fn()) return true;
+    } finally {
+      this.infer = true;
+    }
+    return fn();
+  }
 
   step(): void {
     if (++this.steps > this.maxSteps)
@@ -175,7 +242,8 @@ class Ctx {
 export function validateItem(
   schema: CddlSchema,
   item: CborItem,
-  options?: ValidateOptions
+  options?: ValidateOptions,
+  tags?: TagTracing
 ): ValidationResult {
   const ruleName = options?.rule ?? schema.root?.name;
   if (ruleName === undefined)
@@ -194,6 +262,11 @@ export function validateItem(
     options?.maxSteps ?? 1_000_000,
     new Set(options?.features ?? [])
   );
+  if (tags) {
+    ctx.infer = tags.infer ?? false;
+    ctx.stripped = tags.stripped;
+    ctx.trail = tags.trail;
+  }
   // A generic rule's parameters are only ever bound from a referencing
   // site's `genericArgs` (see `bindGenericsForDef`); neither the schema
   // root nor `{ rule }` has one to supply, so selecting a generic rule here
@@ -215,7 +288,9 @@ export function validateItem(
   let valid: boolean;
   try {
     valid = matchRuleName(item, ruleName, undefined, [], ctx, 0);
+    if (!valid && tags) tags.trail.length = 0;
   } catch (e) {
+    if (tags) tags.trail.length = 0;
     if (!(e instanceof LimitExceeded)) throw e;
     return {
       valid: false,
@@ -763,7 +838,7 @@ function matchRuleName(
   ctx.ruleName = name;
   const fromPrelude = !ctx.schema.rules.has(name);
   if (fromPrelude && ++ctx.preludeDepth === 1) ctx.preludeRef = refNode;
-  try {
+  const tryDefs = (): boolean => {
     for (const def of defs) {
       const env = bindGenericsForDef(def, genericArgs, callerEnv);
       if (isPlainTypeEntry(def.body)) {
@@ -795,6 +870,11 @@ function matchRuleName(
       }
     }
     return false;
+  };
+  try {
+    return defs.length > 1 || !isPlainTypeEntry(defs[0]!.body)
+      ? ctx.strictFirst(tryDefs)
+      : tryDefs();
   } finally {
     ctx.ruleName = prevRule;
     if (fromPrelude && --ctx.preludeDepth === 0) ctx.preludeRef = undefined;
@@ -814,6 +894,16 @@ function unwrapAppSeq(item: CborItem): CborItem {
   return item;
 }
 
+/** `unwrapAppSeq()`, plus seeing through any tag in `ctx.stripped`. */
+function viewItem(item: CborItem, ctx: Ctx): CborItem {
+  for (;;) {
+    item = unwrapAppSeq(item);
+    if (!(ctx.stripped && item instanceof CborTag && ctx.stripped.has(item)))
+      return item;
+    item = item.content;
+  }
+}
+
 function matchType(
   item: CborItem,
   type: CddlType,
@@ -822,9 +912,15 @@ function matchType(
   ctx: Ctx,
   depth: number
 ): boolean {
-  for (const alt of type.alternatives)
-    if (matchType1(item, alt, env, path, ctx, depth)) return true;
-  return false;
+  const run = (): boolean => {
+    const mark = ctx.trail?.length ?? 0;
+    for (const alt of type.alternatives) {
+      if (matchType1(item, alt, env, path, ctx, depth)) return true;
+      if (ctx.trail) ctx.trail.length = mark;
+    }
+    return false;
+  };
+  return type.alternatives.length > 1 ? ctx.strictFirst(run) : run();
 }
 
 function matchType1(
@@ -835,10 +931,25 @@ function matchType1(
   ctx: Ctx,
   depth: number
 ): boolean {
+  if (!ctx.trail) return matchType1Inner(item, t1, env, path, ctx, depth);
+  const mark = ctx.trail.length;
+  if (matchType1Inner(item, t1, env, path, ctx, depth)) return true;
+  ctx.trail.length = mark;
+  return false;
+}
+
+function matchType1Inner(
+  item: CborItem,
+  t1: CddlType1,
+  env: Env,
+  path: readonly PathSeg[],
+  ctx: Ctx,
+  depth: number
+): boolean {
   ctx.step();
   // Unwrapped here (before control handlers see the item) and again in
   // matchType2, which is also entered directly from control plumbing.
-  item = unwrapAppSeq(item);
+  item = viewItem(item, ctx);
   if (!t1.op || !t1.controller)
     return matchType2(item, t1.target, env, path, ctx, depth);
   if (t1.op.kind === 'range')
@@ -863,7 +974,7 @@ function matchType2(
   ctx: Ctx,
   depth: number
 ): boolean {
-  item = unwrapAppSeq(item);
+  item = viewItem(item, ctx);
   // A CDN elision stands for content that was deliberately left out.
   if (item instanceof CborEllipsis) return true;
 
@@ -916,8 +1027,26 @@ function matchType2(
       // #6.n(type) denotes a *tagged data item* (RFC 8610 §3.6): an untagged
       // integer never matches #6.2/#6.3. (Value-level bignum equivalence
       // lives in literals/ranges/comparisons via intValueOf instead.)
-      if (!(item instanceof CborTag))
+      if (!(item instanceof CborTag)) {
+        if (ctx.infer && typeof t2.tag === 'bigint') {
+          const mark = ctx.trail?.length ?? 0;
+          const layer = ctx.inferLayers.get(item) ?? 0;
+          ctx.inferLayers.set(item, layer + 1);
+          let ok: boolean;
+          try {
+            ok = matchType(item, t2.item, env, path, ctx, depth + 1);
+          } finally {
+            if (layer === 0) ctx.inferLayers.delete(item);
+            else ctx.inferLayers.set(item, layer);
+          }
+          if (ok) {
+            ctx.trail?.push({ item, tag: t2.tag, inferred: true, layer });
+            return true;
+          }
+          if (ctx.trail) ctx.trail.length = mark;
+        }
         return ctx.fail(path, item, t2, 'expected a tagged item');
+      }
       if (typeof t2.tag === 'bigint') {
         if (item.tag !== t2.tag)
           return ctx.fail(
@@ -937,7 +1066,11 @@ function matchType2(
             `tag number ${item.tag} does not match the head type`
           );
       }
-      return matchType(item.content, t2.item, env, path, ctx, depth + 1);
+      if (!matchType(item.content, t2.item, env, path, ctx, depth + 1))
+        return false;
+      if (typeof t2.tag === 'bigint')
+        ctx.trail?.push({ item, tag: t2.tag, inferred: false, layer: 0 });
+      return true;
     }
 
     case 'major':
@@ -1842,7 +1975,11 @@ function matchArrayGroup(
     ctx,
     depth
   );
-  if (ends.has(arr.items.length)) return true;
+  const records = ends.get(arr.items.length);
+  if (records) {
+    ctx.trail?.push(...records);
+    return true;
+  }
   return ctx.fail(
     path,
     arr,
@@ -1851,7 +1988,11 @@ function matchArrayGroup(
   );
 }
 
-/** All end positions reachable by matching the group's choices at `idx`. */
+/**
+ * All end positions reachable by matching the group's choices at `idx`,
+ * each with the tag records (see `Ctx.trail`) of the first path found to
+ * reach it. Exploration leaves `ctx.trail` itself unchanged.
+ */
 function seqEnds(
   items: readonly CborItem[],
   idx: number,
@@ -1859,11 +2000,12 @@ function seqEnds(
   path: readonly PathSeg[],
   ctx: Ctx,
   depth: number
-): Set<number> {
-  const out = new Set<number>();
+): Map<number, TagRecord[]> {
+  const out = new Map<number, TagRecord[]>();
+  const base = ctx.trail?.length ?? 0;
   for (const choice of choices) {
     const matchers = choice.entries.map((e) => expandEntry(e, choice.env, ctx));
-    seqStep(items, idx, matchers, 0, path, ctx, depth, out);
+    seqStep(items, idx, matchers, 0, path, ctx, depth, out, base);
   }
   return out;
 }
@@ -1876,10 +2018,11 @@ function seqStep(
   path: readonly PathSeg[],
   ctx: Ctx,
   depth: number,
-  out: Set<number>
+  out: Map<number, TagRecord[]>,
+  base: number
 ): void {
   if (k === ms.length) {
-    out.add(idx);
+    if (!out.has(idx)) out.set(idx, ctx.trail?.slice(base) ?? []);
     return;
   }
   const m = ms[k]!;
@@ -1887,18 +2030,31 @@ function seqStep(
   const tryCount = (count: number, at: number): void => {
     ctx.step();
     if (count >= m.occur.min)
-      seqStep(items, at, ms, k + 1, path, ctx, depth, out);
+      seqStep(items, at, ms, k + 1, path, ctx, depth, out, base);
     if (count >= m.occur.max || at >= items.length) return;
-    for (const end of matchOnceEnds(items, at, m, path, ctx, depth)) {
+    for (const [end, records] of matchOnceEnds(
+      items,
+      at,
+      m,
+      path,
+      ctx,
+      depth
+    )) {
       // An empty match makes no progress; recursing on it would loop.
       if (end === at) continue;
+      const mark = ctx.trail?.length ?? 0;
+      ctx.trail?.push(...records);
       tryCount(count + 1, end);
+      if (ctx.trail) ctx.trail.length = mark;
     }
   };
   tryCount(0, idx);
 }
 
-/** End positions from matching a single occurrence of `m` at `at`. */
+/**
+ * End positions from matching a single occurrence of `m` at `at`, each
+ * with the tag records of that match (not left on `ctx.trail`).
+ */
 function matchOnceEnds(
   items: readonly CborItem[],
   at: number,
@@ -1906,17 +2062,18 @@ function matchOnceEnds(
   path: readonly PathSeg[],
   ctx: Ctx,
   depth: number
-): number[] {
+): [number, TagRecord[]][] {
   if (m.kind === 'type') {
+    const mark = ctx.trail?.length ?? 0;
     // Member keys inside arrays are documentation only (RFC 8610 §3.4).
-    return matchType(items[at]!, m.type, m.env, [...path, at], ctx, depth)
-      ? [at + 1]
-      : [];
+    if (!matchType(items[at]!, m.type, m.env, [...path, at], ctx, depth))
+      return [];
+    return [[at + 1, ctx.trail?.splice(mark) ?? []]];
   }
   ctx.checkDepth(depth);
   const ends = seqEnds(items, at, m.choices, path, ctx, depth + 1);
   // Descending order: prefer greedy consumption first.
-  return [...ends].sort((a, b) => b - a);
+  return [...ends].sort((a, b) => b[0] - a[0]);
 }
 
 // ─── Group matching: maps ─────────────────────────────────────────────────────
@@ -1932,28 +2089,33 @@ function matchMapGroup(
 ): boolean {
   ctx.checkDepth(depth);
   const consumed = new Array<MapMember | false>(map.entries.length).fill(false);
-  for (const choice of plainChoices(group, env)) {
-    consumed.fill(false);
-    if (
-      mapSeq(
-        map,
-        choice.entries,
-        0,
-        consumed,
-        choice.env,
-        path,
-        ctx,
-        depth,
-        () => {
-          if (!mapFullyConsumed(map, consumed, path, ctx, group)) return false;
-          onMatch?.(consumed);
-          return true;
-        }
+  const choices = plainChoices(group, env);
+  const run = (): boolean => {
+    for (const choice of choices) {
+      consumed.fill(false);
+      if (
+        mapSeq(
+          map,
+          choice.entries,
+          0,
+          consumed,
+          choice.env,
+          path,
+          ctx,
+          depth,
+          () => {
+            if (!mapFullyConsumed(map, consumed, path, ctx, group))
+              return false;
+            onMatch?.(consumed);
+            return true;
+          }
+        )
       )
-    )
-      return true;
-  }
-  return false;
+        return true;
+    }
+    return false;
+  };
+  return choices.length > 1 ? ctx.strictFirst(run) : run();
 }
 
 function mapFullyConsumed(
@@ -1988,6 +2150,24 @@ function mapFullyConsumed(
  * not backtracked (a deliberate heuristic — put wildcard members last).
  */
 function mapSeq(
+  map: CborMap,
+  entries: readonly CddlGroupEntry[],
+  k: number,
+  consumed: (MapMember | false)[],
+  env: Env,
+  path: readonly PathSeg[],
+  ctx: Ctx,
+  depth: number,
+  cont: () => boolean
+): boolean {
+  const mark = ctx.trail?.length ?? 0;
+  if (mapSeqInner(map, entries, k, consumed, env, path, ctx, depth, cont))
+    return true;
+  if (ctx.trail) ctx.trail.length = mark;
+  return false;
+}
+
+function mapSeqInner(
   map: CborMap,
   entries: readonly CddlGroupEntry[],
   k: number,
