@@ -56,4 +56,13 @@ describe('booting straight from a shared e-ref link', () => {
     expect(byId('byte-count').textContent).toMatch(/\d+ bytes?/);
     expect(byId<HTMLButtonElement>('copy-bytes').disabled).toBe(false);
   });
+
+  test("resolves e'...' against the shared schema without a stale missing-extension squiggle", async () => {
+    // The pane opens from inside initCddlPane(), before main.ts assigns
+    // `cddlPane` — so that first onSchemaChanged saw no active schema and
+    // linted/converted without e'...'. main.ts reruns it once assigned.
+    // Give the linter time to settle, then check nothing is left flagged.
+    await new Promise((r) => setTimeout(r, 1000));
+    expect(byId('editor').querySelectorAll('.cm-lintRange')).toHaveLength(0);
+  });
 });
