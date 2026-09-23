@@ -33,10 +33,24 @@ export interface CddlPane {
   isOpen(): boolean;
   getText(): string;
   /**
-   * Replace the schema text (sample selection from the CDN pane). Compiles
+   * The currently compiled schema, or `null` if the pane's text is empty or
+   * fails to compile. Set regardless of whether the pane is open — callers
+   * that only care about an *active* schema (e.g. the CDN-side conversion
+   * pipeline) should gate on `isOpen()` themselves, same as `revalidate()`'s
+   * own "validation only runs while open" contract.
+   */
+  getSchema(): CddlSchema | null;
+  /**
+   * Replace the schema text (example selection from the CDN pane). Compiles
    * immediately; validation still only runs while the pane is open.
    */
   setText(text: string): void;
+  /** Open or close the pane programmatically, same as clicking the toggle
+   * button — e.g. an example whose CDN only makes sense with its schema
+   * active (see `Example.requiresCddl`). Does *not* invoke `onToggle` (that's
+   * reserved for the user's own explicit toggle, which persists to the
+   * `?cddl=` query parameter — see `CddlPaneOptions.onToggle`). */
+  setOpen(open: boolean): void;
   /** Re-run validation against the given conversion result. */
   revalidate(conversion: Conversion): void;
 }
@@ -46,7 +60,7 @@ export interface CddlPaneOptions {
   getConversion(): Conversion;
   /** Set/clear the hex view's validation-failure byte range. */
   hexHighlight(range: { byteStart: number; byteEnd: number } | null): void;
-  /** Schema shown initially: from the share hash, or the default sample. */
+  /** Schema shown initially: from the share hash, or the default example. */
   initialCddl: string;
   /**
    * Whether the pane should open on load (normally closed). Computed by the
@@ -62,6 +76,17 @@ export interface CddlPaneOptions {
    * elsewhere (e.g. the `?cddl=` query parameter).
    */
   onToggle?: (open: boolean) => void;
+  /**
+   * Called whenever the compiled schema (`getSchema()`'s return value) or
+   * the pane's open state may have changed — after every text edit
+   * (debounced), `setText()`, schema import, and `setOpen()` call,
+   * regardless of the pane's open state. The CDN-side conversion pipeline
+   * consults `isOpen()`/`getSchema()` itself (e.g. to register the `e'...'`
+   * app-extension only while a schema is active — see `main.ts`'s own
+   * `update()`), so this is the signal to re-run that pipeline even though
+   * the CDN text itself didn't change.
+   */
+  onSchemaChanged?: () => void;
 }
 
 export function initCddlPane(opts: CddlPaneOptions): CddlPane {
@@ -192,6 +217,7 @@ export function initCddlPane(opts: CddlPaneOptions): CddlPane {
         revalidateTimer = setTimeout(() => {
           compile(text);
           revalidate(opts.getConversion());
+          opts.onSchemaChanged?.();
         }, 200);
       },
       onCursorMoved() {},
@@ -213,6 +239,7 @@ export function initCddlPane(opts: CddlPaneOptions): CddlPane {
       clearMarks();
       setStatus(null);
     }
+    opts.onSchemaChanged?.();
   }
 
   toggleBtn.addEventListener('click', () => {
@@ -270,6 +297,7 @@ export function initCddlPane(opts: CddlPaneOptions): CddlPane {
         // status line reflects the imported schema immediately.
         compile(text);
         revalidate(opts.getConversion());
+        opts.onSchemaChanged?.();
       })
       .catch((e: unknown) => {
         setStatus('error', e instanceof Error ? e.message : String(e));
@@ -307,6 +335,7 @@ export function initCddlPane(opts: CddlPaneOptions): CddlPane {
   return {
     isOpen: () => !paneEl.hidden,
     getText: () => editor.state.doc.toString(),
+    getSchema: () => schema,
     setText: (text) => {
       setEditorText(editor, text);
       // Compile now rather than waiting for the editor's debounce, so a
@@ -314,7 +343,9 @@ export function initCddlPane(opts: CddlPaneOptions): CddlPane {
       // the new schema, not the previous one.
       compile(text);
       revalidate(opts.getConversion());
+      opts.onSchemaChanged?.();
     },
+    setOpen,
     revalidate,
   };
 }

@@ -668,8 +668,10 @@ export abstract class CborItem {
    * (`h'...'`, `b64'...'`, ...) depends on the `sqstr` option.
    *
    * This method deliberately does *not* also cover the "is this (or does
-   * it wrap) a prefixed literal" question — a prefixed literal has no word
-   * count to check, but still disqualifies under the strict rule (and, per
+   * it wrap) a prefixed literal" question — a byte-string literal has no
+   * word count to check, and an app-string literal (`dt'...'`) is
+   * word-counted from its rendered content, but either disqualifies only
+   * under the strict rule (and, per
    * `strict`, is an ordinary leaf under the loose one). That's handled
    * generically elsewhere instead, from the *actual rendered text* rather
    * than predicted from this node's type: `isPrefixedLiteralText` for a
@@ -711,6 +713,22 @@ export abstract class CborItem {
     _path?: readonly unknown[]
   ): boolean {
     return false;
+  }
+
+  /**
+   * @internal
+   * Optional override: an alternate plain-string spelling to use as this
+   * node's `toJS()` object key, in place of `CborMap.toObject()`'s generic
+   * `toCDN()` fallback for a non-text-string key. Returns `undefined` to use
+   * that default. The base class implements no such override; a subclass
+   * that carries an alternate key spelling for a non-text key (e.g. a CDDL
+   * e-ref annotated integer key — see `extensions/eref.ts`) overrides this
+   * instead of `CborMap` special-casing that subclass directly. Takes the
+   * full `ToJSOptions` (unlike `_toCDN`'s options) since a key-naming choice
+   * like e-ref's `eRefKeys` is a `toJS()`-only concept with no CDN analogue.
+   */
+  _jsObjectKey(_options: ToJSOptions | undefined): string | undefined {
+    return undefined;
   }
 
   // ─── Public template methods ────────────────────────────────────────────────

@@ -11,6 +11,7 @@ import { CborTag } from '../ast/CborTag';
 import { CborFloat } from '../ast/CborFloat';
 import { CborSimple } from '../ast/CborSimple';
 import { CborTaggedEpochDtExt } from '../extensions/dt';
+import { CBOR } from '../cbor';
 
 // ─── Leaf nodes ───────────────────────────────────────────────────────────────
 
@@ -254,5 +255,60 @@ describe('toHexDump — large inputs', () => {
     expect(lines.length).toBe(130_002);
     expect(lines[0]).toMatch(/-- Tag 1$/);
     expect(lines[1]).toMatch(/-- Array of length 130000$/);
+  });
+});
+
+// ─── RFC 9277 tag labels ─────────────────────────────────────────────────────
+
+describe('toHexDump — RFC 9277 tag labels', () => {
+  const firstLines = (hex: string, n: number) =>
+    CBOR.fromHexDumpSeq(hex).next().value!.toHexDump().split('\n').slice(0, n);
+
+  test('protocol-specific tag with printable ASCII mnemonic', () => {
+    const node = new CborTag(1330664270n, new CborUint(0n));
+    const lines = node.toHexDump().split('\n');
+    expect(lines[0]).toMatch(/^DA 4F 50 53 4E\s+-- Tag 1330664270 \("OPSN"\)$/);
+  });
+
+  test('self-described CBOR + CoAP Content-Format tag (RFC 9277 §2.2.1 SenML example)', () => {
+    const lines = firstLines('d9d9f7 da63740171 80', 2);
+    expect(lines[0]).toMatch(/-- Tag 55799 \(self-described CBOR\)$/);
+    expect(lines[1]).toMatch(/-- Tag 1668546929 \(CoAP Content-Format 112\)$/);
+  });
+
+  test('labeled CBOR Sequence (RFC 9277 §2.3.1 example)', () => {
+    const lines = firstLines('d9d9f8 da63740212 43424f52', 2);
+    expect(lines[0]).toMatch(/-- Tag 55800 \(self-described CBOR Sequence\)$/);
+    expect(lines[1]).toMatch(/-- Tag 1668547090 \(CoAP Content-Format 272\)$/);
+  });
+
+  test('CBOR-labeled non-CBOR data tag', () => {
+    const node = new CborTag(55801n, new CborUint(0n));
+    expect(node.toHexDump()).toMatch(
+      /-- Tag 55801 \(CBOR-labeled non-CBOR data\)\n/
+    );
+  });
+
+  test('escapes " and \\ in the mnemonic', () => {
+    // 0x41225C42 = A " \ B
+    const node = new CborTag(0x41225c42n, new CborUint(0n));
+    expect(node.toHexDump().split('\n')[0]).toMatch(
+      /-- Tag 1092770882 \("A\\"\\\\B"\)$/
+    );
+  });
+
+  test('no label outside the range or with non-printable bytes', () => {
+    for (const tag of [0x4f5053n, 0x4f50530an, 0x100000000n, 0x6374ff00n]) {
+      const node = new CborTag(tag, new CborUint(0n));
+      expect(node.toHexDump().split('\n')[0]).toMatch(
+        new RegExp(`-- Tag ${tag}$`)
+      );
+    }
+  });
+
+  test('labelled dump still round-trips through fromHexDump', () => {
+    const bytes = CBOR.fromHexDumpSeq('d9d9f7 da4f50534e 80').next().value!;
+    const dump = bytes.toHexDump({ commentStyle: '#' });
+    expect(CBOR.fromHexDump(dump).toCBOR()).toEqual(bytes.toCBOR());
   });
 });

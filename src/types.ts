@@ -179,11 +179,19 @@ export interface ToJSOptions {
 
   /**
    * How to represent CBOR map values when converting to JavaScript.
-   * - `'auto'`: text-string-only keys → `Record<string, unknown>`,
-   *   other key types → `Map<unknown, unknown>`.
-   *   Duplicate keys are silently overwritten (last value wins).
+   * - `'auto'`: `Record<string, unknown>` when every key is a text string,
+   *   or (with a CDDL `cddl` schema and `eRefKeys` not `false`) an e-ref
+   *   annotated integer key that resolves to its name string — `Map<unknown,
+   *   unknown>` for any other key type. Duplicate *text-string* keys are
+   *   silently overwritten (last value wins), same as `'object'` below —
+   *   but if a text-string key and an e-ref name key resolve to the same
+   *   property string (e.g. `&(title: -1)` alongside a literal `"title"`
+   *   key in the same map), `'auto'` falls back to `MapEntries` instead of
+   *   silently dropping one of them.
    * - `'object'`: always `Record<string, unknown>` — non-string keys are
-   *   converted via `String()`. Duplicate keys are overwritten (last wins).
+   *   converted via `String()`. Duplicate keys (including a text/e-ref
+   *   collision as above) are overwritten (last wins) — unlike `'auto'`,
+   *   `'object'` never falls back, since it was explicitly requested.
    * - `'entries'`: always `MapEntries` (a typed `Array` subclass) — preserves all
    *   entries including duplicate keys (§2.4.2 of draft-ietf-cbor-edn-literals-27).
    *   `fromJS()` recognises `MapEntries` instances and converts them back to `CborMap`.
@@ -201,6 +209,31 @@ export interface ToJSOptions {
    * @default false
    */
   stripTags?: boolean;
+
+  /**
+   * Whether a tag the CDDL schema itself implies is left off the JavaScript
+   * value — e.g. with `{ t: time }` (prelude `time = #6.1(number)`), the
+   * CBOR `{"t": 1(-14159024)}` (CDN `{"t": DT'1969-07-21T02:56:16Z'}`)
+   * converts to `{ t: -14159024 }` (a plain `number`) rather than a
+   * `Number` object carrying `Tag.symbol`.
+   *
+   * A tag counts as implied only where `FromJSOptions.implicitTags` would
+   * add it back when converting the result with the same schema, so
+   * `toJS()` → `fromJS()` still round-trips: it must be matched by a
+   * `#6.N(type)` with a literal tag number, and the untagged content must
+   * not be acceptable at that position on its own — under `time / number`
+   * a tagged `1(5)` keeps its tag, since plain `5` would stay untagged.
+   * Tags the schema doesn't require (`any`, `#6.<uint>(…)`, …) are always
+   * kept.
+   *
+   * Only takes effect for an item validated via `FromCBOROptions.cddl` /
+   * `FromCDNOptions.cddl` / `FromJSOptions.cddl`; without a schema, every
+   * tag is kept as before. Pass `false` to keep every tag even with one.
+   * `stripTags: true` removes all tags regardless.
+   *
+   * @default true
+   */
+  implicitTags?: boolean;
 
   /**
    * Post-conversion reviver function, applied bottom-up after the CBOR value
@@ -290,6 +323,51 @@ export interface ToJSOptions {
     item: CborItem,
     ctx: ItemContext
   ) => Partial<ToJSNodeOptions> | undefined;
+
+  /**
+   * Whether a map key annotated by CDDL `e'...'` external-reference
+   * resolution (draft-ietf-cbor-edn-e-ref) — an integer key the `cddl`
+   * schema names via a `&(name: value)` group entry at a map-member-key
+   * position, e.g. `? &(title: -1) => oltext` — converts to a plain-object
+   * key spelled as that name (`"title"`) instead of the integer itself. A
+   * general CDDL constant rule (`title = -1`) is not enough on its own to
+   * annotate a key this way — see `cddl/eref.ts`'s module doc — only
+   * `e'title'` written explicitly in CDN source resolves via a plain
+   * constant rule.
+   *
+   * Defaults to `true`: such a key exists at all only because some earlier
+   * `cddl`-validated decode/parse (or an `eRefKeys`-driven `fromJS()`, see
+   * `FromJSOptions.eRefKeys`) already named it, so leaving this option unset
+   * uses that name — pass `false` explicitly to fall back to the plain
+   * integer key instead (e.g. for code that reads `obj[-1]` and doesn't
+   * want it silently renamed to `obj.title`). A map with no CDDL-named keys
+   * at all is entirely unaffected either way — `mapAs: 'auto'`'s own choice
+   * between a plain object and `MapEntries` only ever treats a key as
+   * object-eligible via this option when the key is actually annotated;
+   * this is not a general "coerce integer keys to strings" switch.
+   *
+   * Only takes effect for a key CDDL validation has already annotated (see
+   * `FromCBOROptions.cddl` / `FromCDNOptions.cddl`); without a schema, or for
+   * a key the schema does not name this way, the key converts as usual.
+   * Annotation is unambiguous by construction (a name mapped to more than
+   * one value, or a value named more than once, in the same schema is
+   * excluded from annotation entirely — and a name ambiguous in either
+   * direction is excluded from *both*), so this never introduces a name
+   * collision on its own — though a name can still collide with an
+   * unrelated map's own genuine text-string key of the same spelling
+   * (e.g. `&(title: -1)` alongside a literal `"title"` key in the same
+   * map). `mapAs: 'auto'` treats that case differently from a plain
+   * duplicate text-string key: it detects the collision and falls back to
+   * `MapEntries` rather than silently dropping one side — see
+   * `ToJSOptions.mapAs`. An explicit `mapAs: 'object'` still overwrites
+   * (last value wins), the same as it does for any other non-injective key
+   * conversion. Only integer-valued names are annotated (see
+   * `cddl/eref.ts`'s Scope note) — a float, text, or byte-string map key is
+   * never affected.
+   *
+   * @default true
+   */
+  eRefKeys?: boolean;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
@@ -781,6 +859,81 @@ export interface FromJSOptions {
    * Mirrors `FromCBOROptions.cddlValidationOptions`.
    */
   cddlValidationOptions?: CddlValidateOptions;
+
+  /**
+   * When not `false`, a plain object's property name that the `cddl` schema
+   * names — via a `&(name: value)` group entry at a map-member-key
+   * position (e.g. `? &(title: -1) => oltext`), or a bare reference to a
+   * constant rule at that same position — converts to that integer key
+   * instead of a text-string key, so `fromJS({ title: "oops" }, { cddl })`
+   * produces the same map `toJS()` on that map would read back as
+   * `{ title: "oops" }` (both options default to on, so neither needs
+   * spelling out explicitly to get a round-trip). The resulting key
+   * round-trips through `toCDN()` as `e'title'` the same way a
+   * schema-annotated key produced by `fromCBOR()`/`fromCDN()` does — only
+   * an unambiguous, integer-valued name is ever used this way (see
+   * `cddl/eref.ts`'s module doc).
+   *
+   * `ToJSOptions.eRefKeys` only ever renames an integer key some earlier
+   * step already labeled (`annotateERefKeys()`, run automatically after a
+   * successful `cddl`-validated decode/parse — or `e'name'` written
+   * explicitly in CDN source); this direction is different, since it
+   * *constructs* the key before any validation happens — so which names are
+   * even eligible is resolved **positionally**: only a name bound at a member-key position
+   * within the CDDL type actually governing *this* property's own position
+   * (starting from the schema's root rule, or `cddlValidationOptions.rule`
+   * when set, and descending through nested map types the same way this
+   * object's own nesting does) is used, never a name that merely exists
+   * *somewhere* in the schema. A property named `title` is therefore left
+   * as an ordinary text-string key unless the schema specifically names
+   * `title` at the exact position this object is being converted for —
+   * even if some unrelated, structurally unreachable rule elsewhere in the
+   * same schema happens to name `title` too (see `cddl/eRefScope.ts`'s own
+   * module doc, including its Scope note on what "governing type" this can
+   * and can't resolve).
+   *
+   * Only applies to a plain object's own properties (`Object.entries()`), not
+   * to a `MapEntries` key, which is preserved exactly as given (a native
+   * `Map` is not currently recognized by `fromJS()` at all — see its own
+   * doc — independent of `eRefKeys`) — a `MapEntries` entry's *value* still
+   * gets a nested scope when its own key is a string naming a known map
+   * property, the same way an ordinary property's value does, so a nested
+   * object reached this way still converts correctly; an array element
+   * never does, regardless. Without a schema, or for a property name the
+   * schema does not name this way at this exact position, the key converts as usual (a
+   * text-string key). Pass `false` explicitly to keep every property as a
+   * plain text-string key even when the schema would otherwise name one —
+   * e.g. for code that writes `{ title: "oops" }` and wants that spelled
+   * literally rather than resolved to `-1`. Requires `cddl` — has no effect
+   * on its own.
+   *
+   * @default true
+   */
+  eRefKeys?: boolean;
+
+  /**
+   * Whether a tag the CDDL schema requires is added to a value that lacks
+   * it — e.g. with `{ t: time }` (prelude `time = #6.1(number)`),
+   * `{ t: -14159024 }` (a plain `number`, no `Tag.symbol`) converts to
+   * `{"t": 1(-14159024)}` (CDN `{"t": DT'1969-07-21T02:56:16Z'}`). The
+   * mirror image of `ToJSOptions.implicitTags`.
+   *
+   * Inference is a fallback, never a rewrite of valid data: nothing is
+   * added when the converted value already matches the schema, and at
+   * every choice an alternative the value matches as-is wins — with
+   * `time / number`, a plain `5` stays `5`. Only a `#6.N(type)` with a
+   * literal tag number is inferred (the tag is created the same way a
+   * `Tag.symbol`-annotated value would be, so tag 1 becomes a `DT'…'`
+   * node); a value already carrying `Tag.symbol` is used as given. When
+   * even inference cannot make the value match, it is left unchanged and
+   * the usual `CddlMismatchError` is thrown.
+   *
+   * Requires `cddl` — has no effect on its own. Pass `false` to require
+   * every tag to be spelled out via `Tag.symbol`, as without a schema.
+   *
+   * @default true
+   */
+  implicitTags?: boolean;
 }
 
 // ─── Per-item option overrides (toCDN) ─────────────────────────────────────────

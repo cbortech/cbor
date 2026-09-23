@@ -1,6 +1,7 @@
 import type { CborItem } from './ast/CborItem';
 import type {
   CBOROptions,
+  CborExtension,
   DecodeWarning,
   FromCBOROptions,
   FromCBORSeqOptions,
@@ -23,10 +24,16 @@ import { CdnSyntaxError } from './cdn/errors';
 import { shouldEmitComments } from './cdn/serialize-utils';
 import { CddlMismatchError } from './cddl/errors';
 import { compile as compileCDDL, CddlSchema } from './cddl/schema';
-import type { ValidateOptions as CddlValidateOptions } from './cddl/validator';
+import {
+  validateItem,
+  type TagRecord,
+  type ValidateOptions as CddlValidateOptions,
+} from './cddl/validator';
+import { inferImplicitTags, markImplicitTags } from './cddl/implicitTags';
 import type { CddlValidationError, CddlValidationWarning } from './cddl/errors';
+import { annotateERefKeys, createERefExtension } from './extensions/eref';
 import { dt_as_Date as _dt_as_Date } from './extensions/dt';
-import { fromJS as _fromJS, _applyReplacer } from './js/fromJS';
+import { fromJS as _fromJS, _applyReplacer, tagFromJS } from './js/fromJS';
 import { MapEntries as _MapEntries } from './mapEntries';
 import { Simple as _Simple } from './simple';
 import { CBOR_TAG, Tag as _Tag } from './tag';
@@ -60,20 +67,54 @@ function resolveCddl(
 
 /**
  * Validate an item against a resolved schema (if any) and throw
- * {@link CddlMismatchError} on mismatch.
+ * {@link CddlMismatchError} on mismatch. On success, also annotates any map
+ * key the schema names via `e'...'` external-reference resolution (see
+ * `extensions/eref.ts`'s `annotateERefKeys()`) so the item's own `toCDN()`
+ * naturally emits `e'name'` notation and `toJS()` naturally uses `name` as
+ * the plain-object key (both by default) — regardless of whether the
+ * original CBOR/CDN/JS source spelled `e'...'` at all.
  */
 function assertCddl(
   item: CborItem,
   schema: CddlSchema | undefined,
-  validationOptions?: CddlValidateOptions
+  validationOptions?: CddlValidateOptions,
+  decodeOptions?: Pick<FromCBOROptions, 'extensions' | 'builtinExtensions'>,
+  jsOptions?: FromJSOptions
 ): CborItem {
   if (schema) {
-    const result = schema.validate(item, validationOptions);
+    // A converted JS value may leave out tags the schema implies (see
+    // `cddl/implicitTags.ts`); add them before validating.
+    if (jsOptions && jsOptions.implicitTags !== false)
+      item = inferImplicitTags(schema, item, validationOptions, (tag, inner) =>
+        tagFromJS(tag, inner, jsOptions)
+      );
+    const trail: TagRecord[] = [];
+    const result = validateItem(schema, item, validationOptions, { trail });
     if (!result.valid) {
       throw new CddlMismatchError(result.errors, result.warnings);
     }
+    markImplicitTags(schema, item, validationOptions, trail);
+    annotateERefKeys(item, schema, validationOptions, decodeOptions);
   }
   return item;
+}
+
+/**
+ * Register the `e'...'` external-reference app-extension (see
+ * `extensions/eref.ts`) ahead of any user-supplied `extensions`, so a user
+ * override for the same `'e'` prefix still wins — matching the priority
+ * order `resolveBuiltinExtensions()` gives the bundled set. A no-op without
+ * a resolved schema.
+ */
+function withERefExtension<T extends { extensions?: CborExtension[] }>(
+  options: T | undefined,
+  schema: CddlSchema | undefined
+): T | undefined {
+  if (!schema) return options;
+  return {
+    ...options,
+    extensions: [createERefExtension(schema), ...(options?.extensions ?? [])],
+  } as T;
 }
 
 /**
@@ -85,12 +126,15 @@ function checkCddl(
   options?: {
     cddl?: CddlSchema | string;
     cddlValidationOptions?: CddlValidateOptions;
+    extensions?: CborExtension[];
+    builtinExtensions?: CborExtension[] | false;
   }
 ): CborItem {
   return assertCddl(
     item,
     resolveCddl(options?.cddl),
-    options?.cddlValidationOptions
+    options?.cddlValidationOptions,
+    options
   );
 }
 
@@ -392,7 +436,9 @@ export class CBOR {
 
   /** Parse a CDN text string into an AST node. */
   static fromCDN(text: string, options?: FromCDNOptions): CborItem {
-    return checkCddl(parseCDN(text, options), options);
+    const schema = resolveCddl(options?.cddl);
+    const item = parseCDN(text, withERefExtension(options, schema));
+    return assertCddl(item, schema, options?.cddlValidationOptions, options);
   }
 
   /**
@@ -452,7 +498,12 @@ export class CBOR {
         offset,
         allowTrailing: true,
       });
-      yield assertCddl(item, cddlSchema, options?.cddlValidationOptions);
+      yield assertCddl(
+        item,
+        cddlSchema,
+        options?.cddlValidationOptions,
+        options
+      );
       offset = item.end!;
     }
   }
@@ -515,12 +566,18 @@ export class CBOR {
         // _skipRS: true causes the tokenizer to treat RS (U+001E, RFC 7464) as
         // whitespace, preventing it from corrupting string-literal contents via
         // a global text replacement.
-        item = parseCDN(text, {
-          ...options,
-          offset,
-          allowTrailing: true,
-          _skipRS: true,
-        } as FromCDNOptions);
+        item = parseCDN(
+          text,
+          withERefExtension(
+            {
+              ...options,
+              offset,
+              allowTrailing: true,
+              _skipRS: true,
+            } as FromCDNOptions,
+            cddlSchema
+          )
+        );
       } catch (e) {
         if (options?.strict !== false) throw e;
         emitCDNSeqWarning(
@@ -532,7 +589,12 @@ export class CBOR {
         );
         break;
       }
-      yield assertCddl(item, cddlSchema, options?.cddlValidationOptions);
+      yield assertCddl(
+        item,
+        cddlSchema,
+        options?.cddlValidationOptions,
+        options
+      );
       offset = item.end!;
       isFirst = false;
     }
@@ -540,7 +602,18 @@ export class CBOR {
 
   /** Convert a JavaScript value into an AST node. */
   static fromJS(value: unknown, options?: FromJSOptions): CborItem {
-    return checkCddl(_fromJS(value, options), options);
+    // Resolved up front (rather than via checkCddl(), which resolves after
+    // conversion) so `options.eRefKeys` can be honored during conversion
+    // itself — see `_fromJS()`'s own doc in `js/fromJS.ts`.
+    const schema = resolveCddl(options?.cddl);
+    const item = _fromJS(value, options, schema);
+    return assertCddl(
+      item,
+      schema,
+      options?.cddlValidationOptions,
+      options,
+      options ?? {}
+    );
   }
 
   /**
@@ -718,11 +791,16 @@ export class CBOR {
     const warnings: (DecodeWarning | ParseWarning)[] = [];
     const hints: ParseWarning[] = [];
     let fatal: ParseWarning | undefined;
-    // `cddl` is deliberately not forwarded to the Seq generators: a mismatch
-    // must be collected below, not thrown from inside the generator.
+    const schema = resolveCddl(options?.cddl);
+    // `cddl` is deliberately not forwarded to the Seq generators (a mismatch
+    // must be collected below, not thrown from inside the generator), but
+    // `e'...'` still needs to parse as CDN text when a schema is given — see
+    // `withERefExtension()`.
     const seqOptions = {
       strict: false,
-      extensions: options?.extensions,
+      extensions: schema
+        ? [createERefExtension(schema), ...(options?.extensions ?? [])]
+        : options?.extensions,
       builtinExtensions: options?.builtinExtensions,
       onWarning: (w: DecodeWarning | ParseWarning) => {
         if ('hint' in w && w.hint) {
@@ -736,7 +814,6 @@ export class CBOR {
         warnings.push(w);
       },
     };
-    const schema = resolveCddl(options?.cddl);
     const cddlErrors: CddlValidationError[] = [];
     const cddlWarnings: CddlValidationWarning[] = [];
     const checkItem = (item: CborItem) => {
@@ -930,6 +1007,10 @@ export class CBOR {
     }
     // Options form: also mirror JSON.stringify root-drop semantics.
     const opts = arg2 as (FromJSOptions & ToCDNOptions) | undefined;
+    // Resolved up front (rather than via checkCddl(), which resolves after
+    // conversion) so `opts.eRefKeys` can be honored during conversion
+    // itself — mirrors `CBOR.fromJS()`; see `_fromJS()`'s own doc.
+    const schema = resolveCddl(opts?.cddl);
     if (opts?.replacer) {
       const replaced = _applyReplacer(
         value,
@@ -941,19 +1022,28 @@ export class CBOR {
       if (replaced === undefined || replaced === CBOR_OMIT)
         return undefined as unknown as string;
       const { replacer: _r, ...restFromJS } = opts;
-      return checkCddl(
-        _fromJS(
-          replaced,
-          Object.keys(restFromJS).length > 0
-            ? (restFromJS as FromJSOptions)
-            : undefined
-        ),
-        opts
+      const item = _fromJS(
+        replaced,
+        Object.keys(restFromJS).length > 0
+          ? (restFromJS as FromJSOptions)
+          : undefined,
+        schema
+      );
+      return assertCddl(
+        item,
+        schema,
+        opts.cddlValidationOptions,
+        opts,
+        restFromJS as FromJSOptions
       ).toCDN(opts);
     }
-    return checkCddl(
-      _fromJS(value, opts as FromJSOptions | undefined),
-      opts
+    const item = _fromJS(value, opts as FromJSOptions | undefined, schema);
+    return assertCddl(
+      item,
+      schema,
+      opts?.cddlValidationOptions,
+      opts,
+      opts ?? {}
     ).toCDN(opts);
   }
 

@@ -17,6 +17,7 @@ import {
   renderSingleChildWithComments,
 } from '../cdn/serialize-utils';
 import { bytesToSpacedHexUpper } from '../utils/hex';
+import { rfc9277TagLabel } from '../cbor/tagLabels';
 
 /** CBOR Major Type 6 — tagged data item. */
 export class CborTag extends CborItem {
@@ -30,6 +31,14 @@ export class CborTag extends CborItem {
    * (`0x3e7`, decimal, …) when `preserveNumberFormat` is set.
    */
   ednSource?: string;
+  /**
+   * Set by `cddl`-validated decoding/parsing/conversion when the schema
+   * itself implies this tag at its position (see `cddl/implicitTags.ts`),
+   * so `toJS()` can leave it off the JS value — see
+   * `ToJSOptions.implicitTags`.
+   * @internal
+   */
+  _implicit = false;
 
   constructor(
     tag: number | bigint,
@@ -122,6 +131,17 @@ export class CborTag extends CborItem {
     return `${tagStr}${suffix}${wrapped}`;
   }
 
+  /**
+   * The hex-dump comment for this tag's head: `Tag N`, followed by an
+   * RFC 9277 label when there is one — `Tag 55799 (self-described CBOR)`,
+   * `Tag 1668546929 (CoAP Content-Format 112)`, `Tag 1330664270 ("OPSN")`
+   * for a protocol-specific tag spelling four printable ASCII characters.
+   */
+  hexDumpComment(): string {
+    const label = rfc9277TagLabel(this.tag);
+    return label ? `Tag ${this.tag} (${label})` : `Tag ${this.tag}`;
+  }
+
   override _toHexDump(depth: number, options?: ToCDNOptions): AnnotatedLine[] {
     const lines: AnnotatedLine[] = [
       {
@@ -129,7 +149,7 @@ export class CborTag extends CborItem {
         hex: bytesToSpacedHexUpper(
           writeHead(MT_TAG, this.tag, this.encodingWidth)
         ),
-        comment: `Tag ${this.tag}`,
+        comment: this.hexDumpComment(),
       },
     ];
     pushAll(
@@ -155,6 +175,21 @@ export class CborTag extends CborItem {
           { parent: this }
         )
       : this.content._toJS(options);
-    return options?.stripTags ? value : Tag.set(value, this.tag);
+    return this._tagJS(value, options);
+  }
+
+  /**
+   * Attach this tag to the converted content `value` — unless `stripTags`,
+   * or the tag is schema-implied (`_implicit`) and `implicitTags` isn't
+   * `false`.
+   * @internal
+   */
+  _tagJS(value: unknown, options?: ToJSOptions): unknown {
+    if (
+      options?.stripTags ||
+      (this._implicit && options?.implicitTags !== false)
+    )
+      return value;
+    return Tag.set(value, this.tag);
   }
 }

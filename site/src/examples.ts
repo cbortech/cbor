@@ -1,4 +1,4 @@
-export interface Sample {
+export interface Example {
   name: string;
   /** CDN instance loaded into the CDN editor. */
   cdn: string;
@@ -7,9 +7,37 @@ export interface Sample {
    * validation runs only while the CDDL pane is open.
    */
   cddl: string;
+  /**
+   * When `true`, selecting this example opens the CDDL pane if it isn't
+   * already open (leaving it alone otherwise) — *unconditionally*, even
+   * overriding a reader's own earlier explicit close. For an example whose CDN
+   * actually depends on the schema being *active*, not just present — e.g.
+   * `e'...'` external references (draft-ietf-cbor-edn-e-ref), which the CDN
+   * parser can't resolve without the schema currently open — so a reader
+   * who happened to have the pane closed sees a working conversion instead
+   * of a silent unresolved-extension fallback with no clue why. Reserve this
+   * for that case; for an example that's merely *about* CDDL but converts
+   * correctly either way, use `showsCddl` instead.
+   * @default false
+   */
+  requiresCddl?: boolean;
+  /**
+   * When `true`, selecting this example opens the CDDL pane if it isn't
+   * already open — but only while the reader hasn't yet made an explicit
+   * choice about it this session (no `?cddl=` in the URL yet, checked via
+   * `readCddlOpenParam`): once they've toggled it themselves (open *or*
+   * closed), that choice is left alone for every later `showsCddl` example,
+   * and this never persists an opened-this-way state to `?cddl=` on its
+   * own. For an example whose whole point is demonstrating a CDDL feature
+   * (e.g. "CDDL: Groups, choices & ranges") but whose CDN converts
+   * perfectly well without the schema active — unlike `requiresCddl`, which
+   * is for an example that's actually *broken* without it.
+   * @default false
+   */
+  showsCddl?: boolean;
 }
 
-export const SAMPLES: Sample[] = [
+export const EXAMPLES: Example[] = [
   {
     name: 'JSON is valid CDN',
     cdn: `{
@@ -246,7 +274,7 @@ cbor-types = {
     cdn: `{
   # Arrays and Maps (§2.4) — commas are optional; §2.5 Tags: n(item);
   # §2.6 Simple values: true/false/null/undefined/simple(N) (see also
-  # the "All CBOR types" sample).
+  # the "All CBOR types" example).
   "array":          [1, 2, 3],
   "array-nested":   [1, [2, 3]],
   "no-commas":      [1 2 3],       # whitespace alone separates items
@@ -324,7 +352,7 @@ app-extensions-dt-ip = {
 }`,
     cddl: `; hash'...' — requires @cbortech/hash-extension (bstr; without it,
 ; an unrecognised app-string becomes tag 999(["hash", "..."]) instead —
-; see the "unknown" fields in the cri/float/others sample)
+; see the "unknown" fields in the cri/float/others example)
 app-extensions-hash = {
   "sha256-text": bstr .size 32,
   "sha256-bytes": bstr .size 32,
@@ -418,8 +446,9 @@ streamed = [
 ]`,
   },
   {
-    name: 'Tags, bignums, CBOR sequences & elision',
-    cdn: `{
+    name: 'Tags, bignums, embedded CBOR & elision',
+    cdn: `# 55799 = self-described CBOR (RFC 8949 §3.4.6)
+55799({
   "timestamp": 1(1749772800),
   "rfc3339": 0("2026-06-13T00:00:00Z"),
   "bignum": 18446744073709551616,
@@ -433,8 +462,9 @@ streamed = [
     "b": ...,
     ...: ...
   },
-}`,
-    cddl: `tagged = {
+})`,
+    cddl: `self-described = #6.55799(tagged)
+tagged = {
   "timestamp": time,       ; prelude: #6.1(number)
   "rfc3339": tdate,        ; prelude: #6.0(tstr)
   "bignum": biguint,       ; > 2^64-1 → tag 2 on the wire
@@ -480,20 +510,23 @@ concat = {
 }`,
   },
   {
-    name: 'CDN Sequence & JSONL',
-    cdn: `# CDN Sequence — multiple items separated by whitespace, comma, or comment.
-# Output is a CBOR Sequence (RFC 8742): concatenated CBOR items.
+    name: 'CDN (CBOR Sequence) / JSONL',
+    cdn: `# Labeled CBOR Sequence (RFC 9277 §2.3)
+55800(1413829460('BOR'))
 
+# A CBOR Sequence in CDN — multiple items separated by whitespace, comma, or comment.
+# Output is a CBOR Sequence (RFC 8742): concatenated CBOR items.
 { "event": "start", "ts": DT'2026-06-01T00:00:00Z' }
 { "event": "data",  "value": 42 }
 { "event": "end",   "ts": DT'2026-06-01T00:01:00Z' }
 
-# JSONL / NDJSON is a CDN Sequence too:
+# JSONL / NDJSON is a CDN (CBOR Sequence) too:
 {"id": 1, "name": "Alice", "score": 98.5}
 {"id": 2, "name": "Bob",   "score": 72.0}`,
     cddl: `; Each item of the sequence is validated against the root rule —
-; here a choice between the two record shapes.
-item = event / row
+; here a choice between the label and the two record shapes.
+item = label / event / row
+label = #6.55800(#6.1413829460('BOR'))
 event = {
   "event": tstr,
   ? "ts": time,
@@ -507,6 +540,7 @@ row = {
   },
   {
     name: 'CDDL: Groups, choices & ranges',
+    showsCddl: true,
     cdn: `[
   {"name": "Kudo"},
   {"name": "Ada", "vip": true},
@@ -522,27 +556,63 @@ guest = { name: tstr, ? vip: bool }
 room-number = 100..699 / "penthouse"`,
   },
   {
-    name: 'COSE_Sign1 (RFC 9052)',
-    cdn: `[
-  / protected   / << {1: -7} >>,
-  / unprotected / {4: '11'},
+    name: "CDDL: e'...' external references",
+    requiresCddl: true,
+    cdn: `{
+  e'group_mode' : true,
+  e'gp_enc_alg' : e'AES-CCM-16-64-128',
+        e'hkdf' : e'HMAC-256-256',
+}`,
+    cddl: `payload = {
+  ? &(hkdf: -1) => &(
+    HMAC-256-64: 4,
+    HMAC-256-256: 5,
+    HMAC-384-384: 6,
+    HMAC-512-512: 7
+  ),
+  ? &(group_mode: -3) => bool,
+  ? &(gp_enc_alg: -4) => &(
+    AES-CCM-16-64-128: 10,
+    AES-CCM-16-64-256: 11,
+    AES-CCM-64-64-128: 12,
+    AES-CCM-64-64-256: 13,
+    AES-CCM-16-128-128: 30,
+    AES-CCM-16-128-256: 31,
+    AES-CCM-64-128-128: 32,
+    AES-CCM-64-128-256: 33
+  )
+}`,
+  },
+  {
+    name: 'CDDL: COSE_Sign1 (RFC 9052)',
+    requiresCddl: true,
+    cdn: `18([
+  / protected   / << {e'alg': -7} >>,
+  / unprotected / {e'kid': '11'},
   / payload     / 'This is the content.',
   / signature   / h'8eb33e4ca31d1c465ab05aac34cc6b23
-                    d58fef5c083106c4d25a91aef0b0117e',
-]`,
-    cddl: `COSE_Sign1 = [
+                    d58fef5c083106c4d25a91aef0b0117e
+                    2af9a291aa32e14ab834dc56ed2a2234
+                    44547e01f11d3b0916e5a4c345cacb36',
+])`,
+    cddl: `COSE_Sign1_Tagged = #6.18(COSE_Sign1)
+COSE_Sign1 = [
   protected: bstr .cbor header_map / bstr .size 0,
   unprotected: header_map,
   payload: bstr / nil,
   signature: bstr,
 ]
 header_map = {
-  ? 1 => int / tstr,   ; alg
-  ? 4 => bstr,         ; kid
+  ? &(alg: 1) => int / tstr,
+  ? &(crit: 2) => [+label],
+  ? &(content-type: 3) => tstr / int,
+  ? &(kid: 4) => bstr,
+  ? ( &(IV: 5) => bstr //
+      &(Partial-IV: 6) => bstr ),
   * label => any,
 }
 label = int / tstr`,
   },
 ];
 
-export const DEFAULT_SAMPLE = SAMPLES[0]!.cdn;
+export const DEFAULT_EXAMPLE = EXAMPLES[0]!.cdn;

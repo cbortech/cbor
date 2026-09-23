@@ -1,5 +1,5 @@
 /**
- * Wiring for the static chrome: theme toggle, copy buttons, samples
+ * Wiring for the static chrome: theme toggle, copy buttons, examples
  * dropdown, format-options popover, extensions popover, bytes-pane mode
  * tabs, and share links.
  */
@@ -8,7 +8,7 @@ import type {
   FromCDNOptions,
   ToCDNOptions,
 } from '@cbortech/cbor';
-import { SAMPLES, type Sample } from '../samples';
+import { EXAMPLES, type Example } from '../examples';
 import { EXTENSION_ENTRIES } from '../extensions';
 
 export type BytesMode = 'annotated' | 'plain' | 'js' | 'edit';
@@ -100,17 +100,17 @@ export function initFileDrop(
   );
 }
 
-export function initSamples(onSelect: (sample: Sample) => void): () => void {
-  const select = document.getElementById('samples') as HTMLSelectElement;
-  for (const sample of SAMPLES) {
+export function initExamples(onSelect: (example: Example) => void): () => void {
+  const select = document.getElementById('examples') as HTMLSelectElement;
+  for (const example of EXAMPLES) {
     const option = document.createElement('option');
-    option.value = sample.name;
-    option.textContent = sample.name;
+    option.value = example.name;
+    option.textContent = example.name;
     select.appendChild(option);
   }
   select.addEventListener('change', () => {
-    const sample = SAMPLES.find((s) => s.name === select.value);
-    if (sample) onSelect(sample);
+    const example = EXAMPLES.find((s) => s.name === select.value);
+    if (example) onSelect(example);
   });
   return () => {
     select.selectedIndex = 0;
@@ -335,6 +335,7 @@ export function initExtensionsPopover(onChange: () => void): void {
   for (const entry of EXTENSION_ENTRIES) {
     const label = document.createElement('label');
     label.className = 'check';
+    if (entry.title) label.title = entry.title;
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.id = extCheckboxId(entry.key);
@@ -346,7 +347,9 @@ export function initExtensionsPopover(onChange: () => void): void {
       onChange();
     });
     label.append(checkbox, ` ${entry.label}`);
-    (entry.kind === 'builtin' ? builtinGroup : extraGroup).appendChild(label);
+    // 'eref' groups visually with 'builtin' (see EXTENSION_ENTRIES's own
+    // doc) even though getEnabledExtensions() below skips it entirely.
+    (entry.kind === 'extra' ? extraGroup : builtinGroup).appendChild(label);
   }
 }
 
@@ -355,7 +358,8 @@ export function initExtensionsPopover(onChange: () => void): void {
  * arrays consumed by `fromCDN`/`fromCBOR`/`fromHexDump`: bundled extensions
  * that were unchecked go through `builtinExtensions` (an explicit subset of
  * the default set), and non-bundled ones that were checked go through
- * `extensions` as usual.
+ * `extensions` as usual. `kind: 'eref'` is skipped here — it has no fixed
+ * `CborExtension` to push; see `isERefEnabled()`.
  */
 export function getEnabledExtensions(): {
   extensions: CborExtension[];
@@ -364,14 +368,32 @@ export function getEnabledExtensions(): {
   const extensions: CborExtension[] = [];
   const builtinExtensions: CborExtension[] = [];
   for (const entry of EXTENSION_ENTRIES) {
+    if (entry.kind === 'eref') continue;
     const checkbox = document.getElementById(
       extCheckboxId(entry.key)
     ) as HTMLInputElement | null;
     if (checkbox && !checkbox.checked) continue;
-    if (entry.kind === 'builtin') builtinExtensions.push(entry.ext);
-    else extensions.push(entry.ext);
+    if (entry.kind === 'builtin') builtinExtensions.push(entry.ext!);
+    else extensions.push(entry.ext!);
   }
   return { extensions, builtinExtensions };
+}
+
+/**
+ * Whether the `e'...'` external-reference extension (draft-ietf-cbor-edn-e-ref)
+ * is currently enabled via its own checkbox in the Extensions popover
+ * (`EXTENSION_ENTRIES`'s `kind: 'eref'` entry; default: enabled). Unlike
+ * every other extension, `e'...'` also needs a CDDL schema to do anything at
+ * all, so this is consulted directly by `convert.ts`/`cdn-lint.ts` alongside
+ * their own schema check, rather than through `getEnabledExtensions()`.
+ * `true` when the checkbox hasn't rendered yet (matches every other
+ * extension's own default-enabled behavior).
+ */
+export function isERefEnabled(): boolean {
+  const checkbox = document.getElementById(
+    extCheckboxId('eref')
+  ) as HTMLInputElement | null;
+  return !checkbox || checkbox.checked;
 }
 
 export function initModeTabs(onChange: (mode: BytesMode) => void): void {

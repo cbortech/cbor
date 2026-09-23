@@ -8,14 +8,43 @@
  */
 import {
   CBOR,
+  createERefExtension,
+  annotateERefKeys,
+  CddlMismatchError,
   type FromCDNOptions,
   type ParseWarning,
   type ToCDNOptions,
 } from '@cbortech/cbor';
 import type { CborItem } from '@cbortech/cbor/ast';
+import type { CddlSchema } from '@cbortech/cbor/cddl';
 import { buildRangeMap, type NodeRange } from './mapping/lockstep';
 import { buildRows, type HexRow } from './hexview/build-rows';
-import { getEnabledExtensions } from './ui/toolbar';
+import { getEnabledExtensions, isERefEnabled } from './ui/toolbar';
+
+/**
+ * `e'...'` annotation for input that was decoded/parsed *without* the
+ * library's own `cddl` option (every entry point below — like
+ * `convertCdn()`, see its own doc — deliberately avoids it, since it both
+ * validates *and* throws on a mismatch, and this pipeline must keep
+ * converting input that doesn't match the open schema rather than erroring
+ * out entirely). Soft equivalent: validates separately (never throwing) and
+ * only annotates `item` in place — upgrading an integer map key the schema
+ * names via `&(name: value)` to `e'name'` notation — when it actually
+ * matches. A no-op without a schema, when validation fails, or when the
+ * `e'...'` checkbox in the Extensions popover is unchecked
+ * (`isERefEnabled()`). `decodeOptions` are the extension settings `item`
+ * itself was decoded/parsed with, so embedded content expanded to `<<…>>`
+ * (see `annotateERefKeys()`) decodes with the same ones.
+ */
+export function annotateIfValid(
+  item: CborItem,
+  cddlSchema: CddlSchema | null | undefined,
+  decodeOptions: ReturnType<typeof getEnabledExtensions>
+): void {
+  if (!cddlSchema || !isERefEnabled()) return;
+  if (!cddlSchema.validate(item).valid) return;
+  annotateERefKeys(item, cddlSchema, undefined, decodeOptions);
+}
 
 export interface ConversionOk {
   ok: true;
@@ -60,7 +89,23 @@ function pushAll<T>(target: T[], source: readonly T[]): void {
   for (const item of source) target.push(item);
 }
 
-export function convertCdn(text: string): Conversion {
+/**
+ * `cddlSchema`, when given, registers the `e'...'` external-reference
+ * app-extension (draft-ietf-cbor-edn-e-ref) — so `e'name'` resolves to
+ * whatever integer the schema names it — for CDN parsing only, and only
+ * while the `e'...'` checkbox in the Extensions popover is also checked
+ * (`isERefEnabled()`). Deliberately *not* passed as the library's own
+ * `cddl` option (which would also validate and throw `CddlMismatchError` on
+ * a mismatch): this pipeline must keep converting arbitrary CDN even when
+ * it doesn't match the schema open in the CDDL pane, exactly as it already
+ * does without a schema at all — see `main.ts`'s `update()`, which is the
+ * one place that decides whether a schema is currently active
+ * (`cddlPane.isOpen()`).
+ */
+export function convertCdn(
+  text: string,
+  cddlSchema?: CddlSchema | null
+): Conversion {
   if (text.trim() === '') return { ok: true, empty: true };
   try {
     const warnings: ParseWarning[] = [];
@@ -68,7 +113,10 @@ export function convertCdn(text: string): Conversion {
     const seqOpts = {
       strict: false,
       onWarning: (w: ParseWarning) => warnings.push(w),
-      extensions,
+      extensions:
+        cddlSchema && isERefEnabled()
+          ? [createERefExtension(cddlSchema), ...extensions]
+          : extensions,
       builtinExtensions,
     };
 
@@ -102,6 +150,17 @@ export function convertCdn(text: string): Conversion {
         onWarning: (w) => warnings.push(w),
       }),
     ];
+
+    // Annotate each binAst the same way bytesToCdnText() annotates its own
+    // items — the JS pane renders `binAst`/`binAsts` directly (see
+    // `main.ts`'s `update()`), and without this, a plain integer map key
+    // decoded straight from bytes never becomes a `CborERefUint`/
+    // `CborERefNint`, so `toJS()` has no name to use and 'auto' falls back
+    // to `MapEntries` even though the CDN source spelled `e'title'`
+    // explicitly. `annotateIfValid()` is a no-op without a schema, or when
+    // the item doesn't actually validate against it.
+    for (const item of binAsts)
+      annotateIfValid(item, cddlSchema, { extensions, builtinExtensions });
 
     // Build rows and ranges for every CDN ↔ binary item pair.
     const rows: HexRow[] = [];
@@ -150,14 +209,50 @@ function hasPrettyIndent(indent: ToCDNOptions['indent']): boolean {
  * it, since blank lines between sequence items are outside any single item's
  * own AST). In compact mode `preserveBlankLines` has no effect, matching how
  * the option behaves for blank lines inside a single item's containers.
+ *
+ * `cddlSchema`, when given, validates each item as it's parsed and throws
+ * `CddlMismatchError` on the first mismatch (same fail-fast behavior the
+ * library's own `cddl` option gives `fromCDNSeq` directly) — unlike
+ * `convertCdn()`/`bytesToCdnText()`'s own soft handling, Format is a
+ * deliberate, one-shot action a reader expects to fail loudly on invalid
+ * input, not keep converting best-effort while they type. Registers the
+ * `e'...'` extension and annotates each valid item the same way those two
+ * do — gated by `isERefEnabled()` — rather than actually using the
+ * library's own `cddl` option, which would do both unconditionally; see
+ * `annotateIfValid()`'s own doc for why every entry point in this file
+ * avoids it.
  */
 export function formatCdnText(
   text: string,
-  options: FromCDNOptions & ToCDNOptions
+  options: FromCDNOptions & ToCDNOptions,
+  cddlSchema?: CddlSchema | null
 ): string {
   const preserveBlankLines =
     !!options.preserveBlankLines && hasPrettyIndent(options.indent);
-  const items = [...CBOR.fromCDNSeq(text, options)];
+  const parseOptions: FromCDNOptions = {
+    ...options,
+    extensions:
+      cddlSchema && isERefEnabled()
+        ? [createERefExtension(cddlSchema), ...(options.extensions ?? [])]
+        : options.extensions,
+  };
+  const items: CborItem[] = [];
+  for (const item of CBOR.fromCDNSeq(text, parseOptions)) {
+    if (cddlSchema) {
+      const result = cddlSchema.validate(item, options.cddlValidationOptions);
+      if (!result.valid) {
+        throw new CddlMismatchError(result.errors, result.warnings);
+      }
+      if (isERefEnabled())
+        annotateERefKeys(
+          item,
+          cddlSchema,
+          options.cddlValidationOptions,
+          options
+        );
+    }
+    items.push(item);
+  }
   let cdn = '';
   let prevEnd: number | null = null;
   for (const item of items) {
@@ -177,7 +272,8 @@ export function formatCdnText(
  */
 export function bytesToCdnText(
   hexDumpText: string,
-  formatOptions?: ToCDNOptions
+  formatOptions?: ToCDNOptions,
+  cddlSchema?: CddlSchema | null
 ): {
   cdn: string;
   warnings: string[];
@@ -193,6 +289,8 @@ export function bytesToCdnText(
     }),
   ];
   if (items.length === 0) return { cdn: '', warnings };
+  for (const item of items)
+    annotateIfValid(item, cddlSchema, { extensions, builtinExtensions });
   const opts: ToCDNOptions = formatOptions ?? { indent: 2 };
   const cdn = items.map((item) => item.toCDN(opts)).join('\n');
   return { cdn, warnings };

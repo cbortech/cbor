@@ -48,6 +48,21 @@ export class CborUnresolvedAppExt extends CborTag {
     super(CPA999_TAG, new CborArray([new CborTextString(prefix), content]));
   }
 
+  /** App-string form (`prefix'text'`), as opposed to an app-sequence. */
+  private get _isAppString(): boolean {
+    return (this.content as CborArray).items[1] instanceof CborTextString;
+  }
+
+  /**
+   * An app-string (`e'alg'`) renders as a plain literal, not the
+   * `[prefix, text]` array it wraps, so it's a leaf for
+   * `inlineLeafContainers` — word-counted like a text string instead (via
+   * `CborTag._isMultiWordText`'s tokenizing of the rendered output).
+   */
+  override get _containsCdnContainer(): boolean {
+    return this._isAppString ? false : super._containsCdnContainer;
+  }
+
   override _toCDN(options: ToCDNOptions | undefined, depth: number): string {
     if (options?.appPrefix === false) return super._toCDN(options, depth);
 

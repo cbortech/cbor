@@ -76,6 +76,40 @@ export interface ValidateOptions {
   rule?: string;
 }
 
+/**
+ * One tag on a successful match path: `item` is a `CborTag` matched by a
+ * `#6.N(type)` with literal tag number `tag`, or — `inferred` — an
+ * untagged item that matched only as the content of such a type (see
+ * `TagTracing.infer`).
+ */
+export interface TagRecord {
+  readonly item: CborItem;
+  readonly tag: bigint;
+  readonly inferred: boolean;
+  /**
+   * For an inferred record, how many inferred tags enclose this one around
+   * the same item (0 = outermost): `#6.101(#6.100(int))` records 101 at
+   * layer 0 and 100 at layer 1. Re-checking one layer (`.and`, …) repeats
+   * its layer; a genuinely nested tag, even of the same number, doesn't.
+   * Always 0 for a matched tag.
+   */
+  readonly layer: number;
+}
+
+/** Tag bookkeeping for {@link validateItem}'s internal callers. */
+export interface TagTracing {
+  /**
+   * Let `#6.N(type)` (literal N) accept an untagged item matching `type`,
+   * recording it as inferred. Only a fallback: at every type, rule and
+   * map-group choice, alternatives are first tried without inference.
+   */
+  readonly infer?: boolean;
+  /** Tags to match as if absent (their content in their place). */
+  readonly stripped?: ReadonlySet<CborTag>;
+  /** Receives the successful path's records (left empty on failure). */
+  readonly trail: TagRecord[];
+}
+
 // ─── Context ──────────────────────────────────────────────────────────────────
 
 type PathSeg = string | number;
@@ -98,6 +132,22 @@ class Ctx {
   preludeRef: CddlNodeBase | undefined;
   readonly warnings: CddlValidationWarning[] = [];
   private readonly warned = new Set<string>();
+  /**
+   * Implicit-tag bookkeeping (see `matchTags()`): when `infer` is set, a
+   * `#6.N(type)` with a literal tag number also accepts an *untagged* item
+   * matching `type` — as a fallback only, see `strictFirst()`.
+   */
+  infer = false;
+  /** Tags matched as if absent (their content stands in their place). */
+  stripped: ReadonlySet<CborTag> | undefined;
+  /**
+   * Tag matches/inferences on the current match path, when recording.
+   * Failing branches truncate it back (`ctx.trail.length = mark`), so on
+   * overall success it holds the successful path's records only.
+   */
+  trail: TagRecord[] | undefined;
+  /** Inferred tags currently open around each item (see `TagRecord.layer`). */
+  readonly inferLayers = new Map<CborItem, number>();
   best: (CddlValidationError & { depth: number; startKey: number }) | undefined;
 
   constructor(
@@ -106,6 +156,23 @@ class Ctx {
     readonly maxSteps: number,
     readonly features: Set<string>
   ) {}
+
+  /**
+   * Run `fn` with inference off first, then (only if that fails) on: at a
+   * choice point, an alternative the item matches as-is always wins over
+   * one it would match only with an inferred tag (so `time / number`
+   * leaves a plain number untagged).
+   */
+  strictFirst(fn: () => boolean): boolean {
+    if (!this.infer) return fn();
+    this.infer = false;
+    try {
+      if (fn()) return true;
+    } finally {
+      this.infer = true;
+    }
+    return fn();
+  }
 
   step(): void {
     if (++this.steps > this.maxSteps)
@@ -175,7 +242,8 @@ class Ctx {
 export function validateItem(
   schema: CddlSchema,
   item: CborItem,
-  options?: ValidateOptions
+  options?: ValidateOptions,
+  tags?: TagTracing
 ): ValidationResult {
   const ruleName = options?.rule ?? schema.root?.name;
   if (ruleName === undefined)
@@ -194,6 +262,11 @@ export function validateItem(
     options?.maxSteps ?? 1_000_000,
     new Set(options?.features ?? [])
   );
+  if (tags) {
+    ctx.infer = tags.infer ?? false;
+    ctx.stripped = tags.stripped;
+    ctx.trail = tags.trail;
+  }
   // A generic rule's parameters are only ever bound from a referencing
   // site's `genericArgs` (see `bindGenericsForDef`); neither the schema
   // root nor `{ rule }` has one to supply, so selecting a generic rule here
@@ -215,7 +288,9 @@ export function validateItem(
   let valid: boolean;
   try {
     valid = matchRuleName(item, ruleName, undefined, [], ctx, 0);
+    if (!valid && tags) tags.trail.length = 0;
   } catch (e) {
+    if (tags) tags.trail.length = 0;
     if (!(e instanceof LimitExceeded)) throw e;
     return {
       valid: false,
@@ -245,6 +320,453 @@ export function validateItem(
     errors,
     ...(ctx.warnings.length ? { warnings: ctx.warnings } : {}),
   };
+}
+
+function withCtx<T>(
+  schema: CddlSchema,
+  options: ValidateOptions | undefined,
+  run: (ctx: Ctx) => T
+): T | undefined {
+  const ctx = new Ctx(
+    schema,
+    options?.maxDepth ?? 256,
+    options?.maxSteps ?? 1_000_000,
+    new Set(options?.features ?? [])
+  );
+  try {
+    return run(ctx);
+  } catch (e) {
+    if (e instanceof LimitExceeded) return undefined;
+    throw e;
+  }
+}
+
+/**
+ * Whether `item` matches `type` on its own, exactly as validation would
+ * check it at a position of that type (no generic bindings). `undefined`
+ * when the step/depth budget runs out.
+ */
+export function itemMatchesType(
+  schema: CddlSchema,
+  item: CborItem,
+  type: CddlType,
+  options?: ValidateOptions
+): boolean | undefined {
+  return withCtx(schema, options, (ctx) =>
+    matchType(item, type, undefined, [], ctx, 0)
+  );
+}
+
+/** Opaque generic-parameter bindings in force at some point of a match. */
+export type CddlEnv = Env;
+
+/**
+ * The group member that consumed one map entry on the validator's own
+ * successful path — its member key, value type, and the generic bindings
+ * in force there.
+ */
+export interface MapMember {
+  readonly memberKey: CddlMemberKey;
+  readonly type: CddlType;
+  readonly env: CddlEnv;
+}
+
+/** One map group a type can denote, with its generic bindings. */
+export interface MapGroupTarget {
+  readonly group: CddlGroup;
+  readonly env: CddlEnv;
+}
+
+/**
+ * Every map group (`{...}`) `type` can denote, following references,
+ * parentheses, choices and generic bindings exactly as `matchType()` does.
+ * `undefined` when some alternative could still match a map some *other*
+ * way this can't see into — `any`/`#5`, a control operator, `~unwrap`, an
+ * `&(...)` type, an undefined name — so no single group's assignment is
+ * known to be the one validation used.
+ */
+export function mapGroupsOfType(
+  schema: CddlSchema,
+  type: CddlType,
+  env: CddlEnv
+): MapGroupTarget[] | undefined {
+  return withCtx(schema, undefined, (ctx) => {
+    const out: MapGroupTarget[] = [];
+    return collectMapGroups(type, env, ctx, [], out) ? out : undefined;
+  });
+}
+
+function collectMapGroups(
+  type: CddlType,
+  env: Env,
+  ctx: Ctx,
+  stack: string[],
+  out: MapGroupTarget[]
+): boolean {
+  for (const t1 of type.alternatives) {
+    if (t1.op) return false;
+    if (!collectMapGroups2(t1.target, env, ctx, stack, out)) return false;
+  }
+  return true;
+}
+
+function collectMapGroups2(
+  t2: CddlType2,
+  env: Env,
+  ctx: Ctx,
+  stack: string[],
+  out: MapGroupTarget[]
+): boolean {
+  switch (t2.kind) {
+    case 'map':
+      out.push({ group: t2.group, env });
+      return true;
+    case 'paren':
+      return collectMapGroups(t2.type, env, ctx, stack, out);
+    case 'ref': {
+      const binding = env?.get(t2.name);
+      if (binding && !t2.genericArgs) {
+        if (binding.type1.op) return false;
+        return collectMapGroups2(
+          binding.type1.target,
+          binding.env,
+          ctx,
+          stack,
+          out
+        );
+      }
+      if (stack.length > 64) return false;
+      if (!t2.genericArgs && stack.includes(t2.name)) return true;
+      const defs = ruleDefs(ctx, t2.name);
+      if (!defs) return false;
+      stack.push(t2.name);
+      try {
+        for (const def of defs) {
+          const defEnv = bindGenericsForDef(def, t2.genericArgs, env);
+          if (isPlainTypeEntry(def.body)) {
+            if (!collectMapGroups(def.body.value, defEnv, ctx, stack, out))
+              return false;
+            continue;
+          }
+          // Mirrors matchRuleName(): a group body is usable as a type only
+          // when every choice is a single plain entry; otherwise it never
+          // matches anything here.
+          const choices = choicesOfBody(def.body);
+          if (!choices.every((c) => c.length === 1 && isPlainTypeEntry(c[0]!)))
+            continue;
+          for (const [only] of choices)
+            if (
+              !collectMapGroups(
+                (only as Extract<CddlGroupEntry, { kind: 'entry' }>).value,
+                defEnv,
+                ctx,
+                stack,
+                out
+              )
+            )
+              return false;
+        }
+      } finally {
+        stack.pop();
+      }
+      return true;
+    }
+    case 'major':
+      return t2.major !== 5;
+    case 'value':
+    case 'array':
+    case 'tagged': // requires a tag, never a bare map
+      return true;
+    default:
+      return false; // any, unwrap, enum
+  }
+}
+
+/**
+ * The literal text a member key requires, when it requires exactly one:
+ * `name:`, `"name":`, or `"name" =>` (a text-literal key type).
+ */
+export function plainTextSpelling(mk: CddlMemberKey): string | undefined {
+  if (mk.kind === 'bareword') return mk.key;
+  if (mk.kind === 'value')
+    return mk.key.type === 'text' ? mk.key.value : undefined;
+  const t2 = mk.key.target;
+  return !mk.key.op && t2.kind === 'value' && t2.type === 'text'
+    ? t2.value
+    : undefined;
+}
+
+/**
+ * Every spelling used as a plain text member key anywhere in `target`'s
+ * group — `name:`, `"name":`, or a key type that accepts a text literal
+ * (`"name" =>`, a rule or `/` choice of such literals, or a generic
+ * parameter bound to one, e.g. `K => …` in `G<"name">`) — through inline
+ * sub-groups, bare group references and `~unwrap`ped groups, expanded
+ * exactly as matching expands them (`expandEntry()`), across every choice
+ * and every distinct generic instantiation. `undefined` when the expansion
+ * runs out of budget.
+ */
+export function plainTextMemberKeys(
+  schema: CddlSchema,
+  target: MapGroupTarget
+): ReadonlySet<string> | undefined {
+  return withCtx(schema, undefined, (ctx) => {
+    const names = new Set<string>();
+    // The same group under the same (normalized) bindings can't add
+    // anything new; under different bindings — `G<"x">` vs `G<"y">` — it
+    // can, so both are part of the key.
+    const visited = new Set<string>();
+    const ids = new WeakMap<object, number>();
+    let nextId = 0;
+    const idOf = (node: object): number => {
+      let id = ids.get(node);
+      if (id === undefined) ids.set(node, (id = nextId++));
+      return id;
+    };
+    const visit = (choices: readonly GroupChoice[], depth: number): void => {
+      ctx.checkDepth(depth);
+      for (const choice of choices) {
+        const key = `${idOf(choice.entries)}|${envSignature(idOf, choice.env)}`;
+        if (visited.has(key)) continue;
+        visited.add(key);
+        for (const entry of choice.entries) {
+          ctx.step();
+          const m = expandEntry(entry, choice.env, ctx);
+          if (m.kind === 'group') visit(m.choices, depth + 1);
+          else if (m.memberKey) {
+            const texts = memberKeyTexts(m.memberKey, m.env, ctx);
+            if (!texts) throw UNKNOWN_KEY;
+            for (const t of texts.literals) names.add(t);
+          }
+        }
+      }
+    };
+    try {
+      visit(plainChoices(target.group, target.env), 0);
+    } catch (e) {
+      if (e === UNKNOWN_KEY) return undefined;
+      throw e;
+    }
+    return names;
+  });
+}
+
+const UNKNOWN_KEY = new Error('member key type not resolvable');
+
+/**
+ * A structural signature of `env`: each binding followed through bare
+ * references to other bound parameters down to the type it finally stands
+ * for, so a recursive instantiation (`G<T> = (…, ? G<T>)`) that re-binds a
+ * parameter to the same thing yields the same signature at every level.
+ */
+function envSignature(idOf: (node: object) => number, env: Env): string {
+  if (!env) return '';
+  const parts: string[] = [];
+  for (const [name, binding] of env) {
+    let b = binding;
+    for (let hops = 0; hops < 64; hops++) {
+      const t = b.type1;
+      if (t.op || t.target.kind !== 'ref' || t.target.genericArgs) break;
+      const next = b.env?.get(t.target.name);
+      if (!next) break;
+      b = next;
+    }
+    parts.push(`${name}=${idOf(b.type1)}(${envSignature(idOf, b.env)})`);
+  }
+  return parts.sort().join(',');
+}
+
+/**
+ * What text a member-key type accepts: the specific text `literals` it
+ * can equal, and whether it also accepts arbitrary text (`wildcard`, e.g.
+ * `tstr`/`any` — not a plain spelling, so not a label conflict). A
+ * function returning `undefined` means *unknown*: it might accept some
+ * specific literal this can't see (e.g. a control operator narrowing
+ * `tstr` to `"x"`), so no conclusion about any spelling can be drawn.
+ */
+interface KeyTexts {
+  readonly literals: ReadonlySet<string>;
+  readonly wildcard: boolean;
+}
+
+const NO_TEXT: KeyTexts = { literals: new Set(), wildcard: false };
+const ANY_TEXT: KeyTexts = { literals: new Set(), wildcard: true };
+
+/**
+ * Control operators whose result is always a subset of their target's own
+ * values — so on a target of known literals they can only drop some.
+ */
+const NARROWING_CONTROLS = new Set([
+  'size',
+  'bits',
+  'regexp',
+  'pcre',
+  'and',
+  'within',
+  'lt',
+  'le',
+  'gt',
+  'ge',
+  'eq',
+  'ne',
+  'default',
+  'feature',
+]);
+
+function mergeKeyTexts(a: KeyTexts, b: KeyTexts): KeyTexts {
+  return {
+    literals: new Set([...a.literals, ...b.literals]),
+    wildcard: a.wildcard || b.wildcard,
+  };
+}
+
+function memberKeyTexts(
+  mk: CddlMemberKey,
+  env: Env,
+  ctx: Ctx
+): KeyTexts | undefined {
+  if (mk.kind === 'bareword')
+    return { literals: new Set([mk.key]), wildcard: false };
+  if (mk.kind === 'value')
+    return mk.key.type === 'text'
+      ? { literals: new Set([mk.key.value]), wildcard: false }
+      : NO_TEXT;
+  return keyTextsOfType1(mk.key, env, ctx, []);
+}
+
+function keyTextsOfType(
+  type: CddlType,
+  env: Env,
+  ctx: Ctx,
+  stack: string[]
+): KeyTexts | undefined {
+  let out = NO_TEXT;
+  for (const alt of type.alternatives) {
+    const t = keyTextsOfType1(alt, env, ctx, stack);
+    if (!t) return undefined;
+    out = mergeKeyTexts(out, t);
+  }
+  return out;
+}
+
+function keyTextsOfType1(
+  t1: CddlType1,
+  env: Env,
+  ctx: Ctx,
+  stack: string[]
+): KeyTexts | undefined {
+  ctx.step();
+  const target = keyTextsOfType2(t1.target, env, ctx, stack);
+  if (!target || !t1.op) return target;
+  // A control or range over a type that never holds text can't yield text.
+  if (target.literals.size === 0 && !target.wildcard) return target;
+  if (
+    t1.op.kind === 'ctl' &&
+    NARROWING_CONTROLS.has(t1.op.name) &&
+    !target.wildcard
+  )
+    return target;
+  // Could narrow arbitrary text down to one literal, or build a new one.
+  return undefined;
+}
+
+function keyTextsOfType2(
+  t2: CddlType2,
+  env: Env,
+  ctx: Ctx,
+  stack: string[]
+): KeyTexts | undefined {
+  switch (t2.kind) {
+    case 'value':
+      return t2.type === 'text'
+        ? { literals: new Set([t2.value]), wildcard: false }
+        : NO_TEXT;
+    case 'paren':
+      return keyTextsOfType(t2.type, env, ctx, stack);
+    case 'ref': {
+      const binding = env?.get(t2.name);
+      if (binding && !t2.genericArgs)
+        return keyTextsOfType1(binding.type1, binding.env, ctx, stack);
+      ctx.checkDepth(stack.length);
+      if (!t2.genericArgs && stack.includes(t2.name)) return NO_TEXT;
+      const defs = ruleDefs(ctx, t2.name);
+      if (!defs) return undefined;
+      stack.push(t2.name);
+      try {
+        let out = NO_TEXT;
+        for (const def of defs) {
+          const defEnv = bindGenericsForDef(def, t2.genericArgs, env);
+          // Mirrors matchRuleName(): a group body is usable as a type only
+          // when every choice is a single plain entry.
+          const types = isPlainTypeEntry(def.body)
+            ? [def.body.value]
+            : choicesOfBody(def.body).every(
+                  (c) => c.length === 1 && isPlainTypeEntry(c[0]!)
+                )
+              ? choicesOfBody(def.body).map(
+                  ([only]) =>
+                    (only as Extract<CddlGroupEntry, { kind: 'entry' }>).value
+                )
+              : [];
+          for (const type of types) {
+            const t = keyTextsOfType(type, defEnv, ctx, stack);
+            if (!t) return undefined;
+            out = mergeKeyTexts(out, t);
+          }
+        }
+        return out;
+      } finally {
+        stack.pop();
+      }
+    }
+    case 'enum': {
+      // `&(a: "x", …)` accepts each entry's own value.
+      if (t2.group.kind !== 'group') return undefined;
+      let out = NO_TEXT;
+      for (const choice of t2.group.choices)
+        for (const entry of choice) {
+          if (entry.kind !== 'entry' || !entry.memberKey) return undefined;
+          const t = keyTextsOfType(entry.value, env, ctx, stack);
+          if (!t) return undefined;
+          out = mergeKeyTexts(out, t);
+        }
+      return out;
+    }
+    case 'unwrap': {
+      const inner = resolveUnwrapTagType(t2.ref, env, ctx, 0);
+      return inner
+        ? keyTextsOfType(inner.type, inner.env, ctx, stack)
+        : undefined;
+    }
+    case 'major':
+      return t2.major === 3 ? ANY_TEXT : NO_TEXT;
+    case 'any':
+      return ANY_TEXT;
+    default:
+      return NO_TEXT; // map, array, tagged: never a text string
+  }
+}
+
+/**
+ * Match `map` against one map group exactly as validation does
+ * (`matchMapGroup()`), returning which member consumed each of its entries
+ * on the successful path (`false` for one left unconsumed, e.g. an elided
+ * `...` entry). `null` when it doesn't match; `undefined` when the budget
+ * runs out.
+ */
+export function traceMapGroup(
+  schema: CddlSchema,
+  map: CborMap,
+  target: MapGroupTarget,
+  options?: ValidateOptions
+): readonly (MapMember | false)[] | null | undefined {
+  return withCtx(schema, options, (ctx) => {
+    let owners: (MapMember | false)[] | undefined;
+    const ok = matchMapGroup(map, target.group, target.env, [], ctx, 0, (c) => {
+      owners = c.slice();
+    });
+    return ok && owners ? owners : null;
+  });
 }
 
 // ─── Rule resolution ──────────────────────────────────────────────────────────
@@ -316,7 +838,7 @@ function matchRuleName(
   ctx.ruleName = name;
   const fromPrelude = !ctx.schema.rules.has(name);
   if (fromPrelude && ++ctx.preludeDepth === 1) ctx.preludeRef = refNode;
-  try {
+  const tryDefs = (): boolean => {
     for (const def of defs) {
       const env = bindGenericsForDef(def, genericArgs, callerEnv);
       if (isPlainTypeEntry(def.body)) {
@@ -348,6 +870,11 @@ function matchRuleName(
       }
     }
     return false;
+  };
+  try {
+    return defs.length > 1 || !isPlainTypeEntry(defs[0]!.body)
+      ? ctx.strictFirst(tryDefs)
+      : tryDefs();
   } finally {
     ctx.ruleName = prevRule;
     if (fromPrelude && --ctx.preludeDepth === 0) ctx.preludeRef = undefined;
@@ -367,6 +894,16 @@ function unwrapAppSeq(item: CborItem): CborItem {
   return item;
 }
 
+/** `unwrapAppSeq()`, plus seeing through any tag in `ctx.stripped`. */
+function viewItem(item: CborItem, ctx: Ctx): CborItem {
+  for (;;) {
+    item = unwrapAppSeq(item);
+    if (!(ctx.stripped && item instanceof CborTag && ctx.stripped.has(item)))
+      return item;
+    item = item.content;
+  }
+}
+
 function matchType(
   item: CborItem,
   type: CddlType,
@@ -375,9 +912,15 @@ function matchType(
   ctx: Ctx,
   depth: number
 ): boolean {
-  for (const alt of type.alternatives)
-    if (matchType1(item, alt, env, path, ctx, depth)) return true;
-  return false;
+  const run = (): boolean => {
+    const mark = ctx.trail?.length ?? 0;
+    for (const alt of type.alternatives) {
+      if (matchType1(item, alt, env, path, ctx, depth)) return true;
+      if (ctx.trail) ctx.trail.length = mark;
+    }
+    return false;
+  };
+  return type.alternatives.length > 1 ? ctx.strictFirst(run) : run();
 }
 
 function matchType1(
@@ -388,10 +931,25 @@ function matchType1(
   ctx: Ctx,
   depth: number
 ): boolean {
+  if (!ctx.trail) return matchType1Inner(item, t1, env, path, ctx, depth);
+  const mark = ctx.trail.length;
+  if (matchType1Inner(item, t1, env, path, ctx, depth)) return true;
+  ctx.trail.length = mark;
+  return false;
+}
+
+function matchType1Inner(
+  item: CborItem,
+  t1: CddlType1,
+  env: Env,
+  path: readonly PathSeg[],
+  ctx: Ctx,
+  depth: number
+): boolean {
   ctx.step();
   // Unwrapped here (before control handlers see the item) and again in
   // matchType2, which is also entered directly from control plumbing.
-  item = unwrapAppSeq(item);
+  item = viewItem(item, ctx);
   if (!t1.op || !t1.controller)
     return matchType2(item, t1.target, env, path, ctx, depth);
   if (t1.op.kind === 'range')
@@ -416,7 +974,7 @@ function matchType2(
   ctx: Ctx,
   depth: number
 ): boolean {
-  item = unwrapAppSeq(item);
+  item = viewItem(item, ctx);
   // A CDN elision stands for content that was deliberately left out.
   if (item instanceof CborEllipsis) return true;
 
@@ -469,8 +1027,26 @@ function matchType2(
       // #6.n(type) denotes a *tagged data item* (RFC 8610 §3.6): an untagged
       // integer never matches #6.2/#6.3. (Value-level bignum equivalence
       // lives in literals/ranges/comparisons via intValueOf instead.)
-      if (!(item instanceof CborTag))
+      if (!(item instanceof CborTag)) {
+        if (ctx.infer && typeof t2.tag === 'bigint') {
+          const mark = ctx.trail?.length ?? 0;
+          const layer = ctx.inferLayers.get(item) ?? 0;
+          ctx.inferLayers.set(item, layer + 1);
+          let ok: boolean;
+          try {
+            ok = matchType(item, t2.item, env, path, ctx, depth + 1);
+          } finally {
+            if (layer === 0) ctx.inferLayers.delete(item);
+            else ctx.inferLayers.set(item, layer);
+          }
+          if (ok) {
+            ctx.trail?.push({ item, tag: t2.tag, inferred: true, layer });
+            return true;
+          }
+          if (ctx.trail) ctx.trail.length = mark;
+        }
         return ctx.fail(path, item, t2, 'expected a tagged item');
+      }
       if (typeof t2.tag === 'bigint') {
         if (item.tag !== t2.tag)
           return ctx.fail(
@@ -490,7 +1066,11 @@ function matchType2(
             `tag number ${item.tag} does not match the head type`
           );
       }
-      return matchType(item.content, t2.item, env, path, ctx, depth + 1);
+      if (!matchType(item.content, t2.item, env, path, ctx, depth + 1))
+        return false;
+      if (typeof t2.tag === 'bigint')
+        ctx.trail?.push({ item, tag: t2.tag, inferred: false, layer: 0 });
+      return true;
     }
 
     case 'major':
@@ -1395,7 +1975,11 @@ function matchArrayGroup(
     ctx,
     depth
   );
-  if (ends.has(arr.items.length)) return true;
+  const records = ends.get(arr.items.length);
+  if (records) {
+    ctx.trail?.push(...records);
+    return true;
+  }
   return ctx.fail(
     path,
     arr,
@@ -1404,7 +1988,11 @@ function matchArrayGroup(
   );
 }
 
-/** All end positions reachable by matching the group's choices at `idx`. */
+/**
+ * All end positions reachable by matching the group's choices at `idx`,
+ * each with the tag records (see `Ctx.trail`) of the first path found to
+ * reach it. Exploration leaves `ctx.trail` itself unchanged.
+ */
 function seqEnds(
   items: readonly CborItem[],
   idx: number,
@@ -1412,11 +2000,12 @@ function seqEnds(
   path: readonly PathSeg[],
   ctx: Ctx,
   depth: number
-): Set<number> {
-  const out = new Set<number>();
+): Map<number, TagRecord[]> {
+  const out = new Map<number, TagRecord[]>();
+  const base = ctx.trail?.length ?? 0;
   for (const choice of choices) {
     const matchers = choice.entries.map((e) => expandEntry(e, choice.env, ctx));
-    seqStep(items, idx, matchers, 0, path, ctx, depth, out);
+    seqStep(items, idx, matchers, 0, path, ctx, depth, out, base);
   }
   return out;
 }
@@ -1429,10 +2018,11 @@ function seqStep(
   path: readonly PathSeg[],
   ctx: Ctx,
   depth: number,
-  out: Set<number>
+  out: Map<number, TagRecord[]>,
+  base: number
 ): void {
   if (k === ms.length) {
-    out.add(idx);
+    if (!out.has(idx)) out.set(idx, ctx.trail?.slice(base) ?? []);
     return;
   }
   const m = ms[k]!;
@@ -1440,18 +2030,31 @@ function seqStep(
   const tryCount = (count: number, at: number): void => {
     ctx.step();
     if (count >= m.occur.min)
-      seqStep(items, at, ms, k + 1, path, ctx, depth, out);
+      seqStep(items, at, ms, k + 1, path, ctx, depth, out, base);
     if (count >= m.occur.max || at >= items.length) return;
-    for (const end of matchOnceEnds(items, at, m, path, ctx, depth)) {
+    for (const [end, records] of matchOnceEnds(
+      items,
+      at,
+      m,
+      path,
+      ctx,
+      depth
+    )) {
       // An empty match makes no progress; recursing on it would loop.
       if (end === at) continue;
+      const mark = ctx.trail?.length ?? 0;
+      ctx.trail?.push(...records);
       tryCount(count + 1, end);
+      if (ctx.trail) ctx.trail.length = mark;
     }
   };
   tryCount(0, idx);
 }
 
-/** End positions from matching a single occurrence of `m` at `at`. */
+/**
+ * End positions from matching a single occurrence of `m` at `at`, each
+ * with the tag records of that match (not left on `ctx.trail`).
+ */
 function matchOnceEnds(
   items: readonly CborItem[],
   at: number,
@@ -1459,17 +2062,18 @@ function matchOnceEnds(
   path: readonly PathSeg[],
   ctx: Ctx,
   depth: number
-): number[] {
+): [number, TagRecord[]][] {
   if (m.kind === 'type') {
+    const mark = ctx.trail?.length ?? 0;
     // Member keys inside arrays are documentation only (RFC 8610 §3.4).
-    return matchType(items[at]!, m.type, m.env, [...path, at], ctx, depth)
-      ? [at + 1]
-      : [];
+    if (!matchType(items[at]!, m.type, m.env, [...path, at], ctx, depth))
+      return [];
+    return [[at + 1, ctx.trail?.splice(mark) ?? []]];
   }
   ctx.checkDepth(depth);
   const ends = seqEnds(items, at, m.choices, path, ctx, depth + 1);
   // Descending order: prefer greedy consumption first.
-  return [...ends].sort((a, b) => b - a);
+  return [...ends].sort((a, b) => b[0] - a[0]);
 }
 
 // ─── Group matching: maps ─────────────────────────────────────────────────────
@@ -1480,33 +2084,43 @@ function matchMapGroup(
   env: Env,
   path: readonly PathSeg[],
   ctx: Ctx,
-  depth: number
+  depth: number,
+  onMatch?: (consumed: readonly (MapMember | false)[]) => void
 ): boolean {
   ctx.checkDepth(depth);
-  const consumed = new Array<boolean>(map.entries.length).fill(false);
-  for (const choice of plainChoices(group, env)) {
-    consumed.fill(false);
-    if (
-      mapSeq(
-        map,
-        choice.entries,
-        0,
-        consumed,
-        choice.env,
-        path,
-        ctx,
-        depth,
-        () => mapFullyConsumed(map, consumed, path, ctx, group)
+  const consumed = new Array<MapMember | false>(map.entries.length).fill(false);
+  const choices = plainChoices(group, env);
+  const run = (): boolean => {
+    for (const choice of choices) {
+      consumed.fill(false);
+      if (
+        mapSeq(
+          map,
+          choice.entries,
+          0,
+          consumed,
+          choice.env,
+          path,
+          ctx,
+          depth,
+          () => {
+            if (!mapFullyConsumed(map, consumed, path, ctx, group))
+              return false;
+            onMatch?.(consumed);
+            return true;
+          }
+        )
       )
-    )
-      return true;
-  }
-  return false;
+        return true;
+    }
+    return false;
+  };
+  return choices.length > 1 ? ctx.strictFirst(run) : run();
 }
 
 function mapFullyConsumed(
   map: CborMap,
-  consumed: boolean[],
+  consumed: (MapMember | false)[],
   path: readonly PathSeg[],
   ctx: Ctx,
   node: CddlNodeBase
@@ -1539,7 +2153,25 @@ function mapSeq(
   map: CborMap,
   entries: readonly CddlGroupEntry[],
   k: number,
-  consumed: boolean[],
+  consumed: (MapMember | false)[],
+  env: Env,
+  path: readonly PathSeg[],
+  ctx: Ctx,
+  depth: number,
+  cont: () => boolean
+): boolean {
+  const mark = ctx.trail?.length ?? 0;
+  if (mapSeqInner(map, entries, k, consumed, env, path, ctx, depth, cont))
+    return true;
+  if (ctx.trail) ctx.trail.length = mark;
+  return false;
+}
+
+function mapSeqInner(
+  map: CborMap,
+  entries: readonly CddlGroupEntry[],
+  k: number,
+  consumed: (MapMember | false)[],
   env: Env,
   path: readonly PathSeg[],
   ctx: Ctx,
@@ -1567,7 +2199,7 @@ function mapSeq(
       if (!keyMatches(m.memberKey, key, m.env, path, ctx, depth)) continue;
       const valuePath = [...path, keySeg(key, i)];
       if (matchType(value, m.type, m.env, valuePath, ctx, depth + 1)) {
-        consumed[i] = true;
+        consumed[i] = { memberKey: m.memberKey, type: m.type, env: m.env };
         count++;
         continue;
       }

@@ -21,7 +21,6 @@ import { CborUint } from '../ast/CborUint';
 import { CborNint } from '../ast/CborNint';
 import { CborFloat } from '../ast/CborFloat';
 import { CborTag } from '../ast/CborTag';
-import { Tag } from '../tag';
 import type { EncodingWidth } from '../cbor/encode';
 import { autoSelectFloatPrecision } from '../cbor/encode';
 import { CborTextString } from '../ast/CborTextString';
@@ -390,7 +389,8 @@ export class CborTaggedEpochDtAsDateExt extends CborTaggedEpochDtExt {
  * `ToJSOptions.extensions`/`itemOptions`.
  *
  * The `number` branch replicates `CborTag._toJS()`'s own default behaviour
- * (honouring `stripTags`/`integerAs` and round-tripping via `Tag.set`)
+ * (honouring `stripTags`/`implicitTags`/`integerAs` and round-tripping via
+ * `Tag.set`)
  * rather than assuming a tag wrapper is unwanted, so selecting the plain
  * `dt` extension here for a subtree parsed with `dt_as_Date` reproduces
  * exactly what parsing that subtree with `dt` would have produced.
@@ -414,7 +414,7 @@ function dtToJSHook(
     // to a plain conversion that only ever reads it, same as `_toJS` does
     // for its own `options` parameter elsewhere.
     const value = c._toJS(options as ToJSOptions);
-    return { value: options.stripTags ? value : Tag.set(value, item.tag) };
+    return { value: item._tagJS(value, options as ToJSOptions) };
   };
 }
 

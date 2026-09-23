@@ -16,6 +16,37 @@ import { CborTag } from '../ast/CborTag';
 import { Tag } from '../tag';
 import { Simple } from '../simple';
 import { MapEntries } from '../mapEntries';
+import { CborERefUint, CborERefNint } from '../extensions/eref';
+import {
+  resolveElementPosition,
+  resolveNestedPosition,
+  resolveRootPosition,
+  scopeNameToValue,
+  resolvesGloballyTo,
+  type ERefPosition,
+} from '../cddl/eRefScope';
+import type { CddlSchema } from '../cddl/schema';
+
+/**
+ * `schema` plus the CDDL type currently governing this position in the JS
+ * value tree — see `cddl/eRefScope.ts`'s own module doc for why this is
+ * position-aware rather than a single flat, whole-schema table the way
+ * `toJS()`'s own `ERefTables` is. `undefined` means "no eRefKeys context
+ * here" — either `eRefKeys` is off, there's no schema, or this position
+ * (or an ancestor of it) couldn't be resolved to a map or fixed-shape array
+ * type at all.
+ */
+interface ActiveERefScope {
+  readonly schema: CddlSchema;
+  readonly pos: ERefPosition;
+}
+
+function activeScope(
+  schema: CddlSchema,
+  pos: ERefPosition
+): ActiveERefScope | undefined {
+  return pos.map || pos.array ? { schema, pos } : undefined;
+}
 
 /**
  * Extension hooks used by _fromJS, pre-filtered so the per-node loops touch
@@ -92,7 +123,25 @@ function resolveExtensions(
  *   Map                          → CborMap (keys also converted recursively)
  *   plain object                 → CborMap (string keys → CborTextString)
  */
-export function fromJS(value: unknown, options?: FromJSOptions): CborItem {
+/**
+ * `schema` is an already-resolved (compiled, and — for string `cddl` —
+ * cached) CDDL schema, supplied by `cbor.ts`'s `CBOR.fromJS()` when
+ * `options.cddl` is set; this internal entry point never resolves `options.
+ * cddl` itself (`cbor.ts` owns the compile-and-cache step, same as it does
+ * for `fromCDN()`'s `e'...'` extension registration — see `resolveCddl()`
+ * there). Only consulted when `schema` is defined at all (i.e. `options.
+ * cddl` was set) — `options.eRefKeys` defaults to `true` and only an
+ * explicit `false` turns this back off — see `FromJSOptions.eRefKeys`.
+ * The scope this starts from is the schema's own root rule, or
+ * `options.cddlValidationOptions.rule` when set — the same rule
+ * `assertCddl()`'s own subsequent validation will actually check the
+ * result against (see `cddl/eRefScope.ts`'s own module doc).
+ */
+export function fromJS(
+  value: unknown,
+  options?: FromJSOptions,
+  schema?: CddlSchema
+): CborItem {
   if (options?.replacer) {
     const { replacer, ...rest } = options;
     const replaced = _applyReplacer(
@@ -105,17 +154,85 @@ export function fromJS(value: unknown, options?: FromJSOptions): CborItem {
     if (replaced === CBOR_OMIT) return CborSimple.UNDEFINED;
     return fromJS(
       replaced,
-      Object.keys(rest).length > 0 ? (rest as FromJSOptions) : undefined
+      Object.keys(rest).length > 0 ? (rest as FromJSOptions) : undefined,
+      schema
     );
   }
-  return _fromJS(value, options, true, resolveExtensions(options));
+  const eRefScope: ActiveERefScope | undefined =
+    options?.eRefKeys !== false && schema
+      ? resolveActiveScope(schema, options?.cddlValidationOptions?.rule)
+      : undefined;
+  return _fromJS(value, options, true, resolveExtensions(options), eRefScope);
+}
+
+/**
+ * Wrap `inner` in tag `tag` exactly as converting a JS value carrying that
+ * tag would (`parseTag()` hooks first, so e.g. tag 1 becomes the `dt`
+ * extension's `DT'…'` node) — used for tags a CDDL schema implies (see
+ * `FromJSOptions.implicitTags`).
+ */
+export function tagFromJS(
+  tag: bigint,
+  inner: CborItem,
+  options?: FromJSOptions
+): CborItem {
+  for (const ext of resolveExtensions(options).parseTag) {
+    const result = ext.parseTag!(tag, inner);
+    if (result !== undefined) return result;
+  }
+  return new CborTag(tag, inner);
+}
+
+function resolveActiveScope(
+  schema: CddlSchema,
+  ruleName: string | undefined
+): ActiveERefScope | undefined {
+  return activeScope(schema, resolveRootPosition(schema, ruleName));
+}
+
+/**
+ * `respectDeclarationOrder` must be `false` whenever `key` is itself a JS
+ * string that has not (and will not) also be converted to an integer key
+ * this same way — a MapEntries/plain-object string key, preserved or left
+ * as literal text — since a same-alternative wildcard whose own key type
+ * matches text could equally have claimed that exact string, and resolving
+ * the nested scope as if the *named* entry definitely matched instead would
+ * make nested content convert inconsistently with the key that governs it
+ * staying text. `true` is safe only when `key` was derived from an
+ * *already-integer* wire/JS value (see `cddl/eRefScope.ts`'s own module doc
+ * on why declaration order only disambiguates an already-typed value).
+ */
+function nestActiveScope(
+  ctx: ActiveERefScope,
+  key: string | bigint,
+  respectDeclarationOrder: boolean
+): ActiveERefScope | undefined {
+  if (!ctx.pos.map) return undefined;
+  return activeScope(
+    ctx.schema,
+    resolveNestedPosition(ctx.schema, ctx.pos.map, key, respectDeclarationOrder)
+  );
+}
+
+/** The scope for element `index` of a JS array of `length` elements. */
+function elementActiveScope(
+  ctx: ActiveERefScope | undefined,
+  index: number,
+  length: number
+): ActiveERefScope | undefined {
+  if (!ctx?.pos.array) return undefined;
+  return activeScope(
+    ctx.schema,
+    resolveElementPosition(ctx.schema, ctx.pos.array, index, length)
+  );
 }
 
 function _fromJS(
   value: unknown,
   options: FromJSOptions | undefined,
   checkTag: boolean,
-  exts: ResolvedExtensions
+  exts: ResolvedExtensions,
+  eRefScope: ActiveERefScope | undefined
 ): CborItem {
   // ── Extension fromJS hooks ───────────────────────────────────────────────────
   for (const ext of exts.fromJS) {
@@ -136,7 +253,7 @@ function _fromJS(
     Tag.symbol in (value as object)
   ) {
     const tag = (value as Record<symbol, bigint>)[Tag.symbol];
-    const innerValue = _fromJS(value, options, false, exts);
+    const innerValue = _fromJS(value, options, false, exts, eRefScope);
     for (const ext of exts.parseTag) {
       const result = ext.parseTag!(tag, innerValue);
       if (result !== undefined) return result;
@@ -180,19 +297,21 @@ function _fromJS(
   if (typeof value === 'string') return new CborTextString(value);
 
   // ── Boxed primitives — unwrap and recurse ───────────────────────────────────
+  // Same eRefScope: unwrapping a box doesn't change the schema position.
   if (value instanceof Number)
-    return _fromJS(value.valueOf(), options, false, exts);
+    return _fromJS(value.valueOf(), options, false, exts, eRefScope);
   if (value instanceof Boolean)
-    return _fromJS(value.valueOf(), options, false, exts);
+    return _fromJS(value.valueOf(), options, false, exts, eRefScope);
   if (value instanceof String)
-    return _fromJS(value.valueOf(), options, false, exts);
+    return _fromJS(value.valueOf(), options, false, exts, eRefScope);
   // Object(bigint) — detected via Object.prototype.toString
   if (Object.prototype.toString.call(value) === '[object BigInt]')
     return _fromJS(
       (value as { valueOf(): bigint }).valueOf(),
       options,
       false,
-      exts
+      exts,
+      eRefScope
     );
 
   // ── ArrayBuffer / SharedArrayBuffer ─────────────────────────────────────────
@@ -215,32 +334,123 @@ function _fromJS(
   }
 
   if (value instanceof MapEntries) {
+    // Keys are preserved exactly as given — MapEntries round-trips CBOR map
+    // entries verbatim, unlike a plain object's own properties below, so a
+    // key never gets an eRefScope (isn't looked up as a name at all) and
+    // never converts to an e-ref key itself: a MapEntries key isn't
+    // necessarily even a string `resolveNestedScope()` could match against,
+    // and preserving entries *exactly* is the whole point of using
+    // MapEntries over a plain object in the first place. The key still
+    // identifies a nested scope for its own *value*, though: a string key
+    // by spelling, an integer key by value — whether a schema name spells
+    // it (`&(data: 1) => …`) or it's a bare literal key (`1: …`), matched
+    // the same way `annotateERefKeys()` matches a decoded integer key — so
+    // a map `toJS()` produced as MapEntries (see `annotateERefKeys()`'s own
+    // doc) still lets that nested content convert back correctly.
     return new CborMap(
-      [...value].map(
-        ([k, v]) =>
-          [
-            _fromJS(k, options, true, exts),
-            _fromJS(v, options, true, exts),
-          ] as [CborItem, CborItem]
-      )
+      [...value].map(([k, v]): [CborItem, CborItem] => {
+        const isStringKey = typeof k === 'string';
+        const name = isStringKey
+          ? k
+          : typeof k === 'bigint'
+            ? k
+            : typeof k === 'number' && Number.isInteger(k)
+              ? BigInt(k)
+              : undefined;
+        // A string key is preserved verbatim (see the doc above) — never
+        // converted to an integer the way a plain-object property is — so
+        // nested descent from it must use the same strict,
+        // non-declaration-order matching `fromJS()`'s own string-key
+        // conversion does (see `nestActiveScope()`'s own doc), not the
+        // relaxed one a genuinely already-integer key safely gets.
+        const nestedScope =
+          eRefScope && name !== undefined && v !== null && typeof v === 'object'
+            ? nestActiveScope(eRefScope, name, !isStringKey)
+            : undefined;
+        return [
+          _fromJS(k, options, true, exts, undefined),
+          _fromJS(v, options, true, exts, nestedScope),
+        ];
+      })
     );
   }
 
   if (Array.isArray(value)) {
+    // Elements are positioned by index against a fixed-shape array type —
+    // the same way `annotateERefKeys()` walks a decoded array, so a
+    // `toJS()` → `fromJS()` round trip converts back exactly the names it
+    // labeled (see `cddl/eRefScope.ts`'s `ERefArrayScope`).
     return new CborArray(
-      value.map((item) => _fromJS(item, options, true, exts))
+      value.map((item, i) =>
+        _fromJS(
+          item,
+          options,
+          true,
+          exts,
+          elementActiveScope(eRefScope, i, value.length)
+        )
+      )
     );
   }
 
   if (typeof value === 'object') {
     const entries: [CborItem, CborItem][] = [];
+    // `false`: a JS property name is always a string that could equally be
+    // preserved as a literal text key by a same-alternative wildcard whose
+    // own key type matches text — declaration order alone can't tell which
+    // shape the author meant (see `cddl/eRefScope.ts`'s own module doc), so
+    // this must use the strict, non-relaxed matching, unlike the annotation
+    // direction's own `scopeNameToValue()` calls.
+    const localNames = eRefScope?.pos.map
+      ? scopeNameToValue(eRefScope.schema, eRefScope.pos.map, false)
+      : undefined;
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      entries.push([new CborTextString(k), _fromJS(v, options, true, exts)]);
+      const keyItem =
+        eRefKeyItemFor(k, localNames, eRefScope?.schema) ??
+        new CborTextString(k);
+      const nestedScope =
+        eRefScope && v !== null && typeof v === 'object'
+          ? nestActiveScope(eRefScope, k, false)
+          : undefined;
+      entries.push([keyItem, _fromJS(v, options, true, exts, nestedScope)]);
     }
     return new CborMap(entries);
   }
 
   throw new TypeError(`fromJS: unsupported value type: ${typeof value}`);
+}
+
+/**
+ * `FromJSOptions.eRefKeys` support: resolve a plain object's own property
+ * name to the integer key it names, via the *current position's own*
+ * `scopeNameToValue()` result (see `cddl/eRefScope.ts`) — already
+ * restricted to unambiguous, member-key-position names reachable from
+ * this exact position, not the whole schema. Returns `undefined` (falling
+ * through to the ordinary `CborTextString` key) for a name this scope
+ * doesn't know, or when there's no scope in effect at all.
+ *
+ * The resulting key is only *labeled* `e'name'` (a `CborERefUint`/
+ * `CborERefNint`) when `resolvesGloballyTo()` confirms `e'name'` would
+ * resolve back to this exact value via `parseAppString()`'s own,
+ * genuinely schema-wide table too — otherwise the position-local value is
+ * still correct and still used, just as a plain, unlabeled integer (a
+ * `CborUint`/`CborNint`), so it always round-trips through `fromCDN()`
+ * against the same schema instead of risking `e'name'` notation that
+ * fails to re-parse, or re-parses to a different value, there.
+ */
+function eRefKeyItemFor(
+  name: string,
+  localNames: ReadonlyMap<string, bigint> | undefined,
+  schema: CddlSchema | undefined
+): CborItem | undefined {
+  const value = localNames?.get(name);
+  if (value === undefined) return undefined;
+  if (schema && resolvesGloballyTo(schema, name, value)) {
+    return value >= 0n
+      ? new CborERefUint(value, name)
+      : new CborERefNint(value, name);
+  }
+  return value >= 0n ? new CborUint(value) : new CborNint(value);
 }
 
 // ─── Replacer helper ────────────────────────────────────────────────────────

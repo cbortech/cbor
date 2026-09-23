@@ -45,9 +45,12 @@ export default defineConfig({
     // Playground UI smoke tests run against a real browser DOM (see
     // site/vitest.browser.config.ts) — they crash immediately under this
     // Node environment, so exclude them here the same way the other
-    // special-runner test files below are excluded.
-    exclude: [...configDefaults.exclude, 'site/src/playground.browser.test.ts'],
-    // @cbortech/hash-extension (used by site/src/samples.test.ts) does its
+    // special-runner test files below are excluded. Glob, not each
+    // filename individually — a *.browser.test.ts added later (e.g.
+    // eref-shared-boot.browser.test.ts) must be excluded automatically,
+    // not silently run (and crash) here until someone remembers to list it.
+    exclude: [...configDefaults.exclude, 'site/src/**/*.browser.test.ts'],
+    // @cbortech/hash-extension (used by site/src/examples.test.ts) does its
     // own `instanceof CborByteString` checks against the classes exported
     // from `@cbortech/cbor/ast`. Left unaliased, that resolves to the
     // *built* dist (via the node_modules self-symlink), a different class
