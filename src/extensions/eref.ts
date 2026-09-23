@@ -52,7 +52,7 @@
  * display label — see `annotateERefKeys()`'s own doc for the full story.
  */
 
-import type { ToCDNOptions, ToJSOptions } from '../types';
+import type { FromCBOROptions, ToCDNOptions, ToJSOptions } from '../types';
 import type { CborExtension } from './types';
 import type { CborItem } from '../ast/CborItem';
 import { CborUint } from '../ast/CborUint';
@@ -61,6 +61,9 @@ import { CborTextString } from '../ast/CborTextString';
 import { CborArray } from '../ast/CborArray';
 import { CborMap } from '../ast/CborMap';
 import { CborTag } from '../ast/CborTag';
+import { CborByteString } from '../ast/CborByteString';
+import { CborEmbeddedCBOR } from '../ast/CborEmbeddedCBOR';
+import { decodeCBOR } from '../cbor/decoder';
 import type { EncodingWidth } from '../cbor/encode';
 import {
   resolveEiSuffix,
@@ -69,8 +72,9 @@ import {
 } from '../cdn/serialize-utils';
 import { getERefTables } from '../cddl/eref';
 import type { CddlSchema } from '../cddl/schema';
-import type { CddlType } from '../cddl/ast';
+import type { CddlType, CddlType1 } from '../cddl/ast';
 import {
+  itemMatchesType,
   mapGroupsOfType,
   plainTextMemberKeys,
   traceMapGroup,
@@ -92,6 +96,7 @@ import {
   ruleRefType,
   scopeNameToValue,
   resolvesGloballyTo,
+  typeAlternatives,
   type ERefPosition,
 } from '../cddl/eRefScope';
 
@@ -285,9 +290,15 @@ export function createERefExtension(schema: CddlSchema): CborExtension {
  * so those checks agree with it.
  *
  * Only descends through `CborArray`/`CborMap`/`CborTag` — the structural
- * containers a CDDL-validated data model is built from; other node types
- * (e.g. an indefinite-length string chunk) are left untouched, and their
- * contents are not searched for map keys of their own. A map key is itself
+ * containers a CDDL-validated data model is built from — plus embedded
+ * CBOR: an array element or map value whose type is `bstr .cbor T` (or
+ * `.cborseq`) — e.g. COSE's `protected: bstr .cbor header_map` — is
+ * replaced by a `<<…>>` `CborEmbeddedCBOR` of its decoded content (only
+ * when that re-encodes to exactly the same bytes, so `toCBOR()`/`toJS()`
+ * are unchanged), and it, or a `<<…>>` already in CDN source, is annotated
+ * against `T` in turn (see `expandEmbedded()`/`walkEmbedded()`). Other node
+ * types (e.g. an indefinite-length string chunk) are left untouched, and
+ * their contents are not searched for map keys of their own. A map key is itself
  * walked too (after any replacement of its own) — CBOR permits a map or
  * array as a key, and an integer key nested inside *that* still needs
  * annotating, e.g. `{{-1: "a"}: "b"}` — but never with a *positional*
@@ -295,6 +306,14 @@ export function createERefExtension(schema: CddlSchema): CborExtension {
  * `eRefKeys` names for a map key either (only this module's Scope note
  * applies: a key reached this way simply gets no eRefKeys-eligible names of
  * its own).
+ *
+ * `decodeOptions` are the caller's own decode-time extension settings
+ * (`extensions`/`builtinExtensions`, as given to `fromCBOR()`/`fromCDN()`/
+ * …), forwarded to the decode of embedded content — like tag 24's own
+ * (`extensions/cbordata.ts`) — so e.g. a bundled extension disabled via
+ * `builtinExtensions: false` stays disabled inside `<<…>>` too. Any other
+ * field is ignored; the inner decode is always strict, and content that
+ * doesn't decode that way is simply left as its bytes.
  *
  * Mutates `item` (and its descendants) in place; call only on a tree the
  * caller exclusively owns and has not yet handed to anyone else — this is
@@ -305,7 +324,8 @@ export function createERefExtension(schema: CddlSchema): CborExtension {
 export function annotateERefKeys(
   item: CborItem,
   schema: CddlSchema,
-  ruleOrOptions?: string | ValidateOptions
+  ruleOrOptions?: string | ValidateOptions,
+  decodeOptions?: Pick<FromCBOROptions, 'extensions' | 'builtinExtensions'>
 ): void {
   const options =
     typeof ruleOrOptions === 'string' ? { rule: ruleOrOptions } : ruleOrOptions;
@@ -315,7 +335,15 @@ export function annotateERefKeys(
     : undefined;
   walkAnnotate(
     item,
-    { schema, options, seen: new WeakSet() },
+    {
+      schema,
+      options,
+      decodeOptions: {
+        extensions: decodeOptions?.extensions,
+        builtinExtensions: decodeOptions?.builtinExtensions,
+      },
+      seen: new WeakSet(),
+    },
     candidates,
     resolveRootPosition(schema, options?.rule)
   );
@@ -324,6 +352,8 @@ export function annotateERefKeys(
 interface AnnotateContext {
   readonly schema: CddlSchema;
   readonly options: ValidateOptions | undefined;
+  /** Forwarded to each embedded-content decode (see `annotateERefKeys()`). */
+  readonly decodeOptions: FromCBOROptions;
   readonly seen: WeakSet<CborItem>;
 }
 
@@ -349,8 +379,8 @@ function walkAnnotate(
   ctx: AnnotateContext,
   candidates: Candidates | undefined,
   jsPos: ERefPosition
-): void {
-  if (ctx.seen.has(item)) return;
+): CborItem | undefined {
+  if (ctx.seen.has(item)) return undefined;
   ctx.seen.add(item);
   const { schema } = ctx;
   if (item instanceof CborMap) {
@@ -392,14 +422,15 @@ function walkAnnotate(
           ? resolveNestedPosition(schema, jsScope, jsIdentifier, false)
           : NO_POSITION;
       walkAnnotate(entry[0], ctx, undefined, NO_POSITION);
-      walkAnnotate(
+      const expanded = walkAnnotate(
         entry[1],
         ctx,
         owners?.map((o) => ({ type: o.type, env: o.env })),
         jsNested
       );
+      if (expanded) entry[1] = expanded;
     });
-    return;
+    return undefined;
   }
   if (item instanceof CborArray) {
     // Elements are positioned by index against a fixed-shape array type
@@ -411,21 +442,186 @@ function walkAnnotate(
     const alternatives = candidates
       ? arrayAlternatives(ctx, candidates, items)
       : undefined;
-    items.forEach((child, i) =>
-      walkAnnotate(
+    items.forEach((child, i) => {
+      const expanded = walkAnnotate(
         child,
         ctx,
         alternatives?.map((alt) => ({ type: alt[i]!, env: undefined })),
         jsPos.array
           ? resolveElementPosition(schema, jsPos.array, i, length)
           : NO_POSITION
-      )
-    );
-    return;
+      );
+      if (expanded) items[i] = expanded;
+    });
+    return undefined;
   }
   if (item instanceof CborTag) {
     walkAnnotate(item.content, ctx, undefined, NO_POSITION);
+    return undefined;
   }
+  if (item instanceof CborEmbeddedCBOR) {
+    if (candidates)
+      walkEmbedded(item, ctx, embeddedTypes(ctx, item, candidates));
+    return undefined;
+  }
+  // Only a plain byte string — never an extension's own subclass (`ip'…'`,
+  // …), which already renders its bytes some more specific way.
+  if (candidates && Object.getPrototypeOf(item) === CborByteString.prototype)
+    return expandEmbedded(item as CborByteString, ctx, candidates);
+  return undefined;
+}
+
+/**
+ * What a byte string (or `<<…>>`) validated against one of `candidates`
+ * holds, when that's `.cbor`/`.cborseq`-typed: `controllers` are the
+ * controller types of every such alternative `item` actually satisfies —
+ * all of one kind (`seq`) — and `exclusive` says no *other* alternative
+ * (a plain `bstr`, …) accepts `item` too, i.e. the content's own type is
+ * really among `controllers`, so names may be taken from them. `undefined`
+ * when no `.cbor`/`.cborseq` alternative matches, both kinds do, or the
+ * candidates can't be expanded (see `typeAlternatives()`).
+ */
+interface EmbeddedTypes {
+  readonly controllers: Candidates;
+  readonly seq: boolean;
+  readonly exclusive: boolean;
+}
+
+function embeddedTypes(
+  ctx: AnnotateContext,
+  item: CborItem,
+  candidates: Candidates
+): EmbeddedTypes | undefined {
+  const alternatives: CddlType1[] = [];
+  for (const c of candidates) {
+    if (c.env !== undefined) return undefined;
+    const alts = typeAlternatives(ctx.schema, c.type);
+    if (!alts) return undefined;
+    alternatives.push(...alts);
+  }
+  const controllers: { type: CddlType; env: undefined }[] = [];
+  const kinds = new Set<boolean>();
+  let exclusive = true;
+  for (const t1 of alternatives) {
+    const matches = itemMatchesType(
+      ctx.schema,
+      item,
+      { kind: 'type', start: t1.start, end: t1.end, alternatives: [t1] },
+      ctx.options
+    );
+    if (matches === false) continue;
+    const ctl = t1.op?.kind === 'ctl' ? t1.op.name : undefined;
+    if (matches && (ctl === 'cbor' || ctl === 'cborseq') && t1.controller) {
+      kinds.add(ctl === 'cborseq');
+      const c = t1.controller;
+      controllers.push({
+        type: {
+          kind: 'type',
+          start: c.start,
+          end: c.end,
+          alternatives: [
+            { kind: 'type1', start: c.start, end: c.end, target: c },
+          ],
+        },
+        env: undefined,
+      });
+    } else {
+      exclusive = false;
+    }
+  }
+  if (controllers.length === 0 || kinds.size !== 1) return undefined;
+  return { controllers, seq: kinds.has(true), exclusive };
+}
+
+/**
+ * `bytes` as a `<<…>>` node when its type says it holds encoded CBOR
+ * (`bstr .cbor T`/`.cborseq T`) — so `toCDN()` shows the decoded content
+ * instead of opaque `h'…'`, annotated in turn (`walkEmbedded()`). Kept as
+ * given unless the decoded items re-encode to exactly the same bytes, so
+ * the replacement never changes `toCBOR()`. Like tag 24's own `<<…>>`
+ * (`extensions/cbordata.ts`), the decoded items' byte offsets are relative
+ * to the byte string's own content.
+ */
+function expandEmbedded(
+  bytes: CborByteString,
+  ctx: AnnotateContext,
+  candidates: Candidates
+): CborEmbeddedCBOR | undefined {
+  const types = embeddedTypes(ctx, bytes, candidates);
+  if (!types) return undefined;
+  let items: CborItem[];
+  try {
+    items = types.seq
+      ? decodeSequence(bytes.value, ctx.decodeOptions)
+      : [decodeCBOR(bytes.value, ctx.decodeOptions)];
+  } catch {
+    return undefined;
+  }
+  const node = new CborEmbeddedCBOR(items, {
+    encodingWidth: bytes.encodingWidth,
+  });
+  if (!sameBytes(node.toCBOR(), bytes.toCBOR())) return undefined;
+  node.start = bytes.start;
+  node.end = bytes.end;
+  node.comments = bytes.comments;
+  node.blankLineBefore = bytes.blankLineBefore;
+  walkEmbedded(node, ctx, types);
+  return node;
+}
+
+/**
+ * Annotate a `<<…>>` node's own items against its content types — only
+ * when those are known exactly (`EmbeddedTypes.exclusive`); otherwise its
+ * items are left entirely as given, including any explicit `e'…'` labels.
+ */
+function walkEmbedded(
+  node: CborEmbeddedCBOR,
+  ctx: AnnotateContext,
+  types: EmbeddedTypes | undefined
+): void {
+  if (!types?.exclusive) return;
+  const { items } = node;
+  if (!types.seq) {
+    if (items.length !== 1) return;
+    const expanded = walkAnnotate(
+      items[0]!,
+      ctx,
+      types.controllers,
+      NO_POSITION
+    );
+    if (expanded) items[0] = expanded;
+    return;
+  }
+  const alternatives = arrayAlternatives(ctx, types.controllers, items);
+  if (!alternatives) return;
+  items.forEach((child, i) => {
+    const expanded = walkAnnotate(
+      child,
+      ctx,
+      alternatives.map((alt) => ({ type: alt[i]!, env: undefined })),
+      NO_POSITION
+    );
+    if (expanded) items[i] = expanded;
+  });
+}
+
+/** Every item of a CBOR Sequence (RFC 8742), decoded strictly. */
+function decodeSequence(
+  bytes: Uint8Array,
+  options: FromCBOROptions
+): CborItem[] {
+  const items: CborItem[] = [];
+  let offset = 0;
+  while (offset < bytes.length) {
+    const item = decodeCBOR(bytes, { ...options, offset, allowTrailing: true });
+    items.push(item);
+    offset = item.end!;
+  }
+  return items;
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((byte, i) => byte === b[i]);
 }
 
 /**

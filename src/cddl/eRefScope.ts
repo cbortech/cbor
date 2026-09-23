@@ -94,6 +94,7 @@ import type {
   CddlMemberKey,
   CddlRule,
   CddlType,
+  CddlType1,
   CddlType2,
 } from './ast';
 import type { CborItem } from '../ast/CborItem';
@@ -333,6 +334,49 @@ function positionOfType(schema: CddlSchema, type: CddlType): ERefPosition {
         ? { elementTypes: array.alternatives }
         : undefined,
   };
+}
+
+/**
+ * `type`'s own `/` alternatives with parentheses and (non-generic) type-rule
+ * references expanded in place — including every `/=` extension of a
+ * referenced rule — so each result is a `type1` that is neither of those.
+ * A controlled alternative (`bstr .cbor T`) is kept whole, never looked
+ * into. `undefined` when some alternative can't be expanded this way (a
+ * generic reference, a rule defined nowhere, or a group rule referenced as
+ * a type). A reference cycle contributes no alternatives of its own.
+ */
+export function typeAlternatives(
+  schema: CddlSchema,
+  type: CddlType,
+  seen: ReadonlySet<string> = new Set()
+): CddlType1[] | undefined {
+  const result: CddlType1[] = [];
+  for (const t1 of type.alternatives) {
+    const t2 = t1.target;
+    if (t1.op || (t2.kind !== 'paren' && t2.kind !== 'ref')) {
+      result.push(t1);
+      continue;
+    }
+    if (t2.kind === 'paren') {
+      const inner = typeAlternatives(schema, t2.type, seen);
+      if (!inner) return undefined;
+      result.push(...inner);
+      continue;
+    }
+    if (t2.genericArgs?.length) return undefined;
+    if (seen.has(t2.name)) continue;
+    const defs = ruleDefinitions(schema, t2.name);
+    if (!defs) return undefined;
+    const nextSeen = new Set(seen);
+    nextSeen.add(t2.name);
+    for (const def of defs) {
+      if (!isTypeRule(def) || def.body.kind !== 'entry') return undefined;
+      const inner = typeAlternatives(schema, def.body.value, nextSeen);
+      if (!inner) return undefined;
+      result.push(...inner);
+    }
+  }
+  return result;
 }
 
 /** One `CddlType` whose alternatives are all of `types`' own, combined. */

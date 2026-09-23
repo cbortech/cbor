@@ -72,14 +72,15 @@ function resolveCddl(
 function assertCddl(
   item: CborItem,
   schema: CddlSchema | undefined,
-  validationOptions?: CddlValidateOptions
+  validationOptions?: CddlValidateOptions,
+  decodeOptions?: Pick<FromCBOROptions, 'extensions' | 'builtinExtensions'>
 ): CborItem {
   if (schema) {
     const result = schema.validate(item, validationOptions);
     if (!result.valid) {
       throw new CddlMismatchError(result.errors, result.warnings);
     }
-    annotateERefKeys(item, schema, validationOptions);
+    annotateERefKeys(item, schema, validationOptions, decodeOptions);
   }
   return item;
 }
@@ -111,12 +112,15 @@ function checkCddl(
   options?: {
     cddl?: CddlSchema | string;
     cddlValidationOptions?: CddlValidateOptions;
+    extensions?: CborExtension[];
+    builtinExtensions?: CborExtension[] | false;
   }
 ): CborItem {
   return assertCddl(
     item,
     resolveCddl(options?.cddl),
-    options?.cddlValidationOptions
+    options?.cddlValidationOptions,
+    options
   );
 }
 
@@ -420,7 +424,7 @@ export class CBOR {
   static fromCDN(text: string, options?: FromCDNOptions): CborItem {
     const schema = resolveCddl(options?.cddl);
     const item = parseCDN(text, withERefExtension(options, schema));
-    return assertCddl(item, schema, options?.cddlValidationOptions);
+    return assertCddl(item, schema, options?.cddlValidationOptions, options);
   }
 
   /**
@@ -480,7 +484,12 @@ export class CBOR {
         offset,
         allowTrailing: true,
       });
-      yield assertCddl(item, cddlSchema, options?.cddlValidationOptions);
+      yield assertCddl(
+        item,
+        cddlSchema,
+        options?.cddlValidationOptions,
+        options
+      );
       offset = item.end!;
     }
   }
@@ -566,7 +575,12 @@ export class CBOR {
         );
         break;
       }
-      yield assertCddl(item, cddlSchema, options?.cddlValidationOptions);
+      yield assertCddl(
+        item,
+        cddlSchema,
+        options?.cddlValidationOptions,
+        options
+      );
       offset = item.end!;
       isFirst = false;
     }
@@ -579,7 +593,7 @@ export class CBOR {
     // itself — see `_fromJS()`'s own doc in `js/fromJS.ts`.
     const schema = resolveCddl(options?.cddl);
     const item = _fromJS(value, options, schema);
-    return assertCddl(item, schema, options?.cddlValidationOptions);
+    return assertCddl(item, schema, options?.cddlValidationOptions, options);
   }
 
   /**
@@ -995,10 +1009,14 @@ export class CBOR {
           : undefined,
         schema
       );
-      return assertCddl(item, schema, opts.cddlValidationOptions).toCDN(opts);
+      return assertCddl(item, schema, opts.cddlValidationOptions, opts).toCDN(
+        opts
+      );
     }
     const item = _fromJS(value, opts as FromJSOptions | undefined, schema);
-    return assertCddl(item, schema, opts?.cddlValidationOptions).toCDN(opts);
+    return assertCddl(item, schema, opts?.cddlValidationOptions, opts).toCDN(
+      opts
+    );
   }
 
   /** Normalize a CDN text string by parsing and re-serializing it. */
