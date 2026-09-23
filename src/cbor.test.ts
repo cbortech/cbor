@@ -1436,15 +1436,47 @@ describe('CBOR.format()', () => {
     ).toBe('"[\\"a\\" + \\"b\\"]"');
   });
 
-  test('inlineLeafContainers: any app-string extension literal counts as a prefixed literal', () => {
-    // Not just h'...'/b64'...' — any app-string extension's own rendering
-    // (ip'...', dt'...', ...) has no natural word boundary either, so it
-    // disqualifies a strict array/map from collapsing just the same,
-    // without ip.ts/dt.ts needing any inlineLeafContainers-specific code of
-    // their own (see isPrefixedLiteralText).
+  test('inlineLeafContainers: an app-string extension literal is word-counted like a text string', () => {
+    // Unlike h'...'/b64'...', an app-string extension's own rendering
+    // (ip'...', dt'...', e'...', ...) is judged by its content's word count,
+    // the same as a text string — without ip.ts/dt.ts needing any
+    // inlineLeafContainers-specific code of their own (see
+    // isPrefixedLiteralText). A one-word literal stays inline...
     expect(
       CBOR.format("[ip'192.0.2.42']", { indent: 2, inlineLeafContainers: true })
-    ).toBe("[\n  ip'192.0.2.42'\n]");
+    ).toBe("[ip'192.0.2.42']");
+    // ...even an unresolved one (CPA999 stand-in), whose AST wraps an array.
+    expect(
+      CBOR.format("[e'alg', 1]", { indent: 2, inlineLeafContainers: true })
+    ).toBe("[e'alg', 1]");
+    expect(
+      CBOR.format("{e'alg': -7}", { indent: 2, inlineLeafContainers: true })
+    ).toBe("{e'alg': -7}");
+    expect(
+      CBOR.format("[100(e'alg')]", { indent: 2, inlineLeafContainers: true })
+    ).toBe("[100(e'alg')]");
+    // appPrefix: false renders the stand-in's real array, which disqualifies.
+    expect(
+      CBOR.fromCDN("[e'alg']").toCDN({
+        indent: 2,
+        inlineLeafContainers: true,
+        appPrefix: false,
+      })
+    ).toBe('[\n  999(["e", "alg"])\n]');
+    expect(
+      CBOR.fromCDN("[100(e'alg')]").toCDN({
+        indent: 2,
+        inlineLeafContainers: true,
+        appPrefix: false,
+      })
+    ).toBe('[\n  100(999(["e", "alg"]))\n]');
+    expect(
+      CBOR.format("<<{e'alg': -7}>>", {
+        indent: 2,
+        inlineLeafContainers: true,
+      })
+    ).toBe("<<{e'alg': -7}>>");
+    // ...while a multi-word one breaks, like a multi-word text string.
     expect(
       CBOR.format("[dt'1969-07-21T02:56:16Z']", {
         indent: 2,
@@ -1462,19 +1494,32 @@ describe('CBOR.format()', () => {
     // A map value (not just an array entry, and not just the first/key
     // position) is checked too.
     expect(
+      CBOR.format('{"a": dt\'1969-07-21T02:56:16Z\'}', {
+        indent: 2,
+        inlineLeafContainers: true,
+      })
+    ).toBe('{\n  "a": dt\'1969-07-21T02:56:16Z\'\n}');
+    expect(
       CBOR.format('{"a": ip\'192.0.2.42\'}', {
         indent: 2,
         inlineLeafContainers: true,
       })
-    ).toBe('{\n  "a": ip\'192.0.2.42\'\n}');
+    ).toBe('{"a": ip\'192.0.2.42\'}');
     // The same rule applies inside a splitCdn-reflowed embedded CDN string.
+    expect(
+      CBOR.format('"[dt\'1969-07-21T02:56:16Z\']"', {
+        indent: 2,
+        splitCdn: true,
+        inlineLeafContainers: true,
+      })
+    ).toBe('"[" +\n    "dt\'1969-07-21T02:56:16Z\'" +\n  "]"');
     expect(
       CBOR.format('"[ip\'192.0.2.42\']"', {
         indent: 2,
         splitCdn: true,
         inlineLeafContainers: true,
       })
-    ).toBe('"[" +\n    "ip\'192.0.2.42\'" +\n  "]"');
+    ).toBe('"[ip\'192.0.2.42\']"');
     expect(
       CBOR.format('"<<dt\'1969-07-21T02:56:16Z\'>>"', {
         indent: 2,
