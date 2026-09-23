@@ -1477,6 +1477,32 @@ label = int / tstr`;
     ]);
   });
 
+  test('raw bytes expand a `bstr .cbor header_map` element to <<...>> and annotate inside it', () => {
+    const bytes = Uint8Array.from([
+      0x84, 0x43, 0xa1, 0x01, 0x26, 0xa0, 0x40, 0x40,
+    ]);
+    const item = CBOR.fromCBOR(bytes, { cddl: COSE_SIGN1_CDDL });
+    expect(item.toCDN()).toBe(`[<<{e'alg':-7}>>,{},'','']`);
+    expect(item.toCBOR()).toEqual(bytes);
+    // toJS() still sees the protected header as its raw bytes.
+    expect((item.toJS() as unknown[])[0]).toEqual(
+      Uint8Array.from([0xa1, 0x01, 0x26])
+    );
+  });
+
+  test('a plain integer key inside explicit <<...>> CDN is annotated too', () => {
+    const item = CBOR.fromCDN(`[<<{1: -7}>>, {}, h'', h'']`, {
+      cddl: COSE_SIGN1_CDDL,
+    });
+    expect(item.toCDN()).toBe(`[<<{e'alg':-7}>>,{},'','']`);
+  });
+
+  test("an empty protected header (the `bstr .size 0` alternative) stays h''", () => {
+    const bytes = CBOR.fromCDN(`[h'', {}, h'', h'']`).toCBOR();
+    const item = CBOR.fromCBOR(bytes, { cddl: COSE_SIGN1_CDDL });
+    expect(item.toCDN()).toBe(`['',{},'','']`);
+  });
+
   test('no annotation when an occurrence indicator makes element positions data-dependent', () => {
     const cddl = 'root = [* { ? &(kid: 4) => bstr }]';
     const item = CBOR.fromCDN(`[{4: h'31'}]`, { cddl });
@@ -1826,5 +1852,76 @@ describe('a controlled (or otherwise non-literal) key type is resolved three way
     expect(
       labelOf('root = { ? &(x: 1) => int, ? ~T => int }\nT = #6.32("x")')
     ).toBe('{1:1}');
+  });
+});
+
+describe('byte strings typed `.cbor`/`.cborseq` render as <<...>>', () => {
+  const annotated = (cddl: string, cdn: string): string => {
+    const bytes = CBOR.fromCDN(cdn).toCBOR();
+    const item = CBOR.fromCBOR(bytes, { cddl });
+    expect(item.toCBOR()).toEqual(bytes);
+    return item.toCDN();
+  };
+
+  test('.cborseq expands every item, annotating each against its array position', () => {
+    expect(
+      annotated(
+        'root = [bstr .cborseq [int, { ? &(kid: 4) => int }]]',
+        `[<<1, {4: 2}>>]`
+      )
+    ).toBe(`[<<1,{e'kid':2}>>]`);
+  });
+
+  test('expanded but left unannotated when a plain bstr alternative also accepts the bytes', () => {
+    expect(
+      annotated(
+        'root = [bstr .cbor { ? &(kid: 4) => int } / bstr]',
+        `[<<{4: 2}>>]`
+      )
+    ).toBe(`[<<{4:2}>>]`);
+  });
+
+  test("bytes that are not the `.cbor` type stay h'...'", () => {
+    expect(annotated('root = [bstr .cbor int / bstr]', `[h'ff']`)).toBe(
+      `[h'ff']`
+    );
+  });
+
+  test('a map value typed `.cbor` expands too', () => {
+    expect(
+      annotated(
+        'root = { ? &(hdr: 1) => bstr .cbor { ? &(kid: 4) => int } }',
+        `{1: <<{4: 2}>>}`
+      )
+    ).toBe(`{e'hdr':<<{e'kid':2}>>}`);
+  });
+
+  test("embedded content decodes with the caller's own extension settings", () => {
+    const cddl = 'root = [bstr .cbor any]';
+    const bytes = CBOR.fromCDN('[<<1(0)>>]').toCBOR();
+    expect(CBOR.fromCBOR(bytes, { cddl }).toCDN()).toBe(
+      `[<<DT'1970-01-01T00:00:00Z'>>]`
+    );
+    expect(
+      CBOR.fromCBOR(bytes, { cddl, builtinExtensions: false }).toCDN()
+    ).toBe('[<<1(0)>>]');
+    expect(
+      CBOR.fromCDN(`[h'c100']`, { cddl, builtinExtensions: false }).toCDN()
+    ).toBe('[<<1(0)>>]');
+    const seq = CBOR.fromCDN('[<<1(0), 1(0)>>]').toCBOR();
+    expect(
+      CBOR.fromCBOR(seq, {
+        cddl: 'root = [bstr .cborseq [* any]]',
+        builtinExtensions: false,
+      }).toCDN()
+    ).toBe('[<<1(0),1(0)>>]');
+  });
+
+  test('non-canonical embedded content still round-trips byte-exact', () => {
+    // 0x18 0x01 is 1 in a non-preferred 1-byte argument.
+    const cddl = 'root = [bstr .cbor int]';
+    const bytes = Uint8Array.from([0x81, 0x42, 0x18, 0x01]);
+    const item = CBOR.fromCBOR(bytes, { cddl });
+    expect(item.toCBOR()).toEqual(bytes);
   });
 });

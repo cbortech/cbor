@@ -32,15 +32,18 @@ import { getEnabledExtensions, isERefEnabled } from './ui/toolbar';
  * names via `&(name: value)` to `e'name'` notation — when it actually
  * matches. A no-op without a schema, when validation fails, or when the
  * `e'...'` checkbox in the Extensions popover is unchecked
- * (`isERefEnabled()`).
+ * (`isERefEnabled()`). `decodeOptions` are the extension settings `item`
+ * itself was decoded/parsed with, so embedded content expanded to `<<…>>`
+ * (see `annotateERefKeys()`) decodes with the same ones.
  */
 export function annotateIfValid(
   item: CborItem,
-  cddlSchema: CddlSchema | null | undefined
+  cddlSchema: CddlSchema | null | undefined,
+  decodeOptions: ReturnType<typeof getEnabledExtensions>
 ): void {
   if (!cddlSchema || !isERefEnabled()) return;
   if (!cddlSchema.validate(item).valid) return;
-  annotateERefKeys(item, cddlSchema);
+  annotateERefKeys(item, cddlSchema, undefined, decodeOptions);
 }
 
 export interface ConversionOk {
@@ -156,7 +159,8 @@ export function convertCdn(
     // to `MapEntries` even though the CDN source spelled `e'title'`
     // explicitly. `annotateIfValid()` is a no-op without a schema, or when
     // the item doesn't actually validate against it.
-    for (const item of binAsts) annotateIfValid(item, cddlSchema);
+    for (const item of binAsts)
+      annotateIfValid(item, cddlSchema, { extensions, builtinExtensions });
 
     // Build rows and ranges for every CDN ↔ binary item pair.
     const rows: HexRow[] = [];
@@ -240,7 +244,12 @@ export function formatCdnText(
         throw new CddlMismatchError(result.errors, result.warnings);
       }
       if (isERefEnabled())
-        annotateERefKeys(item, cddlSchema, options.cddlValidationOptions);
+        annotateERefKeys(
+          item,
+          cddlSchema,
+          options.cddlValidationOptions,
+          options
+        );
     }
     items.push(item);
   }
@@ -280,7 +289,8 @@ export function bytesToCdnText(
     }),
   ];
   if (items.length === 0) return { cdn: '', warnings };
-  for (const item of items) annotateIfValid(item, cddlSchema);
+  for (const item of items)
+    annotateIfValid(item, cddlSchema, { extensions, builtinExtensions });
   const opts: ToCDNOptions = formatOptions ?? { indent: 2 };
   const cdn = items.map((item) => item.toCDN(opts)).join('\n');
   return { cdn, warnings };

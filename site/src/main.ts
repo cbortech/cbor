@@ -586,15 +586,17 @@ function importCborFile(file: File): void {
     .arrayBuffer()
     .then((buf) => {
       const warnings: string[] = [];
+      const enabledExtensions = getEnabledExtensions();
       const items = [
         ...CBOR.fromCBORSeq(new Uint8Array(buf), {
-          ...getEnabledExtensions(),
+          ...enabledExtensions,
           strict: false,
           onWarning: (w) => warnings.push(w.message),
         }),
       ];
       const schema = activeCddlSchema();
-      for (const item of items) annotateIfValid(item, schema);
+      for (const item of items)
+        annotateIfValid(item, schema, enabledExtensions);
       const cdn = items
         .map((item) => item.toCDN(readFormatOptions()))
         .join('\n');
