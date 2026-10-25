@@ -172,6 +172,17 @@ const PRESERVE_OPTION_IDS = [
   'opt-app-sequence',
 ] as const;
 
+/**
+ * Notation selects paired with the preserve checkbox that overrides them.
+ * `opt-enc-ind` is deliberately absent: `preserveNumberFormat` only covers
+ * numeric `_N` indicators, so `encodingIndicators` still affects other items.
+ */
+const NOTATION_PRESERVE_PAIRS = [
+  ['opt-int', 'opt-number-format'],
+  ['opt-float', 'opt-number-format'],
+  ['opt-bstr', 'opt-byte-string'],
+] as const;
+
 /** Reflect the current state of the individual preserve-family checkboxes
  * onto the "Preserve everything" master checkbox (checked / unchecked /
  * indeterminate). */
@@ -247,6 +258,18 @@ export function initFormatPopover(): void {
       .addEventListener('change', syncPreserveAllCheckbox);
   }
   syncPreserveAllCheckbox();
+
+  // Picking a notation is an explicit request to re-spell those literals, so
+  // drop the preserve option that would otherwise make the choice a no-op.
+  // One-way only: switching back never re-checks it.
+  for (const [selectId, preserveId] of NOTATION_PRESERVE_PAIRS) {
+    document.getElementById(selectId)!.addEventListener('change', () => {
+      const box = document.getElementById(preserveId) as HTMLInputElement;
+      if (!box.checked) return;
+      box.checked = false;
+      syncPreserveAllCheckbox();
+    });
+  }
 }
 
 export function readFormatOptions(): FromCDNOptions & ToCDNOptions {
