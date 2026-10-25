@@ -368,6 +368,54 @@ describe('playground', () => {
       expect(master.indeterminate).toBe(false);
     });
 
+    test('Choosing a notation unchecks the preserve option that would override it', async () => {
+      byId('format-opts-btn').click();
+      const master = byId<HTMLInputElement>('opt-preserve-all');
+      if (!master.checked) master.click();
+      const numberFormat = byId<HTMLInputElement>('opt-number-format');
+      const byteString = byId<HTMLInputElement>('opt-byte-string');
+      const choose = (id: string, value: string) => {
+        const select = byId<HTMLSelectElement>(id);
+        select.value = value;
+        select.dispatchEvent(new Event('change'));
+      };
+
+      // intFormat → preserveNumberFormat, and Format now actually re-spells.
+      await uploadTo(
+        'cdn-import-input',
+        new File(['[255, 1.5]'], 'nums.cdn', { type: 'text/plain' })
+      );
+      await vi.waitFor(() => expect(cmText('editor')).toContain('255'));
+      byId<HTMLSelectElement>('opt-indent').value = '';
+      choose('opt-int', 'hex');
+      expect(numberFormat.checked).toBe(false);
+      expect(byteString.checked).toBe(true);
+      expect(master.indeterminate).toBe(true);
+      byId('format-btn').click();
+      expect(cmText('editor')).toBe('[0xff,1.5]');
+
+      // Switching back does not re-check it (one-way).
+      choose('opt-int', 'decimal');
+      expect(numberFormat.checked).toBe(false);
+
+      // floatFormat → preserveNumberFormat; bstrEncoding → preserveByteString.
+      numberFormat.click();
+      choose('opt-float', 'hex');
+      expect(numberFormat.checked).toBe(false);
+      choose('opt-bstr', 'base64');
+      expect(byteString.checked).toBe(false);
+
+      // encodingIndicators is deliberately not paired.
+      numberFormat.click();
+      choose('opt-enc-ind', 'always');
+      expect(numberFormat.checked).toBe(true);
+
+      choose('opt-float', 'decimal');
+      choose('opt-bstr', 'hex');
+      choose('opt-enc-ind', 'auto');
+      if (!master.checked) master.click();
+    });
+
     test('Copy button copies the CDN text to the clipboard', () => {
       const spy = vi.spyOn(Clipboard.prototype, 'writeText');
       byId('copy-cdn').click();
